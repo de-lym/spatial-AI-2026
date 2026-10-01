@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spatial AI: Delivery-Platform Semantic Model</title>
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js" } }
+</script>
+</head>
+<body>
+<canvas id="view"></canvas>
+
+<header id="toolbar">
+  <div class="group sim">
+    <span class="gtitle">SIMULATION</span>
+    <button id="btn-play" title="Run / pause simulation time">⏸ Pause</button>
+    <select id="sel-speed" title="Simulation speed">
+      <option value="0.5">0.5×</option><option value="1" selected>1×</option>
+      <option value="2">2×</option><option value="4">4×</option>
+    </select>
+    <button id="btn-reset">↺ Reset</button>
+  </div>
+  <div class="group customer">
+    <span class="gtitle">CUSTOMER</span>
+    <button id="btn-create" title="Customer creates an order (uses the selected customer / restaurant if any)">＋ Create Order</button>
+    <label class="auto"><input type="checkbox" id="auto-customer"> auto</label>
+  </div>
+  <div class="group restaurant">
+    <span class="gtitle">RESTAURANT</span>
+    <button id="btn-accept-order">Accept Order</button>
+    <button id="btn-mark-ready">Mark Ready</button>
+    <label class="auto"><input type="checkbox" id="auto-restaurant"> auto</label>
+  </div>
+  <div class="group platform">
+    <span class="gtitle">PLATFORM</span>
+    <button id="btn-evaluate">Evaluate Pending</button>
+    <button id="btn-estimate">Estimate ETA</button>
+    <button id="btn-assign">Assign Courier</button>
+    <button id="btn-policy" title="Update order priority: switch allocation logic">Priority: FIFO</button>
+    <label class="auto"><input type="checkbox" id="auto-platform"> auto</label>
+  </div>
+  <div class="group courier">
+    <span class="gtitle">COURIER</span>
+    <button id="btn-c-accept">Accept</button>
+    <button id="btn-c-travel">Travel → Restaurant</button>
+    <button id="btn-c-pickup">Pick Up</button>
+    <button id="btn-c-deliver">Deliver</button>
+    <label class="auto"><input type="checkbox" id="auto-courier"> auto</label>
+    <button id="btn-add-courier" title="Add a courier (capacity is limited)">＋</button>
+    <button id="btn-del-courier" title="Remove an idle courier">－</button>
+  </div>
+</header>
+
+<aside id="panel">
+  <section id="stats"></section>
+  <section><h3>Selection</h3><div id="info" class="info">Click an entity in the scene.</div></section>
+  <section><h3>Platform queue <small>(unassigned orders)</small></h3><div id="queue" class="info"></div></section>
+  <section><h3>Rules <small>(times they bound an outcome)</small></h3><ol id="rules"></ol></section>
+  <section><h3>Event log</h3><div id="log"></div></section>
+</aside>
+
+<div id="legend"></div>
+<div id="toast"></div>
+
+<script type="module" src="main.js"></script>
+</body>
+</html>
