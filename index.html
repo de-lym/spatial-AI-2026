@@ -12,56 +12,66 @@
 <body>
 <canvas id="view"></canvas>
 
-<header id="toolbar">
-  <div class="group sim">
-    <span class="gtitle">SIMULATION</span>
-    <button id="btn-play" title="Run / pause simulation time">⏸ Pause</button>
-    <select id="sel-speed" title="Simulation speed">
-      <option value="0.5">0.5×</option><option value="1" selected>1×</option>
-      <option value="2">2×</option><option value="4">4×</option>
-    </select>
-    <button id="btn-reset">↺ Reset</button>
-  </div>
-  <div class="group customer">
-    <span class="gtitle">CUSTOMER</span>
-    <button id="btn-create" title="Customer creates an order (uses the selected customer / restaurant if any)">＋ Create Order</button>
-    <label class="auto"><input type="checkbox" id="auto-customer"> auto</label>
-  </div>
-  <div class="group restaurant">
-    <span class="gtitle">RESTAURANT</span>
-    <button id="btn-accept-order">Accept Order</button>
-    <button id="btn-mark-ready">Mark Ready</button>
-    <label class="auto"><input type="checkbox" id="auto-restaurant"> auto</label>
-  </div>
-  <div class="group platform">
-    <span class="gtitle">PLATFORM</span>
-    <button id="btn-evaluate">Evaluate Pending</button>
-    <button id="btn-estimate">Estimate ETA</button>
-    <button id="btn-assign">Assign Courier</button>
-    <button id="btn-policy" title="Update order priority: switch allocation logic">Priority: FIFO</button>
-    <label class="auto"><input type="checkbox" id="auto-platform"> auto</label>
-  </div>
-  <div class="group courier">
-    <span class="gtitle">COURIER</span>
-    <button id="btn-c-accept">Accept</button>
-    <button id="btn-c-travel">Travel → Restaurant</button>
-    <button id="btn-c-pickup">Pick Up</button>
-    <button id="btn-c-deliver">Deliver</button>
-    <label class="auto"><input type="checkbox" id="auto-courier"> auto</label>
-    <button id="btn-add-courier" title="Add a courier (capacity is limited)">＋</button>
-    <button id="btn-del-courier" title="Remove an idle courier">－</button>
-  </div>
-</header>
-
 <aside id="panel">
-  <section id="stats"></section>
-  <section><h3>Selection</h3><div id="info" class="info">Click an entity in the scene.</div></section>
-  <section><h3>Platform queue <small>(unassigned orders)</small></h3><div id="queue" class="info"></div></section>
-  <section><h3>Rules <small>(times they bound an outcome)</small></h3><ol id="rules"></ol></section>
-  <section><h3>Event log</h3><div id="log"></div></section>
+  <header>
+    <div>
+      <h1>Delivery Platform</h1>
+      <p>Semantic model: how courier capacity is allocated across orders of different revenue and fulfillment time.</p>
+    </div>
+    <button id="btn-panel" class="icon" title="Collapse / expand the whole panel">▾</button>
+  </header>
+
+  <div id="panel-body">
+    <details open class="sec">
+      <summary>Simulation</summary>
+      <div class="group sim">
+        <span class="gtitle">Time</span>
+        <button id="btn-play" title="Run / pause simulation time">⏸ Pause</button>
+        <select id="sel-speed" title="Simulation speed">
+          <option value="0.5">0.5×</option><option value="1" selected>1×</option>
+          <option value="2">2×</option><option value="4">4×</option>
+        </select>
+        <button id="btn-reset">↺ Reset</button>
+      </div>
+      <div class="group customer">
+        <span class="gtitle">Customer</span>
+        <button id="btn-create" title="Create an order (uses the selected customer / restaurant if any)">＋ Create Order</button>
+        <label class="auto"><input type="checkbox" id="auto-customer"> auto</label>
+      </div>
+      <div class="group restaurant">
+        <span class="gtitle">Restaurant</span>
+        <button id="btn-accept-order">Accept Order</button>
+        <button id="btn-mark-ready">Mark Ready</button>
+        <label class="auto"><input type="checkbox" id="auto-restaurant"> auto</label>
+      </div>
+      <div class="group platform">
+        <span class="gtitle">Platform</span>
+        <button id="btn-evaluate">Evaluate Pending</button>
+        <button id="btn-estimate">Estimate ETA</button>
+        <button id="btn-assign">Assign Courier</button>
+        <button id="btn-policy" title="Update order priority: switch allocation logic">Priority: FIFO</button>
+        <label class="auto"><input type="checkbox" id="auto-platform"> auto</label>
+      </div>
+      <div class="group courier">
+        <span class="gtitle">Courier</span>
+        <button id="btn-c-accept">Accept</button>
+        <button id="btn-c-travel">Drive → Restaurant</button>
+        <button id="btn-c-pickup">Pick Up</button>
+        <button id="btn-c-deliver">Deliver</button>
+        <button id="btn-add-courier" title="Add a courier (capacity is limited)">＋</button>
+        <button id="btn-del-courier" title="Remove an idle courier">－</button>
+        <label class="auto"><input type="checkbox" id="auto-courier"> auto</label>
+      </div>
+    </details>
+
+    <details open class="sec"><summary>Statistics</summary><div id="stats"></div></details>
+    <details open class="sec"><summary>Selection</summary><div id="info" class="info"></div></details>
+    <details class="sec"><summary>Platform queue <small>(unassigned orders)</small></summary><div id="queue" class="info"></div></details>
+    <details class="sec"><summary>Rules <small>(times they bound an outcome)</small></summary><ol id="rules"></ol></details>
+    <details class="sec"><summary>Event log</summary><div id="log"></div></details>
+  </div>
 </aside>
 
-<div id="title"><h1>Delivery<br>Platform</h1><p>A semantic model of courier capacity, orders and revenue.</p></div>
 <div id="legend"></div>
 <div id="toast"></div>
 

@@ -1,24 +1,25 @@
 import * as THREE from 'three';
 import { OrbitControls } from './vendor/OrbitControls.js';
+import { RoundedBoxGeometry } from './vendor/RoundedBoxGeometry.js';
 
 /* ====================================================================
    Delivery-platform semantic model — simulation + three.js view
    ORDER is the central object; CUSTOMER, RESTAURANT, COURIER and
-   PLATFORM are the connected agents.
+   PLATFORM are the connected agents. Couriers drive along the roads.
    ==================================================================== */
 
 // ---------- constants ------------------------------------------------
-const COURIER_SPEED = 5;          // world units per simulated second
+const COURIER_SPEED = 6;          // world units per simulated second
 const COURIER_CAPACITY = 2;       // Rule 2: orders one courier can hold at once
 const MAX_COURIERS = 5;           // Rule 1: courier capacity is limited
 const HIGH_REVENUE = 35;          // threshold used only for the revenue statistics
 const STATUS = ['pending', 'preparing', 'ready', 'assigned', 'picked_up', 'delivered'];
 const STATUS_COLOR = {
-  pending: 0xb3bab5, preparing: 0xf0b25c, ready: 0x7cc48a,
-  assigned: 0x6fa8dc, picked_up: 0xb597d9, delivered: 0x57c4b6,
+  pending: 0xb8b2ab, preparing: 0xf5a623, ready: 0x3fbf8f,
+  assigned: 0x3b8fe8, picked_up: 0x8b6fe0, delivered: 0x2cc7c0,
 };
 const REL_COLOR = {
-  creates: 0xd9a21b, prepares: 0xe07b39, evaluates: 0x9aa5a0, assigns: 0x3d7fd1, carries: 0x8b5cc6,
+  creates: 0xf0a30a, prepares: 0xef6a3c, evaluates: 0xa39a90, assigns: 0x2f7fe0, carries: 0x7c5ad8,
 };
 const RULES = [
   'Courier capacity is limited.',
@@ -29,92 +30,161 @@ const RULES = [
   'Revenue may influence allocation priority (simulation hypothesis only).',
   'Total delivery time is not fixed — it varies with all of the above.',
 ];
+// city grid: parcels (12 wide) between roads (4 wide); roads at ±8, ±24, ±40, ±56
+const ROADS = [-56, -40, -24, -8, 8, 24, 40, 56];
+const PARCEL = 12, SLAB = 0.4;
+const VIVID = [0xf26b2c, 0xf7c52e, 0x6c4fd1, 0x35c9b0, 0xf08aa0, 0x3b8fe8];
+const PASTEL = [0xfbd6c8, 0xcdeee8, 0xdcd4f4, 0xfff0c2, 0xffffff, 0xcfe3fa];
+const TREE = [0x3fb5a0, 0x7cc79a, 0xf2b84b, 0x5fa8a0];
 
 // ---------- helpers --------------------------------------------------
 const $ = (id) => document.getElementById(id);
 const rand = (a, b) => a + Math.random() * (b - a);
 const fmt = (n, d = 1) => (Number.isFinite(n) ? n.toFixed(d) : '–');
 const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
-const INK = 0x56655b;
-const dark = (c, f = 0.55) => '#' + [16, 8, 0].map((sh) => Math.round(((c >> sh) & 255) * f).toString(16).padStart(2, '0')).join('');
 const hex = (c) => '#' + c.toString(16).padStart(6, '0');
+const dark = (c, f = 0.55) => '#' + [16, 8, 0].map((sh) => Math.round(((c >> sh) & 255) * f).toString(16).padStart(2, '0')).join('');
+let seed = 11;
+const srand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+const pick = (arr) => arr[Math.floor(srand() * arr.length)];
+
+// road routing: couriers drive along the road grid (Manhattan paths)
+const nearRoad = (v) => ROADS.reduce((p, q) => (Math.abs(q - v) < Math.abs(p - v) ? q : p));
+const onRoad = (v) => Math.abs(nearRoad(v) - v) < 0.05;
+function bestRoad(from, to) { // road minimising detour from→road→to, nearest to `from` on ties
+  return ROADS.reduce((p, q) => {
+    const sp = Math.abs(p - from) + Math.abs(p - to), sq = Math.abs(q - from) + Math.abs(q - to);
+    return sq < sp - 1e-6 || (Math.abs(sq - sp) < 1e-6 && Math.abs(q - from) < Math.abs(p - from)) ? q : p;
+  });
+}
+function route(a, b) {
+  const pts = []; let x = a.x, z = a.z;
+  const go = (px, pz) => { if (Math.hypot(px - x, pz - z) > 0.01) { pts.push(new THREE.Vector3(px, 0, pz)); x = px; z = pz; } };
+  if (!onRoad(z)) go(x, bestRoad(z, b.z));
+  if (Math.abs(z - b.z) < 0.05) go(b.x, b.z);
+  else { const vx = bestRoad(x, b.x); go(vx, z); go(vx, b.z); go(b.x, b.z); }
+  return pts;
+}
+function pathLen(a, b) {
+  let p = a, t = 0;
+  for (const w of route(a, b)) { t += dist(p, w); p = w; }
+  return t;
+}
 
 // ---------- three.js scene -------------------------------------------
+const BG = 0xece7e1;
 const canvas = $('view');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xe8efe4);
-const VIEW = 30; // half-height of the isometric view, in world units
-const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -300, 400);
-camera.position.set(55, 46, 45);
+scene.background = new THREE.Color(BG);
+const VIEW = 26; // half-height of the isometric view, in world units
+const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -400, 600);
+const target = new THREE.Vector3(7, 0, -4);
+camera.position.copy(target).add(new THREE.Vector3(60, 52, 60));
 const controls = new OrbitControls(camera, canvas);
-controls.target.set(9, 0, -3);
-controls.maxPolarAngle = Math.PI * 0.48;
-controls.minZoom = 0.6;
-controls.maxZoom = 3.5;
+controls.target.copy(target);
+controls.maxPolarAngle = Math.PI * 0.45;
+controls.minZoom = 0.55; controls.maxZoom = 3.5;
 controls.enableDamping = true;
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0xdfe9db, 2.6));
-const sun = new THREE.DirectionalLight(0xffffff, 0.8);
-sun.position.set(25, 45, 20);
+scene.add(new THREE.HemisphereLight(0xffffff, 0xf3e4d8, 1.5));
+const sun = new THREE.DirectionalLight(0xfff3e4, 2.6);
+sun.position.set(-40, 70, 30);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.radius = 5; sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.04;
+Object.assign(sun.shadow.camera, { left: -75, right: 75, top: 75, bottom: -75, near: 1, far: 220 });
 scene.add(sun);
 
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), new THREE.MeshLambertMaterial({ color: 0xd3e0cf }));
-ground.rotation.x = -Math.PI / 2;
-scene.add(ground);
-const grid = new THREE.GridHelper(120, 60, 0xc2d3bd, 0xc9d9c4);
-grid.position.y = 0.01;
-scene.add(grid);
-
-function makeLabel(w, h) {
-  const cv = document.createElement('canvas');
-  cv.width = Math.round(256 * (w / h)); cv.height = 256;
-  const tex = new THREE.CanvasTexture(cv);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
-  sprite.scale.set(w, h, 1);
-  sprite.renderOrder = 10;
-  sprite.userData = { cv, tex, key: '' };
-  return sprite;
-}
-/** lines: [{t, c?, s?}] drawn centred; redraws only when content changes */
-function setLabel(sprite, lines, bg = 'rgba(255,255,255,.9)') {
-  const key = JSON.stringify(lines) + bg;
-  if (sprite.userData.key === key) return;
-  sprite.userData.key = key;
-  const { cv, tex } = sprite.userData;
-  const g = cv.getContext('2d');
-  g.clearRect(0, 0, cv.width, cv.height);
-  const pad = 10, r = 26;
-  g.fillStyle = bg;
-  g.beginPath(); g.roundRect(pad, pad, cv.width - 2 * pad, cv.height - 2 * pad, r); g.fill();
-  g.lineWidth = 4; g.strokeStyle = '#8fa396'; g.stroke();
-  const total = lines.reduce((a, l) => a + (l.s || 56), 0) * 1.15;
-  let y = (cv.height - total) / 2;
-  g.textAlign = 'center'; g.textBaseline = 'top';
-  for (const l of lines) {
-    const s = l.s || 56;
-    g.font = `500 ${s}px system-ui, sans-serif`;
-    g.fillStyle = l.c || '#2c3a31';
-    g.fillText(l.t, cv.width / 2, y);
-    y += s * 1.15;
-  }
-  tex.needsUpdate = true;
-}
-
-const mat = (c, extra = {}) => new THREE.MeshLambertMaterial({ color: c, ...extra });
-const edgeMat = new THREE.LineBasicMaterial({ color: INK });
-/** thin ink outline, like the line-drawn buildings of the reference style */
-function shadowed(m) {
-  if (m.geometry.type !== 'SphereGeometry') m.add(new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry, 20), edgeMat));
+// soft "clay" materials and rounded geometry
+const matCache = new Map();
+const mat = (c) => {
+  if (!matCache.has(c)) matCache.set(c, new THREE.MeshStandardMaterial({ color: c, roughness: 0.82, metalness: 0 }));
+  return matCache.get(c);
+};
+function shade(m) { m.castShadow = true; m.receiveShadow = true; return m; }
+/** rounded box whose bottom sits at y (relative to parent) */
+function box(parent, w, h, d, color, x = 0, y = 0, z = 0, r) {
+  const m = shade(new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 3, r ?? Math.min(0.16, w / 4, h / 4, d / 4)), mat(color)));
+  m.position.set(x, y + h / 2, z);
+  parent.add(m);
   return m;
 }
-function register(mesh, ref) {
-  mesh.traverse((o) => { if (o.isMesh || o.isLineSegments) o.userData.ref = ref; });
-  pickables.push(mesh);
+const coneGeo = new THREE.ConeGeometry(0.8, 1.6, 12);
+function tree(parent, x, z, y = SLAB, s = 1) {
+  const g = new THREE.Group();
+  const c = pick(TREE);
+  const trunk = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.5, 6), mat(0xd9b88f)));
+  trunk.position.y = 0.25; g.add(trunk);
+  const kind = srand();
+  if (kind < 0.6) {
+    for (let i = 0; i < 2; i++) {
+      const cone = shade(new THREE.Mesh(coneGeo, mat(c)));
+      cone.scale.setScalar((1 - i * 0.35) * s); cone.position.y = 0.9 + i * 0.85 * s; g.add(cone);
+    }
+  } else {
+    for (let i = 0; i < 2; i++) {
+      const b = shade(new THREE.Mesh(new THREE.SphereGeometry(0.62 - i * 0.18, 14, 12), mat(c)));
+      b.position.y = 1.05 + i * 0.85; g.add(b);
+    }
+  }
+  g.position.set(x, y, z); g.scale.setScalar(s); parent.add(g);
 }
+function prism(parent, w, h, d, color, x, y, z, ry = 0) { // pitched roof: triangle (w wide, h high) extruded along d
+  const sh = new THREE.Shape(); sh.moveTo(-w / 2, 0); sh.lineTo(w / 2, 0); sh.lineTo(0, h); sh.closePath();
+  const geo = new THREE.ExtrudeGeometry(sh, { depth: d, bevelEnabled: true, bevelSize: 0.08, bevelThickness: 0.08, bevelSegments: 2 });
+  geo.translate(0, 0, -d / 2);
+  const m = shade(new THREE.Mesh(geo, mat(color)));
+  m.position.set(x, y, z); m.rotation.y = ry; parent.add(m);
+  return m;
+}
+
+// ---------- labels: sized to their text, minimal margin -----------------
+const WORLD_PER_PX = 0.021;
+function makeLabel() {
+  const cv = document.createElement('canvas');
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ depthTest: false, transparent: true }));
+  sprite.renderOrder = 10;
+  sprite.userData = { cv, key: '', w: 0, h: 0 };
+  return sprite;
+}
+/** lines: [{t, c?, s?}] — canvas is measured and resized to fit the text */
+function setLabel(sprite, lines) {
+  const key = JSON.stringify(lines);
+  const u = sprite.userData;
+  if (u.key === key) return;
+  u.key = key;
+  const cv = u.cv, g = cv.getContext('2d');
+  const pad = 10, lh = 1.12;
+  const font = (s) => `600 ${s}px system-ui, "Helvetica Neue", Arial, sans-serif`;
+  let w = 0, h = 0;
+  for (const l of lines) { g.font = font(l.s || 56); w = Math.max(w, g.measureText(l.t).width); h += (l.s || 56) * lh; }
+  w = Math.ceil(w + pad * 2); h = Math.ceil(h + pad * 1.2);
+  const resized = cv.width !== w || cv.height !== h;
+  cv.width = w; cv.height = h;
+  g.clearRect(0, 0, w, h);
+  g.fillStyle = 'rgba(255,255,255,.93)';
+  g.beginPath(); g.roundRect(0, 0, w, h, 14); g.fill();
+  g.textAlign = 'center'; g.textBaseline = 'top';
+  let y = pad * 0.45;
+  for (const l of lines) {
+    g.font = font(l.s || 56); g.fillStyle = l.c || '#3b3631';
+    g.fillText(l.t, w / 2, y + (l.s || 56) * 0.04); y += (l.s || 56) * lh;
+  }
+  if (resized || !sprite.material.map) {
+    sprite.material.map?.dispose();
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace; tex.generateMipmaps = false; tex.minFilter = THREE.LinearFilter;
+    sprite.material.map = tex; sprite.material.needsUpdate = true;
+  } else sprite.material.map.needsUpdate = true;
+  sprite.scale.set(w * WORLD_PER_PX, h * WORLD_PER_PX, 1);
+}
+
 const pickables = [];
+function register(obj, ref) { obj.traverse((o) => { if (o.isMesh) o.userData.ref = ref; }); pickables.push(obj); }
 
 // ---------- world state ----------------------------------------------
 const S = {
@@ -122,142 +192,187 @@ const S = {
   nextOrder: 1, nextCourier: 1,
   orders: [], couriers: [], restaurants: [], customers: [],
   selected: null,
-  auto: { customer: false, restaurant: false, platform: false, courier: false },
-  timers: { spawn: 2, evaluate: 0 },
+  auto: { customer: true, restaurant: true, platform: true, courier: true }, // simulation starts on its own
+  timers: { spawn: 1.5, evaluate: 0 },
   ruleHits: new Array(7).fill(0),
   log: [],
   delivered: [],
 };
 
-const platform = { type: 'platform', name: 'PLATFORM', pos: new THREE.Vector3(0, 0, 0) };
+// ---- terrain: roads, lane marks, parcels -------------------------------
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshStandardMaterial({ color: 0xdcd6cf, roughness: 1 }));
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
+scene.add(ground);
 {
+  const marks = [];
+  for (const r of ROADS) for (let t = -60; t <= 60; t += 3.2) {
+    if (ROADS.some((q) => Math.abs(t - q) < 3.4)) continue;
+    marks.push([t, r, 0], [r, t, 1]);
+  }
+  const im = new THREE.InstancedMesh(new THREE.BoxGeometry(1.7, 0.02, 0.2), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 }), marks.length);
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion();
+  marks.forEach(([a, b, vert], i) => {
+    q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), vert ? Math.PI / 2 : 0);
+    m4.compose(new THREE.Vector3(a, 0.02, b), q, new THREE.Vector3(1, 1, 1));
+    im.setMatrixAt(i, m4);
+  });
+  im.receiveShadow = true; scene.add(im);
+}
+
+// entity layout: parcel centres on a 16-unit pitch; the door faces +z onto the road at pz+8
+const parcels = [];
+for (let i = -3; i <= 3; i++) for (let j = -3; j <= 3; j++) parcels.push([i * 16, j * 16]);
+const takenAt = new Set();
+const key = (x, z) => x + ',' + z;
+
+const platform = { type: 'platform', name: 'PLATFORM', pos: new THREE.Vector3(0, SLAB, 0), acc: new THREE.Vector3(0, 0, 8) };
+const platformTop = new THREE.Vector3(0, 9.6, 0);
+function buildPlatform() {
   const g = new THREE.Group();
-  const base = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.8, 1.2, 24), mat(0xf4f6f2)));
-  base.position.y = 0.6;
-  const tower = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.4, 5, 24), mat(0xffffff)));
-  tower.position.y = 3.6;
-  const core = new THREE.Mesh(new THREE.SphereGeometry(1.1, 24, 16), new THREE.MeshLambertMaterial({ color: 0xa9c7a5, emissive: 0x4d7a52, emissiveIntensity: .35 }));
-  core.position.y = 7;
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(2.2, .12, 8, 48), new THREE.MeshBasicMaterial({ color: 0xf0b9a0 }));
-  ring.position.y = 7; ring.rotation.x = Math.PI / 2.4;
-  g.add(base, tower, core, ring);
-  g.userData.ring = ring;
+  const plaza = shade(new THREE.Mesh(new THREE.CylinderGeometry(5.4, 5.4, 0.18, 40), mat(0x9fd4b5)));
+  plaza.position.y = 0.09; g.add(plaza);
+  box(g, 3.2, 0.7, 3.2, 0xffffff, 0, 0.18, 0, 0.3);
+  const shaft = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.5, 1.1, 7, 24), mat(0xffffff)));
+  shaft.position.y = 4.4; g.add(shaft);
+  const disc = shade(new THREE.Mesh(new THREE.CylinderGeometry(2.6, 1.6, 0.9, 32), mat(0x9a86d8)));
+  disc.position.y = 8.6; g.add(disc);
+  const dome = shade(new THREE.Mesh(new THREE.SphereGeometry(1.25, 24, 14, 0, Math.PI * 2, 0, Math.PI / 2), mat(0xcfc4f2)));
+  dome.position.y = 9.05; g.add(dome);
+  const mast = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.12, 2.6, 8), mat(0xffffff)));
+  mast.position.y = 11.3; g.add(mast);
+  const tip = shade(new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 10), mat(0xf26b6b)));
+  tip.position.y = 12.6; g.add(tip);
+  const ring = shade(new THREE.Mesh(new THREE.TorusGeometry(3.4, 0.1, 8, 64), mat(0xf4b9a0)));
+  ring.position.y = 8.6; ring.rotation.x = Math.PI / 2.3; g.add(ring);
+  platform.ring = ring;
+  for (const [x, z] of [[-4, -3.6], [4, 3.6], [-4, 3.6], [4, -3.6]]) tree(g, x, z, 0.18, 1.1);
+  g.position.set(0, SLAB, 0);
   scene.add(g);
-  platform.mesh = g; platform.ring = ring;
-  platform.label = makeLabel(11, 5.5); platform.label.position.set(0, 12, 0);
-  scene.add(platform.label);
+  platform.mesh = g;
+  platform.label = makeLabel(); platform.label.position.set(0, 15, 0); scene.add(platform.label);
   register(g, platform);
+  takenAt.add(key(0, 0));
 }
-const platformTop = new THREE.Vector3(0, 7, 0);
 
-function addRestaurant(name, x, z, prep, cap, color) {
-  const r = { type: 'restaurant', name, pos: new THREE.Vector3(x, 0, z), prepTime: prep, capacity: cap, color };
+function addRestaurant(name, x, z, prep, cap, color, accent) {
+  const r = { type: 'restaurant', name, pos: new THREE.Vector3(x, SLAB, z), acc: new THREE.Vector3(x, 0, z + 8), prepTime: prep, capacity: cap, color, accent };
   const g = new THREE.Group();
-  const body = shadowed(new THREE.Mesh(new THREE.BoxGeometry(5, 2.6, 3.6), mat(0xfbfbf8)));
-  body.position.y = 1.3;
-  const roof = shadowed(new THREE.Mesh(new THREE.BoxGeometry(5.4, .35, 4), mat(color)));
-  roof.position.y = 2.8;
-  const chim = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(.35, .35, 1.2, 12), mat(0xe8ebe6)));
-  chim.position.set(1.5, 3.5, -.8);
-  const door = new THREE.Mesh(new THREE.BoxGeometry(1, 1.6, .1), mat(0xaab9ae));
-  door.position.set(-1, .8, 1.82);
-  g.add(body, roof, chim, door);
-  g.position.copy(r.pos);
-  scene.add(g);
+  box(g, 8, 2.4, 5, 0xfaf7f2, 0, 0, -1.5);
+  box(g, 5.6, 2.2, 4, color, -0.8, 2.4, -1.6);
+  box(g, 3, 1.6, 3.2, accent, 2, 2.4, -1.2);
+  box(g, 7.4, 0.3, 2, accent, 0, 1.9, 1.5, 0.14);              // awning
+  box(g, 2.6, 1.2, 0.12, 0x9fd0e8, -2, 0.5, 1.02, 0.05);       // glass
+  box(g, 1.1, 1.7, 0.12, color, 2.2, 0, 1.02, 0.05);           // door
+  const chim = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 1.4, 14), mat(0xffffff)));
+  chim.position.set(-2.6, 5.3, -2.4); g.add(chim);
+  tree(g, -3.8, 3.8); tree(g, 3.8, 4.4, SLAB * 0, 0.8);
+  g.position.set(x, SLAB, z); scene.add(g);
   r.mesh = g;
-  r.label = makeLabel(10, 5); r.label.position.set(x, 7, z); scene.add(r.label);
+  r.label = makeLabel(); r.label.position.set(x, 8.2, z); scene.add(r.label);
   register(g, r);
-  S.restaurants.push(r);
+  S.restaurants.push(r); takenAt.add(key(x, z));
 }
-function addCustomer(name, x, z) {
-  const c = { type: 'customer', name, pos: new THREE.Vector3(x, 0, z), orderTime: null, selectedRestaurant: null };
+function addCustomer(name, x, z, bodyC, roofC) {
+  const c = { type: 'customer', name, pos: new THREE.Vector3(x, SLAB, z), acc: new THREE.Vector3(x, 0, z + 8), orderTime: null, selectedRestaurant: null };
   const g = new THREE.Group();
-  const body = shadowed(new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.8, 2.4), mat(0xfbfbf8)));
-  body.position.y = .9;
-  const roof = shadowed(new THREE.Mesh(new THREE.ConeGeometry(2.1, 1.3, 4), mat(0xa9c7a5)));
-  roof.position.y = 2.45; roof.rotation.y = Math.PI / 4;
-  g.add(body, roof);
-  g.position.copy(c.pos);
-  scene.add(g);
+  box(g, 4.6, 2.6, 4, bodyC, 0, 0, -0.8);
+  prism(g, 5.4, 2.4, 4.6, roofC, 0, 2.6, -0.8, Math.PI / 2);
+  box(g, 1.0, 1.6, 0.12, roofC, 0.8, 0, 1.22, 0.05);
+  box(g, 1.2, 1.0, 0.12, 0x9fd0e8, -1.2, 0.8, 1.22, 0.05);
+  box(g, 0.9, 1.5, 0.9, 0xffffff, 1.4, 3.4, -1.6);
+  tree(g, -3.6, 3.6); tree(g, 3.8, 3.2, 0, 0.8);
+  g.position.set(x, SLAB, z); scene.add(g);
   c.mesh = g;
-  c.label = makeLabel(5.6, 2.8); c.label.position.set(x, 5.6, z); scene.add(c.label);
+  c.label = makeLabel(); c.label.position.set(x, 7.2, z); scene.add(c.label);
   register(g, c);
-  S.customers.push(c);
-}
-addRestaurant('R1 Burger', -16, -10, 6, 2, 0xf1c3a3);
-addRestaurant('R2 Ramen', 16, -12, 10, 2, 0xeba79a);
-addRestaurant('R3 Slow-Roast', -2, 17, 14, 1, 0xc9b8dd);
-[['C1', -21, 6], ['C2', -6, -19], ['C3', 9, -3], ['C4', 21, 8], ['C5', 12, 19], ['C6', -9, 5]]
-  .forEach(([n, x, z]) => addCustomer(n, x, z));
-
-// ---- scenery in the line-drawn isometric style: roads, trees, quiet white blocks ----
-{
-  const roadM = new THREE.MeshLambertMaterial({ color: 0xffffff });
-  const road = (x1, z1, x2, z2, w = 2.4) => {
-    const len = Math.hypot(x2 - x1, z2 - z1);
-    const m = new THREE.Mesh(new THREE.BoxGeometry(len, 0.06, w), roadM);
-    m.position.set((x1 + x2) / 2, 0.04, (z1 + z2) / 2);
-    m.rotation.y = -Math.atan2(z2 - z1, x2 - x1);
-    scene.add(m);
-  };
-  const ring = new THREE.Mesh(new THREE.RingGeometry(5.2, 7.6, 48), roadM);
-  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.04; scene.add(ring);
-  for (const r of S.restaurants) road(0, 0, r.pos.x, r.pos.z + 3.4);
-  for (const c of S.customers) road(0, 0, c.pos.x, c.pos.z + 2.4, 1.6);
-  const keepOut = [platform, ...S.restaurants, ...S.customers];
-  let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-  const free = (x, z, r) => keepOut.every((e) => Math.hypot(e.pos.x - x, e.pos.z - z) > r) && Math.hypot(x, z) > 9;
-  const treeTrunk = mat(0xd9cdb6), treeLeaf = [mat(0x9cc49a), mat(0xb3d4ad), mat(0x86b58a)];
-  for (let n = 0, placed = 0; n < 400 && placed < 70; n++) {
-    const x = (rnd() - 0.5) * 70, z = (rnd() - 0.5) * 70;
-    if (!free(x, z, 6)) continue;
-    const t = new THREE.Group();
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(.1, .12, 1, 6), treeTrunk); trunk.position.y = .5;
-    const crown = new THREE.Mesh(new THREE.SphereGeometry(.5 + rnd() * .35, 14, 10), treeLeaf[placed % 3]); crown.position.y = 1.5;
-    t.add(trunk, crown); t.position.set(x, 0, z); scene.add(t); placed++;
-  }
-  const block = mat(0xfbfbf8);
-  for (let n = 0, placed = 0; n < 300 && placed < 16; n++) {
-    const a = rnd() * Math.PI * 2, d = 32 + rnd() * 16;
-    const x = Math.cos(a) * d, z = Math.sin(a) * d;
-    if (!free(x, z, 6)) continue;
-    const w = 2.5 + rnd() * 2, h = 3 + rnd() * 7;
-    const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, w * (.8 + rnd() * .5)), block);
-    b.position.set(x, h / 2, z); b.add(new THREE.LineSegments(new THREE.EdgesGeometry(b.geometry), edgeMat)); scene.add(b); placed++;
-  }
+  S.customers.push(c); takenAt.add(key(x, z));
 }
 
+// filler parcels (decor, not part of the model)
+function buildFiller(x, z) {
+  const g = new THREE.Group(); g.position.set(x, SLAB, z);
+  const t = srand();
+  if (t < 0.3) { // house
+    const bc = pick(PASTEL), rc = pick(VIVID);
+    const h = new THREE.Group(); h.rotation.y = 0; g.add(h);
+    box(h, 4.4, 2.4, 3.6, bc, 0, 0, 0); prism(h, 5.2, 2.2, 4.2, rc, 0, 2.4, 0, Math.PI / 2);
+    box(h, 1, 1.5, 0.12, rc, 0.8, 0, 1.82, 0.05);
+    tree(g, -3.8, 3.6); tree(g, 4, -3.6);
+  } else if (t < 0.5) { // white tower with ledges
+    const w = 4 + srand() * 2, hgt = 6 + srand() * 10, d = 4 + srand() * 2;
+    const col = srand() < 0.25 ? pick([0xcfe6f7, 0x2f6fd8, 0xf7c52e]) : 0xffffff;
+    box(g, w, hgt, d, col, 0, 0, 0, 0.25);
+    for (let k = 1; k * 2 < hgt; k++) box(g, w + 0.14, 0.12, d + 0.14, col === 0xffffff ? 0xe9e4de : col, 0, k * 2, 0, 0.05);
+    tree(g, -4.3, 4.3); tree(g, 4.6, 4.6, 0, 0.8);
+  } else if (t < 0.7) { // stacked coloured boxes
+    const a = pick(VIVID), b = pick(VIVID), c = pick(VIVID);
+    box(g, 6, 2.6, 4.4, a, 0, 0, 0.4, 0.25); box(g, 4.4, 2.4, 4, b, -0.8, 2.6, -0.4, 0.25); box(g, 3, 2, 3, c, 1.6, 5, -0.2, 0.25);
+    box(g, 2.2, 1.2, 0.12, 0xdff1fa, -0.4, 0.8, 2.64, 0.05);
+    tree(g, -4.4, 4.2); tree(g, 4.4, 4.6, 0, 0.8);
+  } else if (t < 0.85) { // park
+    const lawn = shade(new THREE.Mesh(new THREE.CylinderGeometry(5.2, 5.2, 0.14, 36), mat(0x9fd4b5)));
+    lawn.position.y = 0.07; g.add(lawn);
+    for (let i = 0; i < 6; i++) { const a = i * 1.05 + srand(); tree(g, Math.cos(a) * 3.4, Math.sin(a) * 3.4, 0.14, 0.8 + srand() * 0.5); }
+    tree(g, 0, 0, 0.14, 1.4);
+  } else if (t < 0.93) { // pool house
+    box(g, 6.6, 0.12, 4.6, 0xffffff, 0, 0, 0, 0.05); box(g, 5.8, 0.16, 3.8, 0x7fe0e6, 0, 0.08, 0, 0.06);
+    box(g, 3.2, 2.2, 2.4, pick(VIVID), 0, 0, -3.6, 0.2); tree(g, 4.4, -3.8);
+  } else { // water tank
+    const tank = shade(new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 2.2, 24), mat(0xf2955a)));
+    tank.position.y = 5.3; g.add(tank);
+    const cap = shade(new THREE.Mesh(new THREE.ConeGeometry(1.7, 0.9, 24), mat(0xf7b987))); cap.position.y = 6.85; g.add(cap);
+    for (const [lx, lz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      const l = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 4.2, 6), mat(0xb9b0a6))); l.position.set(lx, 2.1, lz); g.add(l);
+    }
+    tree(g, -4, 4);
+  }
+  scene.add(g);
+}
+
+// parcel slabs
+for (const [x, z] of parcels) {
+  const slab = shade(new THREE.Mesh(new RoundedBoxGeometry(PARCEL, SLAB, PARCEL, 3, 0.12), mat(0xf8f5f1)));
+  slab.position.set(x, SLAB / 2, z); scene.add(slab);
+}
+buildPlatform();
+addRestaurant('R1 Burger', -16, -16, 6, 2, 0xf26b2c, 0xf7c52e);
+addRestaurant('R2 Ramen', 16, -16, 10, 2, 0xf08aa0, 0xffffff);
+addRestaurant('R3 Slow-Roast', 0, 16, 14, 1, 0x6c4fd1, 0xf7c52e);
+addCustomer('C1', -32, 0, 0xffffff, 0x3b8fe8);
+addCustomer('C2', -16, 16, 0xfff0c2, 0xf26b6b);
+addCustomer('C3', 16, 16, 0xcdeee8, 0x35c9b0);
+addCustomer('C4', 32, 16, 0xdcd4f4, 0x8b6fe0);
+addCustomer('C5', -32, -16, 0xfbd6c8, 0xf4a261);
+addCustomer('C6', 32, -16, 0xffffff, 0xf08aa0);
+for (const [x, z] of parcels) if (!takenAt.has(key(x, z))) buildFiller(x, z);
+
+// ---- couriers (little cars) ----------------------------------------
+const CAR_COLORS = [0xf7c52e, 0xf08aa0, 0x8b6fe0, 0x35c9b0, 0xf26b2c];
 function addCourier() {
   if (S.couriers.length >= MAX_COURIERS) return null;
   const idx = S.nextCourier++;
-  const a = idx * 1.9;
-  const c = {
-    type: 'courier', name: 'K' + idx, pos: new THREE.Vector3(Math.cos(a) * 5, 0, Math.sin(a) * 5),
-    orders: [], carry: [], task: null, bob: Math.random() * 6,
-  };
+  const c = { type: 'courier', name: 'K' + idx, pos: new THREE.Vector3(-8 + idx * 4.5, 0, 8), orders: [], carry: [], task: null, heading: Math.PI / 2, rot: Math.PI / 2 };
   const g = new THREE.Group();
-  const body = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(.45, .45, 1.5, 12), mat(0x9fd4a8)));
-  body.rotation.z = Math.PI / 2; body.position.y = .55;
-  const head = shadowed(new THREE.Mesh(new THREE.SphereGeometry(.4, 12, 10), mat(0xf2cdb5)));
-  head.position.set(0, 1.3, 0);
-  const wheelM = mat(0x11161d);
-  for (const dx of [-.7, .7]) {
-    const w = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(.3, .3, .2, 12), wheelM));
-    w.rotation.x = Math.PI / 2; w.position.set(dx, .3, 0); g.add(w);
+  const inner = new THREE.Group(); g.add(inner);
+  box(inner, 1.3, 0.6, 2.6, CAR_COLORS[(idx - 1) % 5], 0, 0.25, 0, 0.22);
+  box(inner, 1.1, 0.55, 1.3, 0xdff1fa, 0, 0.85, -0.15, 0.22);
+  for (const [wx, wz] of [[-0.62, -0.8], [0.62, -0.8], [-0.62, 0.8], [0.62, 0.8]]) {
+    const w = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.2, 12), mat(0x4a4540)));
+    w.rotation.z = Math.PI / 2; w.position.set(wx, 0.28, wz); inner.add(w);
   }
-  g.add(body, head);
-  g.position.copy(c.pos);
-  scene.add(g);
-  c.mesh = g; c.body = body;
-  c.label = makeLabel(5.6, 2.8); scene.add(c.label);
+  const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 10), new THREE.MeshStandardMaterial({ color: 0x5fd38d, emissive: 0x5fd38d, emissiveIntensity: 0.6 }));
+  lamp.position.set(0, 1.45, -0.15); inner.add(lamp);
+  g.position.copy(c.pos); scene.add(g);
+  c.mesh = g; c.inner = inner; c.lamp = lamp;
+  c.label = makeLabel(); scene.add(c.label);
   register(g, c);
   S.couriers.push(c);
   return c;
 }
 
 // selection ring
-const selRing = new THREE.Mesh(new THREE.RingGeometry(2.2, 2.6, 40), new THREE.MeshBasicMaterial({ color: INK, side: THREE.DoubleSide, transparent: true, opacity: .75 }));
-selRing.rotation.x = -Math.PI / 2; selRing.position.y = .05; selRing.visible = false;
+const selRing = new THREE.Mesh(new THREE.RingGeometry(2.2, 2.6, 40), new THREE.MeshBasicMaterial({ color: 0x3b3631, side: THREE.DoubleSide, transparent: true, opacity: 0.55 }));
+selRing.rotation.x = -Math.PI / 2; selRing.visible = false;
 scene.add(selRing);
 
 // relationship lines (rebuilt every frame from the model)
@@ -266,7 +381,7 @@ const linePos = new Float32Array(MAX_SEG * 6), lineCol = new Float32Array(MAX_SE
 const lineGeo = new THREE.BufferGeometry();
 lineGeo.setAttribute('position', new THREE.BufferAttribute(linePos, 3).setUsage(THREE.DynamicDrawUsage));
 lineGeo.setAttribute('color', new THREE.BufferAttribute(lineCol, 3).setUsage(THREE.DynamicDrawUsage));
-const lines = new THREE.LineSegments(lineGeo, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: .85 }));
+const lines = new THREE.LineSegments(lineGeo, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 }));
 lines.frustumCulled = false;
 scene.add(lines);
 
@@ -276,12 +391,12 @@ function toast(msg) {
   const t = $('toast'); t.textContent = msg; t.classList.add('show');
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
 }
+let logDirty = true;
 function log(msg, kind = '') {
   S.log.unshift({ t: S.time, msg, kind });
   if (S.log.length > 60) S.log.pop();
   logDirty = true;
 }
-let logDirty = true;
 /** a refused action: explains which rule bound it */
 function refuse(rule, msg) {
   if (rule) S.ruleHits[rule - 1]++;
@@ -291,7 +406,7 @@ function refuse(rule, msg) {
 }
 
 // ---------- order model ----------------------------------------------
-function load(c) { return c.orders.length + c.carry.length; }
+const load = (c) => c.orders.length + c.carry.length;
 const unassigned = () => S.orders.filter((o) => ['pending', 'preparing', 'ready'].includes(o.status));
 const waitingTime = (o) => S.time - (o.readyAt ?? o.createdAt);
 
@@ -304,24 +419,19 @@ function createOrder(customer, restaurant) {
     accepted: false, eta: null, priority: 0, goneAt: null,
   };
   customer.orderTime = S.time; customer.selectedRestaurant = restaurant;
-  const size = 0.7 + o.revenue / 60 * 0.9;
+  const size = 0.8 + o.revenue / 60 * 0.9;
   const g = new THREE.Group();
-  const box = shadowed(new THREE.Mesh(new THREE.BoxGeometry(size, size, size), mat(STATUS_COLOR.pending)));
-  box.position.y = size / 2;
-  g.add(box);
-  g.position.copy(restaurant.pos).add(new THREE.Vector3(0, 0.3, 2.8));
+  const bx = box(g, size, size, size, STATUS_COLOR.pending, 0, 0, 0, 0.18);
+  g.position.set(restaurant.pos.x, SLAB, restaurant.pos.z + 4.8);
   scene.add(g);
-  o.mesh = g; o.box = box; o.size = size;
-  o.label = makeLabel(6.4, 2.8); scene.add(o.label);
+  o.mesh = g; o.box = bx; o.size = size;
+  o.label = makeLabel(); scene.add(o.label);
   register(g, o);
   S.orders.push(o);
   log(`${customer.name} created order #${o.id} ($${o.revenue}) at ${restaurant.name}`);
   return o;
 }
-function setStatus(o, s) {
-  o.status = s;
-  o.box.material.color.setHex(STATUS_COLOR[s]);
-}
+function setStatus(o, s) { o.status = s; o.box.material = mat(STATUS_COLOR[s]); }
 function removeOrder(o) {
   scene.remove(o.mesh, o.label);
   const i = pickables.indexOf(o.mesh); if (i >= 0) pickables.splice(i, 1);
@@ -332,17 +442,16 @@ function removeOrder(o) {
 /** Platform delivery-time estimate (seconds from now until delivered). */
 function estimate(o) {
   if (o.status === 'delivered') return 0;
-  const legB = dist(o.restaurant.pos, o.customer.pos) / COURIER_SPEED;
-  if (o.status === 'picked_up') return dist(o.courier.pos, o.customer.pos) / COURIER_SPEED;
+  const legB = pathLen(o.restaurant.acc, o.customer.acc) / COURIER_SPEED;
+  if (o.status === 'picked_up') return pathLen(o.courier.pos, o.customer.acc) / COURIER_SPEED;
   const ready = o.status === 'pending' ? o.prepTotal + 1.5
     : o.status === 'preparing' ? Math.max(0, o.prepRemaining) : 0;
+  const reach = (c) => pathLen(c.pos, o.restaurant.acc) / COURIER_SPEED + load(c) * 4;
   let arrive;
-  if (o.courier) arrive = dist(o.courier.pos, o.restaurant.pos) / COURIER_SPEED + load(o.courier) * 3;
+  if (o.courier) arrive = reach(o.courier);
   else {
     const free = S.couriers.filter((c) => load(c) < COURIER_CAPACITY);
-    arrive = free.length
-      ? Math.min(...free.map((c) => dist(c.pos, o.restaurant.pos) / COURIER_SPEED + load(c) * 3))
-      : 12; // no courier free: assumed wait
+    arrive = free.length ? Math.min(...free.map(reach)) : 12; // no courier free: assumed wait
   }
   return Math.max(ready, arrive) + legB;
 }
@@ -365,7 +474,12 @@ function chooseOrder(pred, relation) {
   return pool[0] ?? null;
 }
 const byRestaurant = (o, s) => s.type === 'restaurant' && o.restaurant === s;
-const byCourier = (o, s) => s.type === 'courier' && (o.courier === s);
+const byCourier = (o, s) => s.type === 'courier' && o.courier === s;
+const atRestaurant = (o) => dist(o.courier.pos, o.restaurant.acc) < 1;
+function startTask(c, kind, order) {
+  const dest = kind === 'toRestaurant' ? order.restaurant.acc : order.customer.acc;
+  c.task = { kind, order, path: route(c.pos, dest) };
+}
 
 const act = {
   create() {
@@ -415,8 +529,9 @@ const act = {
     return true;
   },
   estimate() {
-    S.orders.forEach((o) => { if (o.status !== 'delivered') o.eta = estimate(o); });
-    log(`Platform updated delivery-time estimates for ${S.orders.filter((o) => o.status !== 'delivered').length} order(s)`);
+    const live = S.orders.filter((o) => o.status !== 'delivered');
+    live.forEach((o) => { o.eta = estimate(o); });
+    log(`Platform updated delivery-time estimates for ${live.length} order(s)`);
     return true;
   },
   togglePolicy() {
@@ -426,27 +541,21 @@ const act = {
     return true;
   },
   assign(auto = false) {
-    // Candidates: only ready orders can be assigned (pending→preparing→ready→assigned).
+    // Only ready orders can be assigned (pending → preparing → ready → assigned).
     const sel = S.selected;
-    let cands = S.orders.filter((o) => o.status === 'ready' && !o.courier);
-    if (!cands.length) {
-      if (auto) return false;
-      return refuse(0, 'No ready order awaits a courier.');
-    }
+    const cands = S.orders.filter((o) => o.status === 'ready' && !o.courier);
+    if (!cands.length) return auto ? false : refuse(0, 'No ready order awaits a courier.');
     cands.forEach((o) => { o.priority = priorityOf(o); });
     const byPrio = [...cands].sort((a, b) => b.priority - a.priority);
     let o = byPrio[0];
     if (sel?.type === 'order' && cands.includes(sel)) o = sel;
-    // Rule 6: did revenue change the choice relative to FIFO?
     const fifo = [...cands].sort((a, b) => waitingTime(b) - waitingTime(a))[0];
     const free = S.couriers.filter((c) => load(c) < COURIER_CAPACITY);
     if (!free.length) {
       if (auto) return false;
-      return S.couriers.length >= MAX_COURIERS || S.couriers.every((c) => load(c) >= COURIER_CAPACITY)
-        ? refuse(S.couriers.some((c) => load(c) > 0) ? 2 : 1, `All ${S.couriers.length} couriers are at capacity (${COURIER_CAPACITY} orders each) — #${o.id} must wait.`)
-        : refuse(1, 'No courier available.');
+      return refuse(S.couriers.some((c) => load(c) > 0) ? 2 : 1, `All ${S.couriers.length} couriers are at capacity (${COURIER_CAPACITY} orders each) — #${o.id} must wait.`);
     }
-    free.sort((a, b) => dist(a.pos, o.restaurant.pos) + load(a) * 6 - (dist(b.pos, o.restaurant.pos) + load(b) * 6));
+    free.sort((a, b) => pathLen(a.pos, o.restaurant.acc) + load(a) * 8 - (pathLen(b.pos, o.restaurant.acc) + load(b) * 8));
     const c = free[0];
     o.courier = c; o.assignedAt = S.time; o.accepted = false;
     c.orders.push(o);
@@ -465,32 +574,26 @@ const act = {
     return true;
   },
   cTravel(auto = false) {
-    const idle = (c) => !c.task;
-    const o = chooseOrder((x) => x.status === 'assigned' && x.accepted && idle(x.courier) && x.courier.carry.length === 0, byCourier);
+    const o = chooseOrder((x) => x.status === 'assigned' && x.accepted && !x.courier.task && x.courier.carry.length === 0, byCourier);
     if (!o) return auto ? false : refuse(0, 'No idle courier with an accepted assignment (accept first).');
-    o.courier.task = { kind: 'toRestaurant', order: o };
-    log(`${o.courier.name} travelling to ${o.restaurant.name} for #${o.id}`);
+    startTask(o.courier, 'toRestaurant', o);
+    log(`${o.courier.name} driving to ${o.restaurant.name} for #${o.id}`);
     return true;
   },
   cPickup(auto = false) {
     const sel = S.selected;
-    if (!auto && sel?.type === 'order' && sel.status !== 'assigned' && STATUS.indexOf(sel.status) < 3)
+    if (!auto && sel?.type === 'order' && STATUS.indexOf(sel.status) < 3)
       return refuse(3, `#${sel.id} is ${sel.status} — it cannot be picked up before it is ready (and assigned).`);
-    const o = chooseOrder((x) => x.status === 'assigned' && x.accepted && !x.courier.task
-      && dist(x.courier.pos, x.restaurant.pos) < 1.8, byCourier);
+    const o = chooseOrder((x) => x.status === 'assigned' && x.accepted && !x.courier.task && atRestaurant(x), byCourier);
     if (!o) return auto ? false : refuse(0, 'No courier is waiting at a restaurant with an assigned order.');
     if (o.readyAt == null) return refuse(3, `#${o.id} is not ready.`); // guard; unreachable by construction
-    o.pickedAt = S.time;
-    o.courier.orders.splice(o.courier.orders.indexOf(o), 1);
-    o.courier.carry.push(o);
-    setStatus(o, 'picked_up');
-    log(`${o.courier.name} picked up #${o.id} (order waited ${fmt(o.pickedAt - o.readyAt)}s for pickup)`);
+    pickupFor(o.courier, o);
     return true;
   },
   cDeliver(auto = false) {
     const o = chooseOrder((x) => x.status === 'picked_up' && !x.courier.task, byCourier);
     if (!o) return auto ? false : refuse(0, 'No courier holds a picked-up order (and is idle).');
-    o.courier.task = { kind: 'toCustomer', order: o };
+    startTask(o.courier, 'toCustomer', o);
     log(`${o.courier.name} delivering #${o.id} to ${o.customer.name}`);
     return true;
   },
@@ -502,28 +605,15 @@ const act = {
     if (S.couriers.length <= 1) return refuse(0, 'At least one courier is needed.');
     const c = [...S.couriers].reverse().find((x) => load(x) === 0 && !x.task);
     if (!c) return refuse(0, 'Every courier is busy — only an idle courier can be removed.');
-    scene.remove(c.mesh, c.label);
-    pickables.splice(pickables.indexOf(c.mesh), 1);
-    S.couriers.splice(S.couriers.indexOf(c), 1);
-    if (S.selected === c) S.selected = null;
+    removeCourier(c);
     log(`${c.name} left the fleet`); return true;
   },
 };
-
-// ---------- simulation step ------------------------------------------
-function autoCourier(c) {
-  if (c.task) return;
-  const here = c.orders.find((o) => o.accepted && dist(c.pos, o.restaurant.pos) < 1.8);
-  for (const o of c.orders) if (!o.accepted) { o.accepted = true; log(`${c.name} accepted assignment #${o.id}`); }
-  if (here) { pickupFor(c, here); return; }
-  if (c.carry.length) {
-    const o = c.carry.slice().sort((a, b) => dist(c.pos, a.customer.pos) - dist(c.pos, b.customer.pos))[0];
-    c.task = { kind: 'toCustomer', order: o };
-    log(`${c.name} delivering #${o.id} to ${o.customer.name}`);
-    return;
-  }
-  const o = c.orders[0];
-  if (o) { c.task = { kind: 'toRestaurant', order: o }; log(`${c.name} travelling to ${o.restaurant.name} for #${o.id}`); }
+function removeCourier(c) {
+  scene.remove(c.mesh, c.label);
+  pickables.splice(pickables.indexOf(c.mesh), 1);
+  S.couriers.splice(S.couriers.indexOf(c), 1);
+  if (S.selected === c) S.selected = null;
 }
 function pickupFor(c, o) {
   o.pickedAt = S.time;
@@ -532,20 +622,40 @@ function pickupFor(c, o) {
   log(`${c.name} picked up #${o.id} (order waited ${fmt(o.pickedAt - o.readyAt)}s for pickup)`);
 }
 
+// ---------- simulation step ------------------------------------------
+function autoCourier(c) {
+  if (c.task) return;
+  for (const o of c.orders) if (!o.accepted) { o.accepted = true; log(`${c.name} accepted assignment #${o.id}`); }
+  const here = c.orders.find((o) => dist(c.pos, o.restaurant.acc) < 1);
+  if (here) { pickupFor(c, here); return; }
+  if (c.carry.length) {
+    const o = c.carry.slice().sort((a, b) => pathLen(c.pos, a.customer.acc) - pathLen(c.pos, b.customer.acc))[0];
+    startTask(c, 'toCustomer', o);
+    log(`${c.name} delivering #${o.id} to ${o.customer.name}`);
+    return;
+  }
+  const o = c.orders[0];
+  if (o) { startTask(c, 'toRestaurant', o); log(`${c.name} driving to ${o.restaurant.name} for #${o.id}`); }
+}
+
 function step(dt) {
   S.time += dt;
   // restaurants: preparation clocks run for orders being prepared (Rule 4)
   for (const o of S.orders) if (o.status === 'preparing' && o.prepRemaining > 0) o.prepRemaining = Math.max(0, o.prepRemaining - dt);
 
-  // couriers move
+  // couriers drive along their road path
   for (const c of S.couriers) {
     if (!c.task) continue;
-    const o = c.task.order;
-    const target = c.task.kind === 'toRestaurant' ? o.restaurant.pos : o.customer.pos;
-    const d = dist(c.pos, target);
-    const mv = COURIER_SPEED * dt;
-    if (d <= mv) {
-      c.pos.x = target.x; c.pos.z = target.z;
+    let mv = COURIER_SPEED * dt;
+    const path = c.task.path;
+    while (mv > 0 && path.length) {
+      const w = path[0], d = dist(c.pos, w);
+      c.heading = Math.atan2(w.x - c.pos.x, w.z - c.pos.z);
+      if (d <= mv) { c.pos.copy(w); mv -= d; path.shift(); }
+      else { c.pos.x += (w.x - c.pos.x) / d * mv; c.pos.z += (w.z - c.pos.z) / d * mv; mv = 0; }
+    }
+    if (!path.length) {
+      const o = c.task.order;
       if (c.task.kind === 'toRestaurant') log(`${c.name} arrived at ${o.restaurant.name}`);
       else {
         o.deliveredAt = S.time; setStatus(o, 'delivered');
@@ -555,14 +665,10 @@ function step(dt) {
         log(`${c.name} delivered #${o.id} to ${o.customer.name} in ${fmt(o.deliveredAt - o.createdAt)}s`, 'good');
       }
       c.task = null;
-    } else {
-      c.pos.x += (target.x - c.pos.x) / d * mv;
-      c.pos.z += (target.z - c.pos.z) / d * mv;
-      c.heading = Math.atan2(target.x - c.pos.x, target.z - c.pos.z);
     }
   }
 
-  // autonomous agents
+  // autonomous agents (each can be switched off in the panel)
   const A = S.auto;
   if (A.customer && (S.timers.spawn -= dt) <= 0) {
     S.timers.spawn = rand(3, 7);
@@ -571,11 +677,14 @@ function step(dt) {
   if (A.restaurant) { while (act.accept(true)); while (act.ready(true)); }
   if (A.platform) {
     while (act.assign(true));
-    if ((S.timers.evaluate -= dt) <= 0) { S.timers.evaluate = 1; unassigned().forEach((o) => { o.priority = priorityOf(o); }); S.orders.forEach((o) => { if (o.status !== 'delivered') o.eta = estimate(o); }); }
+    if ((S.timers.evaluate -= dt) <= 0) {
+      S.timers.evaluate = 1;
+      unassigned().forEach((o) => { o.priority = priorityOf(o); });
+      S.orders.forEach((o) => { if (o.status !== 'delivered') o.eta = estimate(o); });
+    }
   }
   if (A.courier) S.couriers.forEach(autoCourier);
 
-  // cleanup delivered orders after a short display time
   for (const o of [...S.orders]) if (o.goneAt && S.time > o.goneAt) removeOrder(o);
 }
 
@@ -586,10 +695,10 @@ function targetFor(o, slot) {
   switch (o.status) {
     case 'picked_up': {
       const c = o.courier, i = c.carry.indexOf(o);
-      return tmp.set(c.pos.x + (i - (c.carry.length - 1) / 2) * 0.9, 2.0 + o.size / 2, c.pos.z);
+      return tmp.set(c.pos.x + (i - (c.carry.length - 1) / 2) * 0.1, 1.5, c.pos.z + (i - (c.carry.length - 1) / 2) * 0.8);
     }
-    case 'delivered': return tmp.set(o.customer.pos.x, 0.4 + o.size / 2 + 1.2, o.customer.pos.z + 1.8);
-    default: return tmp.set(r.x + (slot - 1.5) * 1.5, 0.3, r.z + 2.9);
+    case 'delivered': return tmp.set(o.customer.pos.x + 1.5, SLAB + 1.4, o.customer.pos.z + 4.6);
+    default: return tmp.set(r.x + (slot - 1.5) * 1.7, SLAB, r.z + 4.8);
   }
 }
 let segN = 0;
@@ -600,81 +709,74 @@ function seg(a, b, color) {
   lineCol.set([c.r, c.g, c.b, c.r, c.g, c.b], i);
 }
 const up = (v, y) => new THREE.Vector3(v.x, y, v.z);
+const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
 function syncVisuals(dt) {
   const k = 1 - Math.exp(-dt * 9);
-  // orders
   const slots = new Map();
   for (const o of S.orders) {
     let slot = 0;
     if (['pending', 'preparing', 'ready', 'assigned'].includes(o.status)) {
       slot = slots.get(o.restaurant) ?? 0; slots.set(o.restaurant, slot + 1);
     }
-    const tg = targetFor(o, slot);
-    o.mesh.position.lerp(tg, k);
-    o.box.rotation.y += dt * (o.status === 'picked_up' ? 1.5 : 0.2);
-    const col = STATUS_COLOR[o.status];
-    o.box.material.emissive.setHex(o === S.selected ? 0x555555 : 0x000000);
+    o.mesh.position.lerp(targetFor(o, slot), k);
     const life = o.status === 'delivered' ? Math.max(0, (o.goneAt - S.time) / 5) : 1;
     o.mesh.scale.setScalar(0.4 + 0.6 * Math.min(1, life * 2));
-    o.label.position.set(o.mesh.position.x, o.mesh.position.y + o.size + 1.5, o.mesh.position.z);
+    o.label.position.set(o.mesh.position.x, o.mesh.position.y + o.size + 1.1, o.mesh.position.z);
     let sub;
     if (o.status === 'preparing') sub = o.prepRemaining > 0 ? `cooking ${Math.ceil(o.prepRemaining)}s` : 'done — mark ready';
     else if (o.status === 'delivered') sub = `${fmt(o.deliveredAt - o.createdAt)}s total`;
     else sub = o.eta != null ? `${o.status} · ETA ${Math.ceil(o.eta)}s` : o.status;
-    setLabel(o.label, [{ t: `#${o.id}  $${o.revenue}`, c: '#26332b', s: 70 }, { t: sub, c: dark(col, .6), s: 46 }]);
+    setLabel(o.label, [{ t: `#${o.id}  $${o.revenue}`, c: '#3b3631', s: 40 }, { t: sub, c: dark(STATUS_COLOR[o.status], 0.62), s: 30 }]);
   }
-  // restaurants
   for (const r of S.restaurants) {
-    const act_ = S.orders.filter((o) => o.restaurant === r && o.status === 'preparing').length;
-    setLabel(r.label, [{ t: r.name, c: dark(r.color, .5), s: 58 },
-      { t: `prep ${r.prepTime}s · cooking ${act_}/${r.capacity}`, c: act_ >= r.capacity ? '#c0392b' : '#66746b', s: 40 }]);
+    const n = S.orders.filter((o) => o.restaurant === r && o.status === 'preparing').length;
+    setLabel(r.label, [{ t: r.name, c: dark(r.color, 0.8), s: 42 },
+      { t: `prep ${r.prepTime}s · cooking ${n}/${r.capacity}`, c: n >= r.capacity ? '#c0392b' : '#7a736b', s: 28 }]);
   }
   for (const c of S.customers) {
     const n = S.orders.filter((o) => o.customer === c && o.status !== 'delivered').length;
-    setLabel(c.label, [{ t: c.name, c: '#8a6d12', s: 64 }, { t: n ? `waiting: ${n}` : 'idle', c: '#66746b', s: 42 }]);
+    setLabel(c.label, [{ t: c.name, c: '#8a6d12', s: 40 }, { t: n ? `waiting: ${n}` : 'idle', c: '#7a736b', s: 28 }]);
   }
-  // couriers
   for (const c of S.couriers) {
-    c.bob += dt * 8;
-    c.mesh.position.set(c.pos.x, Math.abs(Math.sin(c.bob)) * (c.task ? .12 : 0), c.pos.z);
-    if (c.heading !== undefined) c.mesh.rotation.y = c.heading - Math.PI / 2;
+    c.mesh.position.set(c.pos.x, 0.06, c.pos.z);
+    c.rot += wrap(c.heading - c.rot) * Math.min(1, dt * 10);
+    c.inner.rotation.y = c.rot;
     const l = load(c);
-    c.body.material.color.setHex(l >= COURIER_CAPACITY ? 0xea9a9a : l > 0 ? 0x8dbbe8 : 0x9fd4a8);
+    const lc = l >= COURIER_CAPACITY ? 0xf26b6b : l > 0 ? 0x3b8fe8 : 0x5fd38d;
+    c.lamp.material.color.setHex(lc); c.lamp.material.emissive.setHex(lc);
     c.label.position.set(c.pos.x, 3.6, c.pos.z);
-    setLabel(c.label, [{ t: c.name, c: '#2c5f9e', s: 62 },
-      { t: `${l}/${COURIER_CAPACITY} orders · ${c.task ? 'moving' : l ? 'stopped' : 'available'}`, c: l >= COURIER_CAPACITY ? '#c0392b' : '#66746b', s: 34 }]);
+    setLabel(c.label, [{ t: c.name, c: '#2c5f9e', s: 38 },
+      { t: `${l}/${COURIER_CAPACITY} orders · ${c.task ? 'driving' : l ? 'stopped' : 'available'}`, c: l >= COURIER_CAPACITY ? '#c0392b' : '#7a736b', s: 26 }]);
   }
-  // platform
-  platform.ring.rotation.z += dt * 1.2;
+  platform.ring.rotation.z += dt * 1.1;
   const q = unassigned().length;
-  setLabel(platform.label, [{ t: 'PLATFORM', c: '#26332b', s: 64 },
-    { t: `pending ${q} · free couriers ${S.couriers.filter((c) => load(c) < COURIER_CAPACITY).length}/${S.couriers.length}`, c: '#66746b', s: 36 },
-    { t: S.policy === 'fifo' ? 'allocation: FIFO' : 'allocation: revenue-weighted', c: S.policy === 'fifo' ? '#66746b' : '#a2740a', s: 36 }]);
-  // selection ring
+  setLabel(platform.label, [{ t: 'PLATFORM', c: '#3b3631', s: 46 },
+    { t: `pending ${q} · free couriers ${S.couriers.filter((c) => load(c) < COURIER_CAPACITY).length}/${S.couriers.length}`, c: '#7a736b', s: 28 },
+    { t: S.policy === 'fifo' ? 'allocation: FIFO' : 'allocation: revenue-weighted', c: S.policy === 'fifo' ? '#7a736b' : '#a2740a', s: 28 }]);
   const s = S.selected;
   selRing.visible = !!s;
   if (s) {
     const p = s.type === 'order' ? s.mesh.position : s.pos;
-    selRing.position.set(p.x, 0.06, p.z);
-    selRing.scale.setScalar(s.type === 'restaurant' ? 1.5 : s.type === 'platform' ? 1.7 : s.type === 'order' ? 0.7 : 1);
+    selRing.position.set(p.x, s.type === 'courier' ? 0.12 : s.type === 'order' ? p.y + 0.05 : SLAB + 0.06, p.z);
+    selRing.scale.setScalar(s.type === 'restaurant' ? 2.4 : s.type === 'platform' ? 2.4 : s.type === 'customer' ? 1.9 : s.type === 'order' ? 0.7 : 0.8);
   }
   // relationship lines
   segN = 0;
   for (const o of S.orders) {
     const op = o.mesh.position;
     if (o.status !== 'delivered') {
-      seg(up(o.customer.pos, 2.4), op, REL_COLOR.creates);                    // CUSTOMER creates ORDER
-      if (['preparing', 'ready'].includes(o.status) || o.status === 'pending') // RESTAURANT prepares ORDER
-        seg(up(o.restaurant.pos, 2.6), op, REL_COLOR.prepares);
-      if (['pending', 'preparing', 'ready'].includes(o.status))               // PLATFORM evaluates ORDER
-        seg(platformTop, op, REL_COLOR.evaluates);
+      seg(up(o.customer.pos, 4.2), op, REL_COLOR.creates);                      // CUSTOMER creates ORDER
+      if (['pending', 'preparing', 'ready'].includes(o.status)) {
+        seg(up(o.restaurant.pos, 5.4), op, REL_COLOR.prepares);                 // RESTAURANT prepares ORDER
+        seg(platformTop, op, REL_COLOR.evaluates);                              // PLATFORM evaluates ORDER
+      }
     }
-    if (o.status === 'assigned' && o.courier) {                               // PLATFORM assigns courier to ORDER
-      seg(platformTop, up(o.courier.pos, 1.2), REL_COLOR.assigns);
-      seg(up(o.courier.pos, 1.2), op, REL_COLOR.assigns);
+    if (o.status === 'assigned' && o.courier) {                                 // PLATFORM assigns courier to ORDER
+      seg(platformTop, up(o.courier.pos, 2), REL_COLOR.assigns);
+      seg(up(o.courier.pos, 2), op, REL_COLOR.assigns);
     }
-    if (o.status === 'picked_up' || o.status === 'delivered') seg(op, up(o.customer.pos, 2.4), REL_COLOR.carries); // COURIER picks up / delivers
+    if (o.status === 'picked_up' || o.status === 'delivered') seg(op, up(o.customer.pos, 4.2), REL_COLOR.carries); // COURIER picks up / delivers
   }
   lineGeo.setDrawRange(0, segN * 2);
   lineGeo.attributes.position.needsUpdate = true;
@@ -683,10 +785,11 @@ function syncVisuals(dt) {
 
 // ---------- DOM panels -------------------------------------------------
 const tag = (s) => `<span class="pill" style="background:${hex(STATUS_COLOR[s])}">${s}</span>`;
-function row(k, v) { return `<tr><td>${k}</td><td>${v}</td></tr>`; }
+const row = (k, v) => `<tr><td>${k}</td><td>${v}</td></tr>`;
+const locOf = (e) => `(${fmt(e.pos.x, 0)}, ${fmt(e.pos.z, 0)})`;
 function infoHTML() {
   const s = S.selected;
-  if (!s) return 'Click an order, customer, restaurant, courier or the platform. Toolbar actions use the selection when it applies.';
+  if (!s) return 'Click an order, customer, restaurant, courier or the platform. Actions use the selection when it applies.';
   if (s.type === 'order') {
     const total = s.deliveredAt != null ? s.deliveredAt - s.createdAt : S.time - s.createdAt;
     return `<div class="name">ORDER #${s.id}</div><table>
@@ -701,7 +804,7 @@ function infoHTML() {
   }
   if (s.type === 'customer') {
     return `<div class="name">CUSTOMER ${s.name}</div><table>
-      ${row('location', `(${fmt(s.pos.x, 0)}, ${fmt(s.pos.z, 0)})`)}
+      ${row('location', locOf(s))}
       ${row('order time', s.orderTime != null ? fmt(s.orderTime) + 's' : '—')}
       ${row('selected restaurant', s.selectedRestaurant?.name ?? '—')}
       ${row('open orders', S.orders.filter((o) => o.customer === s && o.status !== 'delivered').map((o) => '#' + o.id).join(' ') || '—')}</table>`;
@@ -709,18 +812,18 @@ function infoHTML() {
   if (s.type === 'restaurant') {
     const act_ = S.orders.filter((o) => o.restaurant === s && o.status === 'preparing');
     return `<div class="name">RESTAURANT ${s.name}</div><table>
-      ${row('location', `(${fmt(s.pos.x, 0)}, ${fmt(s.pos.z, 0)})`)}
+      ${row('location', locOf(s))}
       ${row('preparation time', s.prepTime + 's (avg)')}
       ${row('active orders', act_.map((o) => '#' + o.id).join(' ') || '—')}
       ${row('production capacity', `${act_.length}/${s.capacity} at once`)}</table>`;
   }
   if (s.type === 'courier') {
-    const eta = s.task ? dist(s.pos, s.task.kind === 'toRestaurant' ? s.task.order.restaurant.pos : s.task.order.customer.pos) / COURIER_SPEED : null;
+    const dest = s.task ? (s.task.kind === 'toRestaurant' ? s.task.order.restaurant : s.task.order.customer) : null;
     return `<div class="name">COURIER ${s.name}</div><table>
       ${row('location', `(${fmt(s.pos.x, 0)}, ${fmt(s.pos.z, 0)})`)}
       ${row('availability', load(s) < COURIER_CAPACITY ? `available (${COURIER_CAPACITY - load(s)} slot${COURIER_CAPACITY - load(s) > 1 ? 's' : ''})` : 'full')}
       ${row('current assignment', [...s.orders, ...s.carry].map((o) => `#${o.id} (${o.status})`).join(', ') || '—')}
-      ${row('travel time', eta != null ? `${fmt(eta)}s to ${s.task.kind === 'toRestaurant' ? s.task.order.restaurant.name : s.task.order.customer.name}` : 'not travelling')}</table>`;
+      ${row('travel time', dest ? `${fmt(pathLen(s.pos, dest.acc) / COURIER_SPEED)}s to ${dest.name}` : 'not driving')}</table>`;
   }
   const q = unassigned();
   return `<div class="name">PLATFORM</div><table>
@@ -731,7 +834,7 @@ function infoHTML() {
 }
 function queueHTML() {
   const q = unassigned().sort((a, b) => priorityOf(b) - priorityOf(a));
-  if (!q.length) return '<span style="color:var(--dim)">empty</span>';
+  if (!q.length) return '<span class="dim">empty</span>';
   return '<table>' + q.map((o, i) => `<tr><td style="width:auto">${i + 1}. #${o.id} $${o.revenue}</td><td>${tag(o.status)}</td><td style="text-align:right">p=${fmt(priorityOf(o))}</td></tr>`).join('') + '</table>';
 }
 function statsHTML() {
@@ -748,12 +851,8 @@ function statsHTML() {
     ${k(fmt(avg(hi.map(tt))) + 's', `avg · revenue ≥ $${HIGH_REVENUE} (${hi.length})`)}${k(fmt(avg(lo.map(tt))) + 's', `avg · revenue < $${HIGH_REVENUE} (${lo.length})`)}
   </div>`;
 }
-function rulesHTML() {
-  return RULES.map((r, i) => `<li><b>${r}</b>${S.ruleHits[i] ? ` <span class="hit">×${S.ruleHits[i]}</span>` : ''}</li>`).join('');
-}
-function logHTML() {
-  return S.log.map((e) => `<div class="${e.kind}">[${fmt(e.t, 0)}s] ${e.msg}</div>`).join('');
-}
+const rulesHTML = () => RULES.map((r, i) => `<li><b>${r}</b>${S.ruleHits[i] ? ` <span class="hit">×${S.ruleHits[i]}</span>` : ''}</li>`).join('');
+const logHTML = () => S.log.map((e) => `<div class="${e.kind}">[${fmt(e.t, 0)}s] ${e.msg}</div>`).join('');
 let panelClock = 0;
 function updatePanels(force) {
   panelClock = 0;
@@ -769,9 +868,9 @@ $('legend').innerHTML = '<b>Order status</b>' + STATUS.map((s) => `<div><i style
   + '<hr><b>Relationships</b>'
   + [['creates', 'customer → order'], ['prepares', 'restaurant → order'], ['evaluates', 'platform → order'], ['assigns', 'platform → courier → order'], ['carries', 'courier picks up / delivers']]
     .map(([k, t]) => `<div><i style="background:${hex(REL_COLOR[k])}"></i>${t}</div>`).join('')
-  + '<hr><div style="color:var(--dim)">Box size = revenue</div>';
+  + '<hr><div class="dim">Box size = revenue</div>';
 
-// ---------- toolbar wiring -------------------------------------------
+// ---------- panel wiring ---------------------------------------------
 const bind = (id, fn) => $(id).addEventListener('click', () => { fn(); updatePanels(true); });
 bind('btn-play', () => { S.running = !S.running; });
 bind('btn-reset', () => resetWorld());
@@ -789,15 +888,21 @@ bind('btn-c-deliver', () => act.cDeliver());
 bind('btn-add-courier', () => act.addCourier());
 bind('btn-del-courier', () => act.delCourier());
 $('sel-speed').addEventListener('change', (e) => { S.speed = parseFloat(e.target.value); });
-for (const k of ['customer', 'restaurant', 'platform', 'courier'])
-  $('auto-' + k).addEventListener('change', (e) => { S.auto[k] = e.target.checked; log(`Auto ${k}: ${e.target.checked ? 'on' : 'off'}`); logDirty = true; });
+for (const k of ['customer', 'restaurant', 'platform', 'courier']) {
+  $('auto-' + k).checked = S.auto[k];
+  $('auto-' + k).addEventListener('change', (e) => { S.auto[k] = e.target.checked; log(`Auto ${k}: ${e.target.checked ? 'on' : 'off'}`); });
+}
+$('btn-panel').addEventListener('click', () => {
+  const c = $('panel').classList.toggle('collapsed');
+  $('btn-panel').textContent = c ? '▸' : '▾';
+});
 
 function resetWorld() {
   [...S.orders].forEach(removeOrder);
-  [...S.couriers].forEach((c) => { scene.remove(c.mesh, c.label); pickables.splice(pickables.indexOf(c.mesh), 1); });
-  S.couriers.length = 0; S.delivered.length = 0; S.log.length = 0;
+  [...S.couriers].forEach(removeCourier);
+  S.delivered.length = 0; S.log.length = 0;
   S.time = 0; S.nextOrder = 1; S.nextCourier = 1; S.selected = null; S.policy = 'fifo';
-  S.ruleHits.fill(0); S.timers = { spawn: 2, evaluate: 0 };
+  S.ruleHits.fill(0); S.timers = { spawn: 1.5, evaluate: 0 };
   S.customers.forEach((c) => { c.orderTime = null; c.selectedRestaurant = null; });
   for (let i = 0; i < 3; i++) addCourier();
   log('World reset');
@@ -822,12 +927,11 @@ function resize() {
   const a = innerWidth / innerHeight;
   Object.assign(camera, { left: -VIEW * a, right: VIEW * a, top: VIEW, bottom: -VIEW });
   camera.updateProjectionMatrix();
-  document.documentElement.style.setProperty('--tb', $('toolbar').offsetHeight + 'px');
 }
 addEventListener('resize', resize);
 
 for (let i = 0; i < 3; i++) addCourier();
-log('Ready. Create an order, then walk it through the actions (or switch agents to auto).');
+log('Simulation started — agents are running on auto. Untick an agent\'s "auto" to take over manually.');
 resize();
 const clock = new THREE.Clock();
 function frame() {

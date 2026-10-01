@@ -17,20 +17,20 @@ three.js is vendored in `vendor/`, so no network or build step is needed.
   platform→order *evaluates*, platform→courier→order *assigns*, courier→order *picks up / delivers*.
 
 ### Controls
-The toolbar has one group per entity, with the actions from the model. Click an entity in the scene to select it;
-actions use the selection when it applies, otherwise the first eligible order/courier. Each group also has an
-**auto** toggle so that agent acts by itself. Refused actions explain which rule blocked them, and the Rules panel counts
-how often each rule bounded an outcome. Left-drag orbits, wheel zooms, right-drag pans.
+Everything except the legend lives in the collapsible panel on the right (each section, and the whole panel, can be collapsed).
+The **Simulation** section groups the time controls and one row of actions per entity. The simulation starts by itself with all
+four agents on **auto**; untick an agent's *auto* to take over that role manually. Click an entity in the scene to select it —
+actions use the selection when it applies, otherwise the first eligible order/courier. Refused actions explain which rule blocked
+them, and the Rules section counts how often each rule bounded an outcome. Left-drag orbits, wheel zooms, right-drag pans.
 
 - Customer: Create Order
 - Restaurant: Accept Order (limited by production capacity), Mark Ready (only after preparation time)
 - Platform: Evaluate Pending, Estimate ETA, Assign Courier, Priority (FIFO ↔ revenue-weighted)
-- Courier: Accept, Travel → Restaurant, Pick Up, Deliver, ＋/－ fleet size
-- Simulation: pause/run, speed, reset
+- Courier: Accept, Drive → Restaurant, Pick Up, Deliver, ＋/－ fleet size (couriers are cars that follow the road grid)
 
-Revenue-weighted priority is a **simulation hypothesis**, not a claim about any real platform. The stats panel compares
+Revenue-weighted priority is a **simulation hypothesis**, not a claim about any real platform. The Statistics section compares
 average delivery time for high- vs low-revenue orders under each policy.
 
 ### Look
-The visual style follows the line-drawn isometric aesthetic of *Urban Encounter*: orthographic isometric camera, pale sage
-ground with white roads, white buildings with thin ink outlines and pastel accents, lollipop trees, and a light UI.
+Soft "clay" isometric city inspired by pastel 3D miniature-city illustrations: orthographic camera, soft shadows, rounded forms,
+white parcels on a warm grey street grid, vivid pastel accents, cone/lollipop trees. No outlines or grid lines.
