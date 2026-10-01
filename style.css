@@ -1,6 +1,6 @@
 :root {
-  --bg: #ece7e1; --panel: rgba(255, 255, 255, .94); --line: #e2dbd2; --text: #3b3631; --dim: #8a8279;
-  --c-time: #8a8279; --c-customer: #e0a21b; --c-restaurant: #ef6a3c; --c-platform: #8b6fe0; --c-courier: #35b8a3;
+  --bg: #dfe4ea; --panel: rgba(255, 255, 255, .94); --line: #e2dbd2; --text: #3b3631; --dim: #8a8279;
+  --c-time: #8a8279; --c-customer: #2f5f45; --c-restaurant: #e8472f; --c-platform: #2c4a8c; --c-courier: #f1b82d;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);

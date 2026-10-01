@@ -32,5 +32,7 @@ Revenue-weighted priority is a **simulation hypothesis**, not a claim about any 
 average delivery time for high- vs low-revenue orders under each policy.
 
 ### Look
-Soft "clay" isometric city inspired by pastel 3D miniature-city illustrations: orthographic camera, soft shadows, rounded forms,
-white parcels on a warm grey street grid, vivid pastel accents, cone/lollipop trees. No outlines or grid lines.
+Soft "clay" isometric city (orthographic camera, soft shadows, rounded forms, no outlines or grid lines).
+The background city is white massing with green parks and blue water on cool-grey streets; saturated architectural-model colours
+are reserved for the four roles: **restaurants** (coral/orange/salmon), **customers** (forest/denim/teal roofs),
+**platform** (navy) and **couriers** (mustard cars).

@@ -19,7 +19,7 @@ const STATUS_COLOR = {
   assigned: 0x3b8fe8, picked_up: 0x8b6fe0, delivered: 0x2cc7c0,
 };
 const REL_COLOR = {
-  creates: 0xf0a30a, prepares: 0xef6a3c, evaluates: 0xa39a90, assigns: 0x2f7fe0, carries: 0x7c5ad8,
+  creates: 0x3f8f5f, prepares: 0xe8472f, evaluates: 0x9aa3ad, assigns: 0x2c4a8c, carries: 0xd9a21b,
 };
 const RULES = [
   'Courier capacity is limited.',
@@ -33,9 +33,15 @@ const RULES = [
 // city grid: parcels (12 wide) between roads (4 wide); roads at ±8, ±24, ±40, ±56
 const ROADS = [-56, -40, -24, -8, 8, 24, 40, 56];
 const PARCEL = 12, SLAB = 0.4;
-const VIVID = [0xf26b2c, 0xf7c52e, 0x6c4fd1, 0x35c9b0, 0xf08aa0, 0x3b8fe8];
-const PASTEL = [0xfbd6c8, 0xcdeee8, 0xdcd4f4, 0xfff0c2, 0xffffff, 0xcfe3fa];
-const TREE = [0x3fb5a0, 0x7cc79a, 0xf2b84b, 0x5fa8a0];
+// Background city = white massing + green + blue water (references 1–2).
+// Saturated architectural-model colours (reference 3) are reserved for the four roles:
+//   restaurants = reds/oranges · customers = greens/denim · platform = navy · couriers = mustard
+const CLR = {
+  white: 0xf3f1ed, ledge: 0xe2dfda, coral: 0xe8472f, orange: 0xee7a3c, salmon: 0xf0a08e, mustard: 0xf1b82d, amber: 0xe3a21c,
+  navy: 0x2c4a8c, denim: 0x4f7fb5, forest: 0x2f5f45, teal: 0x4a9a8a, sage: 0x6f9f6f, cream: 0xf2e6cf, wood: 0xe8d4b4, water: 0x62b6d9,
+};
+const ROLE = { customer: CLR.forest, restaurant: CLR.coral, platform: CLR.navy, courier: CLR.mustard };
+const TREE = [0x8fbf6a, 0x6aa35a, 0x4f8a4f, 0x9ccb7a];
 
 // ---------- helpers --------------------------------------------------
 const $ = (id) => document.getElementById(id);
@@ -72,7 +78,7 @@ function pathLen(a, b) {
 }
 
 // ---------- three.js scene -------------------------------------------
-const BG = 0xece7e1;
+const BG = 0xdfe4ea;
 const canvas = $('view');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -90,8 +96,8 @@ controls.maxPolarAngle = Math.PI * 0.45;
 controls.minZoom = 0.55; controls.maxZoom = 3.5;
 controls.enableDamping = true;
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0xf3e4d8, 1.5));
-const sun = new THREE.DirectionalLight(0xfff3e4, 2.6);
+scene.add(new THREE.HemisphereLight(0xffffff, 0xaebbd0, 1.6));
+const sun = new THREE.DirectionalLight(0xfffaf2, 2.5);
 sun.position.set(-40, 70, 30);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
@@ -113,22 +119,20 @@ function box(parent, w, h, d, color, x = 0, y = 0, z = 0, r) {
   parent.add(m);
   return m;
 }
-const coneGeo = new THREE.ConeGeometry(0.8, 1.6, 12);
+const coneGeo = new THREE.ConeGeometry(0.8, 1.6, 12), ballGeo = new THREE.SphereGeometry(0.7, 16, 12);
 function tree(parent, x, z, y = SLAB, s = 1) {
   const g = new THREE.Group();
-  const c = pick(TREE);
-  const trunk = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.5, 6), mat(0xd9b88f)));
-  trunk.position.y = 0.25; g.add(trunk);
-  const kind = srand();
-  if (kind < 0.6) {
+  const c = pick(TREE), kind = srand();
+  const trunk = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.6, 6), mat(0xc2b393)));
+  trunk.position.y = 0.3; g.add(trunk);
+  if (kind < 0.4) { // cypress
+    const b = shade(new THREE.Mesh(ballGeo, mat(c))); b.scale.set(0.7, 1.9, 0.7); b.position.y = 1.6; g.add(b);
+  } else if (kind < 0.75) { // lollipop
+    const b = shade(new THREE.Mesh(ballGeo, mat(c))); b.position.y = 1.35; g.add(b);
+  } else { // cone
     for (let i = 0; i < 2; i++) {
       const cone = shade(new THREE.Mesh(coneGeo, mat(c)));
-      cone.scale.setScalar((1 - i * 0.35) * s); cone.position.y = 0.9 + i * 0.85 * s; g.add(cone);
-    }
-  } else {
-    for (let i = 0; i < 2; i++) {
-      const b = shade(new THREE.Mesh(new THREE.SphereGeometry(0.62 - i * 0.18, 14, 12), mat(c)));
-      b.position.y = 1.05 + i * 0.85; g.add(b);
+      cone.scale.setScalar(1 - i * 0.35); cone.position.y = 1.0 + i * 0.8; g.add(cone);
     }
   }
   g.position.set(x, y, z); g.scale.setScalar(s); parent.add(g);
@@ -200,7 +204,7 @@ const S = {
 };
 
 // ---- terrain: roads, lane marks, parcels -------------------------------
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshStandardMaterial({ color: 0xdcd6cf, roughness: 1 }));
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshStandardMaterial({ color: 0xa9b6c6, roughness: 1 }));
 ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
 scene.add(ground);
 {
@@ -229,20 +233,20 @@ const platform = { type: 'platform', name: 'PLATFORM', pos: new THREE.Vector3(0,
 const platformTop = new THREE.Vector3(0, 9.6, 0);
 function buildPlatform() {
   const g = new THREE.Group();
-  const plaza = shade(new THREE.Mesh(new THREE.CylinderGeometry(5.4, 5.4, 0.18, 40), mat(0x9fd4b5)));
+  const plaza = shade(new THREE.Mesh(new THREE.CylinderGeometry(5.4, 5.4, 0.18, 40), mat(0xc6dcb2)));
   plaza.position.y = 0.09; g.add(plaza);
   box(g, 3.2, 0.7, 3.2, 0xffffff, 0, 0.18, 0, 0.3);
   const shaft = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.5, 1.1, 7, 24), mat(0xffffff)));
   shaft.position.y = 4.4; g.add(shaft);
-  const disc = shade(new THREE.Mesh(new THREE.CylinderGeometry(2.6, 1.6, 0.9, 32), mat(0x9a86d8)));
+  const disc = shade(new THREE.Mesh(new THREE.CylinderGeometry(2.6, 1.6, 0.9, 32), mat(CLR.navy)));
   disc.position.y = 8.6; g.add(disc);
-  const dome = shade(new THREE.Mesh(new THREE.SphereGeometry(1.25, 24, 14, 0, Math.PI * 2, 0, Math.PI / 2), mat(0xcfc4f2)));
+  const dome = shade(new THREE.Mesh(new THREE.SphereGeometry(1.25, 24, 14, 0, Math.PI * 2, 0, Math.PI / 2), mat(0x9fb6d9)));
   dome.position.y = 9.05; g.add(dome);
   const mast = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.12, 2.6, 8), mat(0xffffff)));
   mast.position.y = 11.3; g.add(mast);
-  const tip = shade(new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 10), mat(0xf26b6b)));
+  const tip = shade(new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 10), mat(0xffffff)));
   tip.position.y = 12.6; g.add(tip);
-  const ring = shade(new THREE.Mesh(new THREE.TorusGeometry(3.4, 0.1, 8, 64), mat(0xf4b9a0)));
+  const ring = shade(new THREE.Mesh(new THREE.TorusGeometry(3.4, 0.1, 8, 64), mat(CLR.mustard)));
   ring.position.y = 8.6; ring.rotation.x = Math.PI / 2.3; g.add(ring);
   platform.ring = ring;
   for (const [x, z] of [[-4, -3.6], [4, 3.6], [-4, 3.6], [4, -3.6]]) tree(g, x, z, 0.18, 1.1);
@@ -257,13 +261,13 @@ function buildPlatform() {
 function addRestaurant(name, x, z, prep, cap, color, accent) {
   const r = { type: 'restaurant', name, pos: new THREE.Vector3(x, SLAB, z), acc: new THREE.Vector3(x, 0, z + 8), prepTime: prep, capacity: cap, color, accent };
   const g = new THREE.Group();
-  box(g, 8, 2.4, 5, 0xfaf7f2, 0, 0, -1.5);
+  box(g, 8, 2.4, 5, CLR.cream, 0, 0, -1.5);
   box(g, 5.6, 2.2, 4, color, -0.8, 2.4, -1.6);
   box(g, 3, 1.6, 3.2, accent, 2, 2.4, -1.2);
   box(g, 7.4, 0.3, 2, accent, 0, 1.9, 1.5, 0.14);              // awning
   box(g, 2.6, 1.2, 0.12, 0x9fd0e8, -2, 0.5, 1.02, 0.05);       // glass
   box(g, 1.1, 1.7, 0.12, color, 2.2, 0, 1.02, 0.05);           // door
-  const chim = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 1.4, 14), mat(0xffffff)));
+  const chim = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 1.4, 14), mat(accent)));
   chim.position.set(-2.6, 5.3, -2.4); g.add(chim);
   tree(g, -3.8, 3.8); tree(g, 3.8, 4.4, SLAB * 0, 0.8);
   g.position.set(x, SLAB, z); scene.add(g);
@@ -279,7 +283,7 @@ function addCustomer(name, x, z, bodyC, roofC) {
   prism(g, 5.4, 2.4, 4.6, roofC, 0, 2.6, -0.8, Math.PI / 2);
   box(g, 1.0, 1.6, 0.12, roofC, 0.8, 0, 1.22, 0.05);
   box(g, 1.2, 1.0, 0.12, 0x9fd0e8, -1.2, 0.8, 1.22, 0.05);
-  box(g, 0.9, 1.5, 0.9, 0xffffff, 1.4, 3.4, -1.6);
+  box(g, 0.9, 1.5, 0.9, CLR.white, 1.4, 3.4, -1.6);
   tree(g, -3.6, 3.6); tree(g, 3.8, 3.2, 0, 0.8);
   g.position.set(x, SLAB, z); scene.add(g);
   c.mesh = g;
@@ -288,74 +292,77 @@ function addCustomer(name, x, z, bodyC, roofC) {
   S.customers.push(c); takenAt.add(key(x, z));
 }
 
-// filler parcels (decor, not part of the model)
+// filler parcels (white massing, parks and water — decor, not part of the model)
+function ledged(g, w, h, d, x, z, step = 1.5) {
+  box(g, w, h, d, CLR.white, x, 0, z, 0.22);
+  for (let k = 1; k * step < h - 0.4; k++) box(g, w + 0.12, 0.1, d + 0.12, CLR.ledge, x, k * step, z, 0.04);
+}
 function buildFiller(x, z) {
   const g = new THREE.Group(); g.position.set(x, SLAB, z);
   const t = srand();
-  if (t < 0.3) { // house
-    const bc = pick(PASTEL), rc = pick(VIVID);
-    const h = new THREE.Group(); h.rotation.y = 0; g.add(h);
-    box(h, 4.4, 2.4, 3.6, bc, 0, 0, 0); prism(h, 5.2, 2.2, 4.2, rc, 0, 2.4, 0, Math.PI / 2);
-    box(h, 1, 1.5, 0.12, rc, 0.8, 0, 1.82, 0.05);
-    tree(g, -3.8, 3.6); tree(g, 4, -3.6);
-  } else if (t < 0.5) { // white tower with ledges
-    const w = 4 + srand() * 2, hgt = 6 + srand() * 10, d = 4 + srand() * 2;
-    const col = srand() < 0.25 ? pick([0xcfe6f7, 0x2f6fd8, 0xf7c52e]) : 0xffffff;
-    box(g, w, hgt, d, col, 0, 0, 0, 0.25);
-    for (let k = 1; k * 2 < hgt; k++) box(g, w + 0.14, 0.12, d + 0.14, col === 0xffffff ? 0xe9e4de : col, 0, k * 2, 0, 0.05);
-    tree(g, -4.3, 4.3); tree(g, 4.6, 4.6, 0, 0.8);
-  } else if (t < 0.7) { // stacked coloured boxes
-    const a = pick(VIVID), b = pick(VIVID), c = pick(VIVID);
-    box(g, 6, 2.6, 4.4, a, 0, 0, 0.4, 0.25); box(g, 4.4, 2.4, 4, b, -0.8, 2.6, -0.4, 0.25); box(g, 3, 2, 3, c, 1.6, 5, -0.2, 0.25);
-    box(g, 2.2, 1.2, 0.12, 0xdff1fa, -0.4, 0.8, 2.64, 0.05);
-    tree(g, -4.4, 4.2); tree(g, 4.4, 4.6, 0, 0.8);
-  } else if (t < 0.85) { // park
-    const lawn = shade(new THREE.Mesh(new THREE.CylinderGeometry(5.2, 5.2, 0.14, 36), mat(0x9fd4b5)));
-    lawn.position.y = 0.07; g.add(lawn);
-    for (let i = 0; i < 6; i++) { const a = i * 1.05 + srand(); tree(g, Math.cos(a) * 3.4, Math.sin(a) * 3.4, 0.14, 0.8 + srand() * 0.5); }
-    tree(g, 0, 0, 0.14, 1.4);
-  } else if (t < 0.93) { // pool house
-    box(g, 6.6, 0.12, 4.6, 0xffffff, 0, 0, 0, 0.05); box(g, 5.8, 0.16, 3.8, 0x7fe0e6, 0, 0.08, 0, 0.06);
-    box(g, 3.2, 2.2, 2.4, pick(VIVID), 0, 0, -3.6, 0.2); tree(g, 4.4, -3.8);
-  } else { // water tank
-    const tank = shade(new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 2.2, 24), mat(0xf2955a)));
-    tank.position.y = 5.3; g.add(tank);
-    const cap = shade(new THREE.Mesh(new THREE.ConeGeometry(1.7, 0.9, 24), mat(0xf7b987))); cap.position.y = 6.85; g.add(cap);
-    for (const [lx, lz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-      const l = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 4.2, 6), mat(0xb9b0a6))); l.position.set(lx, 2.1, lz); g.add(l);
+  if (t < 0.38) { // white tower, sometimes with a stepped neighbour
+    const w = 3.6 + srand() * 2.4, d = 3.6 + srand() * 2.4, h = 5 + srand() * 11;
+    ledged(g, w, h, d, -1 + srand(), -1 + srand());
+    if (srand() < 0.6) ledged(g, 3, 3 + srand() * 3, 3, 3.2, 3.2);
+    tree(g, -4.4, 4.4); tree(g, 4.6, -4.2, 0, 0.8);
+  } else if (t < 0.52) { // long low white blocks
+    ledged(g, 9, 3.6, 3.6, 0, -2.4); ledged(g, 5.4, 5.4, 3.4, -1, 2.6);
+    tree(g, 4.6, 3.6, 0, 0.8);
+  } else if (t < 0.64) { // cluster of small white gable houses
+    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
+      const hx = i * 3.4, hz = j * 3.4;
+      box(g, 2.2, 1.3, 2.2, CLR.white, hx, 0, hz, 0.1);
+      prism(g, 2.5, 1.2, 2.4, CLR.white, hx, 1.3, hz, Math.PI / 2);
     }
-    tree(g, -4, 4);
+  } else if (t < 0.8) { // park: lawn, mound, trees, bench
+    const lawn = shade(new THREE.Mesh(new THREE.CylinderGeometry(5.3, 5.3, 0.14, 40), mat(0xa9d089)));
+    lawn.position.y = 0.07; g.add(lawn);
+    const mound = shade(new THREE.Mesh(new THREE.SphereGeometry(3, 28, 14, 0, Math.PI * 2, 0, Math.PI / 2), mat(0x9ccb7a)));
+    mound.scale.set(1, 0.75, 1); mound.position.set(-1.2, 0.14, -1.2); g.add(mound);
+    box(g, 2.2, 0.35, 0.7, CLR.wood, 2.4, 0.14, 2.4, 0.1);
+    for (let i = 0; i < 7; i++) { const a = i * 0.9 + srand(); tree(g, Math.cos(a) * 3.9, Math.sin(a) * 3.9, 0.14, 0.8 + srand() * 0.5); }
+  } else if (t < 0.9) { // pond
+    box(g, 10, 0.18, 9, CLR.water, 0, 0, 0, 0.8);
+    box(g, 3.4, 0.2, 1.1, CLR.white, 0, 0, 0, 0.1);
+    tree(g, -4.6, 4.6); tree(g, 4.6, -4.6); tree(g, 4.8, 4.6, 0, 0.8);
+  } else { // white dome + obelisk
+    box(g, 5, 1.4, 5, CLR.white, -1, 0, 0, 0.3);
+    const dome = shade(new THREE.Mesh(new THREE.SphereGeometry(2, 28, 14, 0, Math.PI * 2, 0, Math.PI / 2), mat(CLR.white)));
+    dome.position.set(-1, 1.4, 0); g.add(dome);
+    const ob = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.5, 9, 4), mat(CLR.white)));
+    ob.position.set(3.8, 4.5, -3); ob.rotation.y = Math.PI / 4; g.add(ob);
+    tree(g, 4, 4);
   }
   scene.add(g);
 }
 
 // parcel slabs
 for (const [x, z] of parcels) {
-  const slab = shade(new THREE.Mesh(new RoundedBoxGeometry(PARCEL, SLAB, PARCEL, 3, 0.12), mat(0xf8f5f1)));
+  const slab = shade(new THREE.Mesh(new RoundedBoxGeometry(PARCEL, SLAB, PARCEL, 3, 0.12), mat(0xf1efeb)));
   slab.position.set(x, SLAB / 2, z); scene.add(slab);
 }
 buildPlatform();
-addRestaurant('R1 Burger', -16, -16, 6, 2, 0xf26b2c, 0xf7c52e);
-addRestaurant('R2 Ramen', 16, -16, 10, 2, 0xf08aa0, 0xffffff);
-addRestaurant('R3 Slow-Roast', 0, 16, 14, 1, 0x6c4fd1, 0xf7c52e);
-addCustomer('C1', -32, 0, 0xffffff, 0x3b8fe8);
-addCustomer('C2', -16, 16, 0xfff0c2, 0xf26b6b);
-addCustomer('C3', 16, 16, 0xcdeee8, 0x35c9b0);
-addCustomer('C4', 32, 16, 0xdcd4f4, 0x8b6fe0);
-addCustomer('C5', -32, -16, 0xfbd6c8, 0xf4a261);
-addCustomer('C6', 32, -16, 0xffffff, 0xf08aa0);
+addRestaurant('R1 Burger', -16, -16, 6, 2, CLR.coral, CLR.salmon);
+addRestaurant('R2 Ramen', 16, -16, 10, 2, CLR.orange, CLR.cream);
+addRestaurant('R3 Slow-Roast', 0, 16, 14, 1, CLR.salmon, CLR.coral);
+addCustomer('C1', -32, 0, CLR.wood, CLR.denim);
+addCustomer('C2', -16, 16, CLR.cream, CLR.forest);
+addCustomer('C3', 16, 16, CLR.white, CLR.teal);
+addCustomer('C4', 32, 16, CLR.wood, CLR.sage);
+addCustomer('C5', -32, -16, CLR.cream, CLR.denim);
+addCustomer('C6', 32, -16, CLR.white, CLR.forest);
 for (const [x, z] of parcels) if (!takenAt.has(key(x, z))) buildFiller(x, z);
 
 // ---- couriers (little cars) ----------------------------------------
-const CAR_COLORS = [0xf7c52e, 0xf08aa0, 0x8b6fe0, 0x35c9b0, 0xf26b2c];
+const CAR_COLORS = [CLR.mustard, CLR.amber, 0xf6cf5a];
 function addCourier() {
   if (S.couriers.length >= MAX_COURIERS) return null;
   const idx = S.nextCourier++;
   const c = { type: 'courier', name: 'K' + idx, pos: new THREE.Vector3(-8 + idx * 4.5, 0, 8), orders: [], carry: [], task: null, heading: Math.PI / 2, rot: Math.PI / 2 };
   const g = new THREE.Group();
   const inner = new THREE.Group(); g.add(inner);
-  box(inner, 1.3, 0.6, 2.6, CAR_COLORS[(idx - 1) % 5], 0, 0.25, 0, 0.22);
-  box(inner, 1.1, 0.55, 1.3, 0xdff1fa, 0, 0.85, -0.15, 0.22);
+  box(inner, 1.3, 0.6, 2.6, CAR_COLORS[(idx - 1) % 3], 0, 0.25, 0, 0.22);
+  box(inner, 1.1, 0.55, 1.3, CLR.navy, 0, 0.85, -0.15, 0.22);
   for (const [wx, wz] of [[-0.62, -0.8], [0.62, -0.8], [-0.62, 0.8], [0.62, 0.8]]) {
     const w = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.2, 12), mat(0x4a4540)));
     w.rotation.z = Math.PI / 2; w.position.set(wx, 0.28, wz); inner.add(w);
@@ -736,7 +743,7 @@ function syncVisuals(dt) {
   }
   for (const c of S.customers) {
     const n = S.orders.filter((o) => o.customer === c && o.status !== 'delivered').length;
-    setLabel(c.label, [{ t: c.name, c: '#8a6d12', s: 40 }, { t: n ? `waiting: ${n}` : 'idle', c: '#7a736b', s: 28 }]);
+    setLabel(c.label, [{ t: c.name, c: '#2f5f45', s: 40 }, { t: n ? `waiting: ${n}` : 'idle', c: '#7a736b', s: 28 }]);
   }
   for (const c of S.couriers) {
     c.mesh.position.set(c.pos.x, 0.06, c.pos.z);
@@ -746,12 +753,12 @@ function syncVisuals(dt) {
     const lc = l >= COURIER_CAPACITY ? 0xf26b6b : l > 0 ? 0x3b8fe8 : 0x5fd38d;
     c.lamp.material.color.setHex(lc); c.lamp.material.emissive.setHex(lc);
     c.label.position.set(c.pos.x, 3.6, c.pos.z);
-    setLabel(c.label, [{ t: c.name, c: '#2c5f9e', s: 38 },
+    setLabel(c.label, [{ t: c.name, c: '#8a6a0a', s: 38 },
       { t: `${l}/${COURIER_CAPACITY} orders · ${c.task ? 'driving' : l ? 'stopped' : 'available'}`, c: l >= COURIER_CAPACITY ? '#c0392b' : '#7a736b', s: 26 }]);
   }
   platform.ring.rotation.z += dt * 1.1;
   const q = unassigned().length;
-  setLabel(platform.label, [{ t: 'PLATFORM', c: '#3b3631', s: 46 },
+  setLabel(platform.label, [{ t: 'PLATFORM', c: '#2c4a8c', s: 46 },
     { t: `pending ${q} · free couriers ${S.couriers.filter((c) => load(c) < COURIER_CAPACITY).length}/${S.couriers.length}`, c: '#7a736b', s: 28 },
     { t: S.policy === 'fifo' ? 'allocation: FIFO' : 'allocation: revenue-weighted', c: S.policy === 'fifo' ? '#7a736b' : '#a2740a', s: 28 }]);
   const s = S.selected;
@@ -868,6 +875,9 @@ $('legend').innerHTML = '<b>Order status</b>' + STATUS.map((s) => `<div><i style
   + '<hr><b>Relationships</b>'
   + [['creates', 'customer → order'], ['prepares', 'restaurant → order'], ['evaluates', 'platform → order'], ['assigns', 'platform → courier → order'], ['carries', 'courier picks up / delivers']]
     .map(([k, t]) => `<div><i style="background:${hex(REL_COLOR[k])}"></i>${t}</div>`).join('')
+  + '<hr><b>Roles</b>'
+  + [['customer', 'customer'], ['restaurant', 'restaurant'], ['platform', 'platform'], ['courier', 'courier']]
+    .map(([k, t]) => `<div><i style="background:${hex(ROLE[k])}"></i>${t}</div>`).join('')
   + '<hr><div class="dim">Box size = revenue</div>';
 
 // ---------- panel wiring ---------------------------------------------
