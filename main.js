@@ -40,8 +40,15 @@ const CLR = {
   white: 0xf3f1ed, ledge: 0xe2dfda, coral: 0xe8472f, orange: 0xee7a3c, salmon: 0xf0a08e, mustard: 0xf1b82d, amber: 0xe3a21c,
   navy: 0x2c4a8c, denim: 0x4f7fb5, forest: 0x2f5f45, teal: 0x4a9a8a, sage: 0x6f9f6f, cream: 0xf2e6cf, wood: 0xe8d4b4, water: 0x62b6d9,
 };
-const TINT = [0xe3ebf2, 0xf3e6d8, 0xe2ede0, 0xeae4f1, 0xefe8d6];   // pale tints for background buildings
-const TINT_ROOF = [0xc9d6e3, 0xe3c8b0, 0xc4d9bf, 0xd3c9e2, 0xdccdad];
+// Background buildings are near-colourless: faint grey tints per typology, each just off the lot colour.
+const TYPO = {
+  tower: { body: 0xe9ecef, ledge: 0xdadee2 },                      // cool grey
+  block: { body: 0xe8e6e2, ledge: 0xd9d6d1 },                      // warm grey
+  house: { body: 0xebe9e5, roof: 0xdad8d4 },                       // soft stone
+  stack: { body: [0xe6e8ea, 0xebe9e6, 0xf0eeeb], ledge: 0xd8dbde },// stepped greys
+  tank: { body: 0xe4e6e8, cap: 0xd4d7da },                         // blue-ish grey
+  dome: { body: 0xe8e6e2, cap: 0xdde0e3 },                         // pale
+};
 const ROLE = { customer: CLR.forest, restaurant: CLR.coral, platform: CLR.navy, courier: CLR.mustard };
 const TREE = [0x8fbf6a, 0x6aa35a, 0x4f8a4f, 0x9ccb7a];
 
@@ -298,37 +305,35 @@ function addCustomer(name, x, z, bodyC, roofC) {
 }
 
 // filler parcels (white massing, parks and water — decor, not part of the model)
-function ledged(g, w, h, d, x, z, tint, step = 1.5) {
-  box(g, w, h, d, tint, x, 0, z, 0.22);
-  for (let k = 1; k * step < h - 0.4; k++) box(g, w + 0.12, 0.1, d + 0.12, TINT_ROOF[TINT.indexOf(tint)] ?? CLR.ledge, x, k * step, z, 0.04);
+function ledged(g, w, h, d, x, z, typo, step = 1.5) {
+  box(g, w, h, d, typo.body, x, 0, z, 0.22);
+  for (let k = 1; k * step < h - 0.4; k++) box(g, w + 0.12, 0.1, d + 0.12, typo.ledge, x, k * step, z, 0.04);
 }
 function buildFiller(x, z) {
   const g = new THREE.Group(); g.position.set(x, SLAB, z);
-  const ti = Math.floor(srand() * TINT.length), tint = TINT[ti], roof = TINT_ROOF[ti];
   const t = srand();
   if (t < 0.22) { // tower
-    const w = 4 + srand() * 2.4, d = 4 + srand() * 2.4, h = 6 + srand() * 10;
-    ledged(g, w, h, d, 0, 0, tint);
+    ledged(g, 4 + srand() * 2.4, 6 + srand() * 10, 4 + srand() * 2.4, 0, 0, TYPO.tower);
     tree(g, -4.6, 4.6, 0, 0.8);
   } else if (t < 0.34) { // one long low block
-    ledged(g, 8.6, 4.4, 4.6, 0, -0.6, tint, 1.4);
+    ledged(g, 8.6, 4.4, 4.6, 0, -0.6, TYPO.block, 1.4);
     tree(g, 4.4, 4.4, 0, 0.8);
   } else if (t < 0.52) { // one house, or two side by side — never more
     const two = srand() < 0.5;
     const houses = two ? [[-3.1, 0], [3.1, 0]] : [[0, 0]];
-    houses.forEach(([hx, hz], n) => {
-      const sc = two ? 0.62 : 1, tn = TINT[(ti + n * 2) % TINT.length], rn = TINT_ROOF[(ti + n * 2) % TINT.length];
-      const h = new THREE.Group(); h.position.set(hx, 0, hz); h.scale.setScalar(sc); g.add(h);
-      box(h, 4.8, 2.8, 4.2, tn, 0, 0, -0.4, 0.2);
-      prism(h, 5.8, 2.6, 5.2, rn, 0, 2.8, -0.4, Math.PI / 2);
-      box(h, 1.0, 1.7, 0.12, rn, 0.9, 0, 1.72, 0.05);
+    houses.forEach(([hx, hz]) => {
+      const h = new THREE.Group(); h.position.set(hx, 0, hz); h.scale.setScalar(two ? 0.62 : 1); g.add(h);
+      box(h, 4.8, 2.8, 4.2, TYPO.house.body, 0, 0, -0.4, 0.2);
+      prism(h, 5.8, 2.6, 5.2, TYPO.house.roof, 0, 2.8, -0.4, Math.PI / 2);
+      box(h, 1.0, 1.7, 0.12, TYPO.house.roof, 0.9, 0, 1.72, 0.05);
     });
     tree(g, two ? 0 : -4.2, 4.4, 0, 0.8); if (!two) tree(g, 4.4, -3.6, 0, 0.8);
   } else if (t < 0.64) { // stacked rounded boxes
-    box(g, 6.4, 2.6, 4.6, tint, 0, 0, 0.3, 0.32);
-    box(g, 4.6, 2.4, 3.8, TINT[(ti + 2) % TINT.length], -0.7, 2.6, -0.2, 0.32);
-    box(g, 3, 1.8, 2.8, TINT[(ti + 4) % TINT.length], 1.1, 5, -0.1, 0.32);
-    box(g, 1.8, 1.0, 0.1, 0xffffff, 0.8, 0.8, 2.62, 0.04);
+    const [c0, c1, c2] = TYPO.stack.body;
+    box(g, 6.4, 2.6, 4.6, c0, 0, 0, 0.3, 0.32);
+    box(g, 4.6, 2.4, 3.8, c1, -0.7, 2.6, -0.2, 0.32);
+    box(g, 3, 1.8, 2.8, c2, 1.1, 5, -0.1, 0.32);
+    box(g, 1.8, 1.0, 0.1, TYPO.stack.ledge, 0.8, 0.8, 2.62, 0.04);
     tree(g, -4.4, 4.4); tree(g, 4.6, 4.8, 0, 0.8);
   } else if (t < 0.8) { // park: lawn disc, a few trees
     const lawn = shade(new THREE.Mesh(new THREE.CylinderGeometry(5.3, 5.3, 0.14, 48), mat(0xa9d6b3)));
@@ -340,16 +345,16 @@ function buildFiller(x, z) {
     box(g, 3.4, 0.2, 1.1, CLR.white, 0, 0, 0, 0.1);
     tree(g, -4.6, 4.6); tree(g, 4.6, -4.6);
   } else if (t < 0.95) { // water tank on legs
-    const tank = shade(new THREE.Mesh(new THREE.CylinderGeometry(1.9, 1.9, 2.4, 28), mat(tint)));
+    const tank = shade(new THREE.Mesh(new THREE.CylinderGeometry(1.9, 1.9, 2.4, 28), mat(TYPO.tank.body)));
     tank.position.y = 6; g.add(tank);
-    const cap = shade(new THREE.Mesh(new THREE.ConeGeometry(2, 0.9, 28), mat(roof))); cap.position.y = 7.65; g.add(cap);
+    const cap = shade(new THREE.Mesh(new THREE.ConeGeometry(2, 0.9, 28), mat(TYPO.tank.cap))); cap.position.y = 7.65; g.add(cap);
     for (const [lx, lz] of [[-1.1, -1.1], [1.1, -1.1], [-1.1, 1.1], [1.1, 1.1]]) {
-      const l = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 4.8, 6), mat(0xb9b0a6))); l.position.set(lx, 2.4, lz); g.add(l);
+      const l = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 4.8, 6), mat(0xc9c6c2))); l.position.set(lx, 2.4, lz); g.add(l);
     }
     tree(g, 3.6, 3.8);
   } else { // dome
-    box(g, 5.4, 1.4, 5.4, tint, 0, 0, 0, 0.3);
-    const dome = shade(new THREE.Mesh(new THREE.SphereGeometry(2.2, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), mat(roof)));
+    box(g, 5.4, 1.4, 5.4, TYPO.dome.body, 0, 0, 0, 0.3);
+    const dome = shade(new THREE.Mesh(new THREE.SphereGeometry(2.2, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), mat(TYPO.dome.cap)));
     dome.position.set(0, 1.4, 0); g.add(dome);
     tree(g, 4.4, 4.4, 0, 0.8);
   }
