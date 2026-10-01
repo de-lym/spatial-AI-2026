@@ -80,7 +80,7 @@ function pathLen(a, b) {
 }
 
 // ---------- three.js scene -------------------------------------------
-const BG = 0xe3e5e8;
+const BG = 0xe6e4e1;
 const canvas = $('view');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -209,7 +209,7 @@ const S = {
 };
 
 // ---- terrain: roads, lane marks, parcels -------------------------------
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshStandardMaterial({ color: 0xc6c8cc, roughness: 1 }));
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshStandardMaterial({ color: 0xd5d1cd, roughness: 1 }));
 ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
 scene.add(ground);
 {
@@ -313,11 +313,17 @@ function buildFiller(x, z) {
   } else if (t < 0.34) { // one long low block
     ledged(g, 8.6, 4.4, 4.6, 0, -0.6, tint, 1.4);
     tree(g, 4.4, 4.4, 0, 0.8);
-  } else if (t < 0.52) { // single house with a big pitched roof
-    box(g, 4.8, 2.8, 4.2, tint, 0, 0, -0.4, 0.2);
-    prism(g, 5.8, 2.6, 5.2, roof, 0, 2.8, -0.4, Math.PI / 2);
-    box(g, 1.0, 1.7, 0.12, roof, 0.9, 0, 1.72, 0.05);
-    tree(g, -4.2, 3.2); tree(g, 4.4, -3.6, 0, 0.8);
+  } else if (t < 0.52) { // one house, or two side by side — never more
+    const two = srand() < 0.5;
+    const houses = two ? [[-3.1, 0], [3.1, 0]] : [[0, 0]];
+    houses.forEach(([hx, hz], n) => {
+      const sc = two ? 0.62 : 1, tn = TINT[(ti + n * 2) % TINT.length], rn = TINT_ROOF[(ti + n * 2) % TINT.length];
+      const h = new THREE.Group(); h.position.set(hx, 0, hz); h.scale.setScalar(sc); g.add(h);
+      box(h, 4.8, 2.8, 4.2, tn, 0, 0, -0.4, 0.2);
+      prism(h, 5.8, 2.6, 5.2, rn, 0, 2.8, -0.4, Math.PI / 2);
+      box(h, 1.0, 1.7, 0.12, rn, 0.9, 0, 1.72, 0.05);
+    });
+    tree(g, two ? 0 : -4.2, 4.4, 0, 0.8); if (!two) tree(g, 4.4, -3.6, 0, 0.8);
   } else if (t < 0.64) { // stacked rounded boxes
     box(g, 6.4, 2.6, 4.6, tint, 0, 0, 0.3, 0.32);
     box(g, 4.6, 2.4, 3.8, TINT[(ti + 2) % TINT.length], -0.7, 2.6, -0.2, 0.32);
