@@ -40,6 +40,8 @@ const CLR = {
   white: 0xf3f1ed, ledge: 0xe2dfda, coral: 0xe8472f, orange: 0xee7a3c, salmon: 0xf0a08e, mustard: 0xf1b82d, amber: 0xe3a21c,
   navy: 0x2c4a8c, denim: 0x4f7fb5, forest: 0x2f5f45, teal: 0x4a9a8a, sage: 0x6f9f6f, cream: 0xf2e6cf, wood: 0xe8d4b4, water: 0x62b6d9,
 };
+const TINT = [0xe3ebf2, 0xf3e6d8, 0xe2ede0, 0xeae4f1, 0xefe8d6];   // pale tints for background buildings
+const TINT_ROOF = [0xc9d6e3, 0xe3c8b0, 0xc4d9bf, 0xd3c9e2, 0xdccdad];
 const ROLE = { customer: CLR.forest, restaurant: CLR.coral, platform: CLR.navy, courier: CLR.mustard };
 const TREE = [0x8fbf6a, 0x6aa35a, 0x4f8a4f, 0x9ccb7a];
 
@@ -78,7 +80,7 @@ function pathLen(a, b) {
 }
 
 // ---------- three.js scene -------------------------------------------
-const BG = 0xdfe4ea;
+const BG = 0xe3e5e8;
 const canvas = $('view');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -119,21 +121,24 @@ function box(parent, w, h, d, color, x = 0, y = 0, z = 0, r) {
   parent.add(m);
   return m;
 }
-const coneGeo = new THREE.ConeGeometry(0.8, 1.6, 12), ballGeo = new THREE.SphereGeometry(0.7, 16, 12);
+const coneGeo = new THREE.ConeGeometry(0.85, 2.0, 24), ballGeo = new THREE.SphereGeometry(0.7, 20, 14);
 function tree(parent, x, z, y = SLAB, s = 1) {
   const g = new THREE.Group();
-  const c = pick(TREE), kind = srand();
-  const trunk = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.6, 6), mat(0xc2b393)));
-  trunk.position.y = 0.3; g.add(trunk);
-  if (kind < 0.4) { // cypress
-    const b = shade(new THREE.Mesh(ballGeo, mat(c))); b.scale.set(0.7, 1.9, 0.7); b.position.y = 1.6; g.add(b);
-  } else if (kind < 0.75) { // lollipop
-    const b = shade(new THREE.Mesh(ballGeo, mat(c))); b.position.y = 1.35; g.add(b);
-  } else { // cone
-    for (let i = 0; i < 2; i++) {
-      const cone = shade(new THREE.Mesh(coneGeo, mat(c)));
-      cone.scale.setScalar(1 - i * 0.35); cone.position.y = 1.0 + i * 0.8; g.add(cone);
-    }
+  const c = pick(TREE), c2 = pick(TREE), kind = srand();
+  const stem = (h) => {
+    const t = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, h, 6), mat(0xc2863f)));
+    t.position.y = h / 2; g.add(t);
+  };
+  const ball = (r, yy, col) => { const b = shade(new THREE.Mesh(ballGeo, mat(col))); b.scale.setScalar(r / 0.7); b.position.y = yy; g.add(b); };
+  if (kind < 0.35) { // smooth cone
+    const cone = shade(new THREE.Mesh(coneGeo, mat(c))); cone.position.y = 1.0; g.add(cone);
+  } else if (kind < 0.65) { // two stacked balls (big below, small above)
+    stem(0.7); ball(0.8, 1.5, c); ball(0.5, 2.35, c2);
+  } else if (kind < 0.85) { // small lollipop
+    stem(0.8); ball(0.62, 1.4, c);
+  } else { // cypress
+    stem(0.4);
+    const b = shade(new THREE.Mesh(ballGeo, mat(c))); b.scale.set(0.7, 1.9, 0.7); b.position.y = 1.5; g.add(b);
   }
   g.position.set(x, y, z); g.scale.setScalar(s); parent.add(g);
 }
@@ -204,7 +209,7 @@ const S = {
 };
 
 // ---- terrain: roads, lane marks, parcels -------------------------------
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshStandardMaterial({ color: 0xa9b6c6, roughness: 1 }));
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshStandardMaterial({ color: 0xc6c8cc, roughness: 1 }));
 ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
 scene.add(ground);
 {
@@ -293,45 +298,54 @@ function addCustomer(name, x, z, bodyC, roofC) {
 }
 
 // filler parcels (white massing, parks and water — decor, not part of the model)
-function ledged(g, w, h, d, x, z, step = 1.5) {
-  box(g, w, h, d, CLR.white, x, 0, z, 0.22);
-  for (let k = 1; k * step < h - 0.4; k++) box(g, w + 0.12, 0.1, d + 0.12, CLR.ledge, x, k * step, z, 0.04);
+function ledged(g, w, h, d, x, z, tint, step = 1.5) {
+  box(g, w, h, d, tint, x, 0, z, 0.22);
+  for (let k = 1; k * step < h - 0.4; k++) box(g, w + 0.12, 0.1, d + 0.12, TINT_ROOF[TINT.indexOf(tint)] ?? CLR.ledge, x, k * step, z, 0.04);
 }
 function buildFiller(x, z) {
   const g = new THREE.Group(); g.position.set(x, SLAB, z);
+  const ti = Math.floor(srand() * TINT.length), tint = TINT[ti], roof = TINT_ROOF[ti];
   const t = srand();
-  if (t < 0.38) { // white tower, sometimes with a stepped neighbour
-    const w = 3.6 + srand() * 2.4, d = 3.6 + srand() * 2.4, h = 5 + srand() * 11;
-    ledged(g, w, h, d, -1 + srand(), -1 + srand());
-    if (srand() < 0.6) ledged(g, 3, 3 + srand() * 3, 3, 3.2, 3.2);
-    tree(g, -4.4, 4.4); tree(g, 4.6, -4.2, 0, 0.8);
-  } else if (t < 0.52) { // long low white blocks
-    ledged(g, 9, 3.6, 3.6, 0, -2.4); ledged(g, 5.4, 5.4, 3.4, -1, 2.6);
-    tree(g, 4.6, 3.6, 0, 0.8);
-  } else if (t < 0.64) { // cluster of small white gable houses
-    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
-      const hx = i * 3.4, hz = j * 3.4;
-      box(g, 2.2, 1.3, 2.2, CLR.white, hx, 0, hz, 0.1);
-      prism(g, 2.5, 1.2, 2.4, CLR.white, hx, 1.3, hz, Math.PI / 2);
-    }
-  } else if (t < 0.8) { // park: lawn, mound, trees, bench
-    const lawn = shade(new THREE.Mesh(new THREE.CylinderGeometry(5.3, 5.3, 0.14, 40), mat(0xa9d089)));
+  if (t < 0.22) { // tower
+    const w = 4 + srand() * 2.4, d = 4 + srand() * 2.4, h = 6 + srand() * 10;
+    ledged(g, w, h, d, 0, 0, tint);
+    tree(g, -4.6, 4.6, 0, 0.8);
+  } else if (t < 0.34) { // one long low block
+    ledged(g, 8.6, 4.4, 4.6, 0, -0.6, tint, 1.4);
+    tree(g, 4.4, 4.4, 0, 0.8);
+  } else if (t < 0.52) { // single house with a big pitched roof
+    box(g, 4.8, 2.8, 4.2, tint, 0, 0, -0.4, 0.2);
+    prism(g, 5.8, 2.6, 5.2, roof, 0, 2.8, -0.4, Math.PI / 2);
+    box(g, 1.0, 1.7, 0.12, roof, 0.9, 0, 1.72, 0.05);
+    tree(g, -4.2, 3.2); tree(g, 4.4, -3.6, 0, 0.8);
+  } else if (t < 0.64) { // stacked rounded boxes
+    box(g, 6.4, 2.6, 4.6, tint, 0, 0, 0.3, 0.32);
+    box(g, 4.6, 2.4, 3.8, TINT[(ti + 2) % TINT.length], -0.7, 2.6, -0.2, 0.32);
+    box(g, 3, 1.8, 2.8, TINT[(ti + 4) % TINT.length], 1.1, 5, -0.1, 0.32);
+    box(g, 1.8, 1.0, 0.1, 0xffffff, 0.8, 0.8, 2.62, 0.04);
+    tree(g, -4.4, 4.4); tree(g, 4.6, 4.8, 0, 0.8);
+  } else if (t < 0.8) { // park: lawn disc, a few trees
+    const lawn = shade(new THREE.Mesh(new THREE.CylinderGeometry(5.3, 5.3, 0.14, 48), mat(0xa9d6b3)));
     lawn.position.y = 0.07; g.add(lawn);
-    const mound = shade(new THREE.Mesh(new THREE.SphereGeometry(3, 28, 14, 0, Math.PI * 2, 0, Math.PI / 2), mat(0x9ccb7a)));
-    mound.scale.set(1, 0.75, 1); mound.position.set(-1.2, 0.14, -1.2); g.add(mound);
-    box(g, 2.2, 0.35, 0.7, CLR.wood, 2.4, 0.14, 2.4, 0.1);
-    for (let i = 0; i < 7; i++) { const a = i * 0.9 + srand(); tree(g, Math.cos(a) * 3.9, Math.sin(a) * 3.9, 0.14, 0.8 + srand() * 0.5); }
-  } else if (t < 0.9) { // pond
+    const n = 5 + Math.floor(srand() * 3);
+    for (let i = 0; i < n; i++) { const a = i * 2.4 + srand(), r = 1 + srand() * 3.2; tree(g, Math.cos(a) * r, Math.sin(a) * r, 0.14, 0.8 + srand() * 0.5); }
+  } else if (t < 0.88) { // pond
     box(g, 10, 0.18, 9, CLR.water, 0, 0, 0, 0.8);
     box(g, 3.4, 0.2, 1.1, CLR.white, 0, 0, 0, 0.1);
-    tree(g, -4.6, 4.6); tree(g, 4.6, -4.6); tree(g, 4.8, 4.6, 0, 0.8);
-  } else { // white dome + obelisk
-    box(g, 5, 1.4, 5, CLR.white, -1, 0, 0, 0.3);
-    const dome = shade(new THREE.Mesh(new THREE.SphereGeometry(2, 28, 14, 0, Math.PI * 2, 0, Math.PI / 2), mat(CLR.white)));
-    dome.position.set(-1, 1.4, 0); g.add(dome);
-    const ob = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.5, 9, 4), mat(CLR.white)));
-    ob.position.set(3.8, 4.5, -3); ob.rotation.y = Math.PI / 4; g.add(ob);
-    tree(g, 4, 4);
+    tree(g, -4.6, 4.6); tree(g, 4.6, -4.6);
+  } else if (t < 0.95) { // water tank on legs
+    const tank = shade(new THREE.Mesh(new THREE.CylinderGeometry(1.9, 1.9, 2.4, 28), mat(tint)));
+    tank.position.y = 6; g.add(tank);
+    const cap = shade(new THREE.Mesh(new THREE.ConeGeometry(2, 0.9, 28), mat(roof))); cap.position.y = 7.65; g.add(cap);
+    for (const [lx, lz] of [[-1.1, -1.1], [1.1, -1.1], [-1.1, 1.1], [1.1, 1.1]]) {
+      const l = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 4.8, 6), mat(0xb9b0a6))); l.position.set(lx, 2.4, lz); g.add(l);
+    }
+    tree(g, 3.6, 3.8);
+  } else { // dome
+    box(g, 5.4, 1.4, 5.4, tint, 0, 0, 0, 0.3);
+    const dome = shade(new THREE.Mesh(new THREE.SphereGeometry(2.2, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), mat(roof)));
+    dome.position.set(0, 1.4, 0); g.add(dome);
+    tree(g, 4.4, 4.4, 0, 0.8);
   }
   scene.add(g);
 }
