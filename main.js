@@ -14,11 +14,11 @@ const MAX_COURIERS = 5;           // Rule 1: courier capacity is limited
 const HIGH_REVENUE = 35;          // threshold used only for the revenue statistics
 const STATUS = ['pending', 'preparing', 'ready', 'assigned', 'picked_up', 'delivered'];
 const STATUS_COLOR = {
-  pending: 0x9aa0a6, preparing: 0xf6a01a, ready: 0x4cc35a,
-  assigned: 0x3d8bfd, picked_up: 0xa855f7, delivered: 0x14d4c4,
+  pending: 0xb3bab5, preparing: 0xf0b25c, ready: 0x7cc48a,
+  assigned: 0x6fa8dc, picked_up: 0xb597d9, delivered: 0x57c4b6,
 };
 const REL_COLOR = {
-  creates: 0xf2c94c, prepares: 0xf2994a, evaluates: 0x5b6b80, assigns: 0x56a0ff, carries: 0xc084fc,
+  creates: 0xd9a21b, prepares: 0xe07b39, evaluates: 0x9aa5a0, assigns: 0x3d7fd1, carries: 0x8b5cc6,
 };
 const RULES = [
   'Courier capacity is limited.',
@@ -35,40 +35,35 @@ const $ = (id) => document.getElementById(id);
 const rand = (a, b) => a + Math.random() * (b - a);
 const fmt = (n, d = 1) => (Number.isFinite(n) ? n.toFixed(d) : '–');
 const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+const INK = 0x56655b;
+const dark = (c, f = 0.55) => '#' + [16, 8, 0].map((sh) => Math.round(((c >> sh) & 255) * f).toString(16).padStart(2, '0')).join('');
 const hex = (c) => '#' + c.toString(16).padStart(6, '0');
 
 // ---------- three.js scene -------------------------------------------
 const canvas = $('view');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.shadowMap.enabled = true;
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0e1621);
-scene.fog = new THREE.Fog(0x0e1621, 70, 140);
-const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 400);
-camera.position.set(0, 58, 52);
+scene.background = new THREE.Color(0xe8efe4);
+const VIEW = 30; // half-height of the isometric view, in world units
+const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -300, 400);
+camera.position.set(55, 46, 45);
 const controls = new OrbitControls(camera, canvas);
-controls.target.set(0, 0, 2);
+controls.target.set(9, 0, -3);
 controls.maxPolarAngle = Math.PI * 0.48;
-controls.minDistance = 12;
-controls.maxDistance = 110;
+controls.minZoom = 0.6;
+controls.maxZoom = 3.5;
 controls.enableDamping = true;
 
-scene.add(new THREE.HemisphereLight(0xbcd4ff, 0x1a2230, 1.1));
-const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+scene.add(new THREE.HemisphereLight(0xffffff, 0xdfe9db, 2.6));
+const sun = new THREE.DirectionalLight(0xffffff, 0.8);
 sun.position.set(25, 45, 20);
-sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
-Object.assign(sun.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40, near: 1, far: 120 });
 scene.add(sun);
 
-const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(90, 90),
-  new THREE.MeshStandardMaterial({ color: 0x16212f, roughness: 1 }));
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), new THREE.MeshLambertMaterial({ color: 0xd3e0cf }));
 ground.rotation.x = -Math.PI / 2;
-ground.receiveShadow = true;
 scene.add(ground);
-const grid = new THREE.GridHelper(90, 45, 0x2a3a4f, 0x1d2a3a);
+const grid = new THREE.GridHelper(120, 60, 0xc2d3bd, 0xc9d9c4);
 grid.position.y = 0.01;
 scene.add(grid);
 
@@ -84,7 +79,7 @@ function makeLabel(w, h) {
   return sprite;
 }
 /** lines: [{t, c?, s?}] drawn centred; redraws only when content changes */
-function setLabel(sprite, lines, bg = 'rgba(10,16,26,.78)') {
+function setLabel(sprite, lines, bg = 'rgba(255,255,255,.9)') {
   const key = JSON.stringify(lines) + bg;
   if (sprite.userData.key === key) return;
   sprite.userData.key = key;
@@ -94,23 +89,29 @@ function setLabel(sprite, lines, bg = 'rgba(10,16,26,.78)') {
   const pad = 10, r = 26;
   g.fillStyle = bg;
   g.beginPath(); g.roundRect(pad, pad, cv.width - 2 * pad, cv.height - 2 * pad, r); g.fill();
+  g.lineWidth = 4; g.strokeStyle = '#8fa396'; g.stroke();
   const total = lines.reduce((a, l) => a + (l.s || 56), 0) * 1.15;
   let y = (cv.height - total) / 2;
   g.textAlign = 'center'; g.textBaseline = 'top';
   for (const l of lines) {
     const s = l.s || 56;
-    g.font = `600 ${s}px system-ui, sans-serif`;
-    g.fillStyle = l.c || '#e6eef8';
+    g.font = `500 ${s}px system-ui, sans-serif`;
+    g.fillStyle = l.c || '#2c3a31';
     g.fillText(l.t, cv.width / 2, y);
     y += s * 1.15;
   }
   tex.needsUpdate = true;
 }
 
-const mat = (c, extra = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.7, metalness: 0.05, ...extra });
-function shadowed(m) { m.castShadow = true; m.receiveShadow = true; return m; }
+const mat = (c, extra = {}) => new THREE.MeshLambertMaterial({ color: c, ...extra });
+const edgeMat = new THREE.LineBasicMaterial({ color: INK });
+/** thin ink outline, like the line-drawn buildings of the reference style */
+function shadowed(m) {
+  if (m.geometry.type !== 'SphereGeometry') m.add(new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry, 20), edgeMat));
+  return m;
+}
 function register(mesh, ref) {
-  mesh.traverse((o) => { if (o.isMesh) o.userData.ref = ref; });
+  mesh.traverse((o) => { if (o.isMesh || o.isLineSegments) o.userData.ref = ref; });
   pickables.push(mesh);
 }
 const pickables = [];
@@ -131,19 +132,19 @@ const S = {
 const platform = { type: 'platform', name: 'PLATFORM', pos: new THREE.Vector3(0, 0, 0) };
 {
   const g = new THREE.Group();
-  const base = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.8, 1.2, 24), mat(0x3a4a60)));
+  const base = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.8, 1.2, 24), mat(0xf4f6f2)));
   base.position.y = 0.6;
-  const tower = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.4, 5, 24), mat(0x6b7d95)));
+  const tower = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.4, 5, 24), mat(0xffffff)));
   tower.position.y = 3.6;
-  const core = new THREE.Mesh(new THREE.SphereGeometry(1.1, 24, 16), new THREE.MeshStandardMaterial({ color: 0xbfd0e6, emissive: 0x4f6f9a, emissiveIntensity: .9 }));
+  const core = new THREE.Mesh(new THREE.SphereGeometry(1.1, 24, 16), new THREE.MeshLambertMaterial({ color: 0xa9c7a5, emissive: 0x4d7a52, emissiveIntensity: .35 }));
   core.position.y = 7;
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(2.2, .12, 8, 48), new THREE.MeshBasicMaterial({ color: 0x8fb4e8 }));
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(2.2, .12, 8, 48), new THREE.MeshBasicMaterial({ color: 0xf0b9a0 }));
   ring.position.y = 7; ring.rotation.x = Math.PI / 2.4;
   g.add(base, tower, core, ring);
   g.userData.ring = ring;
   scene.add(g);
   platform.mesh = g; platform.ring = ring;
-  platform.label = makeLabel(8, 4); platform.label.position.set(0, 11, 0);
+  platform.label = makeLabel(11, 5.5); platform.label.position.set(0, 12, 0);
   scene.add(platform.label);
   register(g, platform);
 }
@@ -152,42 +153,79 @@ const platformTop = new THREE.Vector3(0, 7, 0);
 function addRestaurant(name, x, z, prep, cap, color) {
   const r = { type: 'restaurant', name, pos: new THREE.Vector3(x, 0, z), prepTime: prep, capacity: cap, color };
   const g = new THREE.Group();
-  const body = shadowed(new THREE.Mesh(new THREE.BoxGeometry(5, 2.6, 3.6), mat(color)));
+  const body = shadowed(new THREE.Mesh(new THREE.BoxGeometry(5, 2.6, 3.6), mat(0xfbfbf8)));
   body.position.y = 1.3;
-  const roof = shadowed(new THREE.Mesh(new THREE.BoxGeometry(5.4, .35, 4), mat(0x2b2f38)));
+  const roof = shadowed(new THREE.Mesh(new THREE.BoxGeometry(5.4, .35, 4), mat(color)));
   roof.position.y = 2.8;
-  const chim = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(.35, .35, 1.2, 12), mat(0x555b66)));
+  const chim = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(.35, .35, 1.2, 12), mat(0xe8ebe6)));
   chim.position.set(1.5, 3.5, -.8);
-  const door = new THREE.Mesh(new THREE.BoxGeometry(1, 1.6, .1), mat(0x1d2430));
+  const door = new THREE.Mesh(new THREE.BoxGeometry(1, 1.6, .1), mat(0xaab9ae));
   door.position.set(-1, .8, 1.82);
   g.add(body, roof, chim, door);
   g.position.copy(r.pos);
   scene.add(g);
   r.mesh = g;
-  r.label = makeLabel(7, 3.5); r.label.position.set(x, 6, z); scene.add(r.label);
+  r.label = makeLabel(10, 5); r.label.position.set(x, 7, z); scene.add(r.label);
   register(g, r);
   S.restaurants.push(r);
 }
 function addCustomer(name, x, z) {
   const c = { type: 'customer', name, pos: new THREE.Vector3(x, 0, z), orderTime: null, selectedRestaurant: null };
   const g = new THREE.Group();
-  const body = shadowed(new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.8, 2.4), mat(0x2f9e9a)));
+  const body = shadowed(new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.8, 2.4), mat(0xfbfbf8)));
   body.position.y = .9;
-  const roof = shadowed(new THREE.Mesh(new THREE.ConeGeometry(2.1, 1.3, 4), mat(0xc9d6e4)));
+  const roof = shadowed(new THREE.Mesh(new THREE.ConeGeometry(2.1, 1.3, 4), mat(0xa9c7a5)));
   roof.position.y = 2.45; roof.rotation.y = Math.PI / 4;
   g.add(body, roof);
   g.position.copy(c.pos);
   scene.add(g);
   c.mesh = g;
-  c.label = makeLabel(4.2, 2.1); c.label.position.set(x, 5, z); scene.add(c.label);
+  c.label = makeLabel(5.6, 2.8); c.label.position.set(x, 5.6, z); scene.add(c.label);
   register(g, c);
   S.customers.push(c);
 }
-addRestaurant('R1 Burger', -16, -10, 6, 2, 0xd9772b);
-addRestaurant('R2 Ramen', 16, -12, 10, 2, 0xc4452f);
-addRestaurant('R3 Slow-Roast', -2, 17, 14, 1, 0x9b5ac4);
+addRestaurant('R1 Burger', -16, -10, 6, 2, 0xf1c3a3);
+addRestaurant('R2 Ramen', 16, -12, 10, 2, 0xeba79a);
+addRestaurant('R3 Slow-Roast', -2, 17, 14, 1, 0xc9b8dd);
 [['C1', -21, 6], ['C2', -6, -19], ['C3', 9, -3], ['C4', 21, 8], ['C5', 12, 19], ['C6', -9, 5]]
   .forEach(([n, x, z]) => addCustomer(n, x, z));
+
+// ---- scenery in the line-drawn isometric style: roads, trees, quiet white blocks ----
+{
+  const roadM = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  const road = (x1, z1, x2, z2, w = 2.4) => {
+    const len = Math.hypot(x2 - x1, z2 - z1);
+    const m = new THREE.Mesh(new THREE.BoxGeometry(len, 0.06, w), roadM);
+    m.position.set((x1 + x2) / 2, 0.04, (z1 + z2) / 2);
+    m.rotation.y = -Math.atan2(z2 - z1, x2 - x1);
+    scene.add(m);
+  };
+  const ring = new THREE.Mesh(new THREE.RingGeometry(5.2, 7.6, 48), roadM);
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.04; scene.add(ring);
+  for (const r of S.restaurants) road(0, 0, r.pos.x, r.pos.z + 3.4);
+  for (const c of S.customers) road(0, 0, c.pos.x, c.pos.z + 2.4, 1.6);
+  const keepOut = [platform, ...S.restaurants, ...S.customers];
+  let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const free = (x, z, r) => keepOut.every((e) => Math.hypot(e.pos.x - x, e.pos.z - z) > r) && Math.hypot(x, z) > 9;
+  const treeTrunk = mat(0xd9cdb6), treeLeaf = [mat(0x9cc49a), mat(0xb3d4ad), mat(0x86b58a)];
+  for (let n = 0, placed = 0; n < 400 && placed < 70; n++) {
+    const x = (rnd() - 0.5) * 70, z = (rnd() - 0.5) * 70;
+    if (!free(x, z, 6)) continue;
+    const t = new THREE.Group();
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(.1, .12, 1, 6), treeTrunk); trunk.position.y = .5;
+    const crown = new THREE.Mesh(new THREE.SphereGeometry(.5 + rnd() * .35, 14, 10), treeLeaf[placed % 3]); crown.position.y = 1.5;
+    t.add(trunk, crown); t.position.set(x, 0, z); scene.add(t); placed++;
+  }
+  const block = mat(0xfbfbf8);
+  for (let n = 0, placed = 0; n < 300 && placed < 16; n++) {
+    const a = rnd() * Math.PI * 2, d = 32 + rnd() * 16;
+    const x = Math.cos(a) * d, z = Math.sin(a) * d;
+    if (!free(x, z, 6)) continue;
+    const w = 2.5 + rnd() * 2, h = 3 + rnd() * 7;
+    const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, w * (.8 + rnd() * .5)), block);
+    b.position.set(x, h / 2, z); b.add(new THREE.LineSegments(new THREE.EdgesGeometry(b.geometry), edgeMat)); scene.add(b); placed++;
+  }
+}
 
 function addCourier() {
   if (S.couriers.length >= MAX_COURIERS) return null;
@@ -198,9 +236,9 @@ function addCourier() {
     orders: [], carry: [], task: null, bob: Math.random() * 6,
   };
   const g = new THREE.Group();
-  const body = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(.45, .45, 1.5, 12), mat(0x56a0ff)));
+  const body = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(.45, .45, 1.5, 12), mat(0x9fd4a8)));
   body.rotation.z = Math.PI / 2; body.position.y = .55;
-  const head = shadowed(new THREE.Mesh(new THREE.SphereGeometry(.4, 12, 10), mat(0xf1d3b0)));
+  const head = shadowed(new THREE.Mesh(new THREE.SphereGeometry(.4, 12, 10), mat(0xf2cdb5)));
   head.position.set(0, 1.3, 0);
   const wheelM = mat(0x11161d);
   for (const dx of [-.7, .7]) {
@@ -211,14 +249,14 @@ function addCourier() {
   g.position.copy(c.pos);
   scene.add(g);
   c.mesh = g; c.body = body;
-  c.label = makeLabel(3.6, 1.8); scene.add(c.label);
+  c.label = makeLabel(5.6, 2.8); scene.add(c.label);
   register(g, c);
   S.couriers.push(c);
   return c;
 }
 
 // selection ring
-const selRing = new THREE.Mesh(new THREE.RingGeometry(2.2, 2.6, 40), new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: .8 }));
+const selRing = new THREE.Mesh(new THREE.RingGeometry(2.2, 2.6, 40), new THREE.MeshBasicMaterial({ color: INK, side: THREE.DoubleSide, transparent: true, opacity: .75 }));
 selRing.rotation.x = -Math.PI / 2; selRing.position.y = .05; selRing.visible = false;
 scene.add(selRing);
 
@@ -268,13 +306,13 @@ function createOrder(customer, restaurant) {
   customer.orderTime = S.time; customer.selectedRestaurant = restaurant;
   const size = 0.7 + o.revenue / 60 * 0.9;
   const g = new THREE.Group();
-  const box = shadowed(new THREE.Mesh(new THREE.BoxGeometry(size, size, size), mat(STATUS_COLOR.pending, { emissive: 0x000000 })));
+  const box = shadowed(new THREE.Mesh(new THREE.BoxGeometry(size, size, size), mat(STATUS_COLOR.pending)));
   box.position.y = size / 2;
   g.add(box);
   g.position.copy(restaurant.pos).add(new THREE.Vector3(0, 0.3, 2.8));
   scene.add(g);
   o.mesh = g; o.box = box; o.size = size;
-  o.label = makeLabel(4.8, 2.1); scene.add(o.label);
+  o.label = makeLabel(6.4, 2.8); scene.add(o.label);
   register(g, o);
   S.orders.push(o);
   log(`${customer.name} created order #${o.id} ($${o.revenue}) at ${restaurant.name}`);
@@ -576,7 +614,7 @@ function syncVisuals(dt) {
     o.mesh.position.lerp(tg, k);
     o.box.rotation.y += dt * (o.status === 'picked_up' ? 1.5 : 0.2);
     const col = STATUS_COLOR[o.status];
-    o.box.material.emissive.setHex(o === S.selected ? 0x444444 : 0x000000);
+    o.box.material.emissive.setHex(o === S.selected ? 0x555555 : 0x000000);
     const life = o.status === 'delivered' ? Math.max(0, (o.goneAt - S.time) / 5) : 1;
     o.mesh.scale.setScalar(0.4 + 0.6 * Math.min(1, life * 2));
     o.label.position.set(o.mesh.position.x, o.mesh.position.y + o.size + 1.5, o.mesh.position.z);
@@ -584,17 +622,17 @@ function syncVisuals(dt) {
     if (o.status === 'preparing') sub = o.prepRemaining > 0 ? `cooking ${Math.ceil(o.prepRemaining)}s` : 'done — mark ready';
     else if (o.status === 'delivered') sub = `${fmt(o.deliveredAt - o.createdAt)}s total`;
     else sub = o.eta != null ? `${o.status} · ETA ${Math.ceil(o.eta)}s` : o.status;
-    setLabel(o.label, [{ t: `#${o.id}  $${o.revenue}`, c: '#ffffff', s: 70 }, { t: sub, c: hex(col), s: 46 }]);
+    setLabel(o.label, [{ t: `#${o.id}  $${o.revenue}`, c: '#26332b', s: 70 }, { t: sub, c: dark(col, .6), s: 46 }]);
   }
   // restaurants
   for (const r of S.restaurants) {
     const act_ = S.orders.filter((o) => o.restaurant === r && o.status === 'preparing').length;
-    setLabel(r.label, [{ t: r.name, c: hex(r.color === 0x9b5ac4 ? 0xd7a8f2 : 0xffc78a), s: 58 },
-      { t: `prep ${r.prepTime}s · cooking ${act_}/${r.capacity}`, c: act_ >= r.capacity ? '#ff8f8f' : '#a8b6c7', s: 40 }]);
+    setLabel(r.label, [{ t: r.name, c: dark(r.color, .5), s: 58 },
+      { t: `prep ${r.prepTime}s · cooking ${act_}/${r.capacity}`, c: act_ >= r.capacity ? '#c0392b' : '#66746b', s: 40 }]);
   }
   for (const c of S.customers) {
     const n = S.orders.filter((o) => o.customer === c && o.status !== 'delivered').length;
-    setLabel(c.label, [{ t: c.name, c: '#f2c94c', s: 64 }, { t: n ? `waiting: ${n}` : 'idle', c: '#a8b6c7', s: 42 }]);
+    setLabel(c.label, [{ t: c.name, c: '#8a6d12', s: 64 }, { t: n ? `waiting: ${n}` : 'idle', c: '#66746b', s: 42 }]);
   }
   // couriers
   for (const c of S.couriers) {
@@ -602,17 +640,17 @@ function syncVisuals(dt) {
     c.mesh.position.set(c.pos.x, Math.abs(Math.sin(c.bob)) * (c.task ? .12 : 0), c.pos.z);
     if (c.heading !== undefined) c.mesh.rotation.y = c.heading - Math.PI / 2;
     const l = load(c);
-    c.body.material.color.setHex(l >= COURIER_CAPACITY ? 0xff6b6b : l > 0 ? 0x56a0ff : 0x4cc35a);
+    c.body.material.color.setHex(l >= COURIER_CAPACITY ? 0xea9a9a : l > 0 ? 0x8dbbe8 : 0x9fd4a8);
     c.label.position.set(c.pos.x, 3.6, c.pos.z);
-    setLabel(c.label, [{ t: c.name, c: '#9cc8ff', s: 62 },
-      { t: `${l}/${COURIER_CAPACITY} orders · ${c.task ? 'moving' : l ? 'stopped' : 'available'}`, c: l >= COURIER_CAPACITY ? '#ff8f8f' : '#a8b6c7', s: 34 }]);
+    setLabel(c.label, [{ t: c.name, c: '#2c5f9e', s: 62 },
+      { t: `${l}/${COURIER_CAPACITY} orders · ${c.task ? 'moving' : l ? 'stopped' : 'available'}`, c: l >= COURIER_CAPACITY ? '#c0392b' : '#66746b', s: 34 }]);
   }
   // platform
   platform.ring.rotation.z += dt * 1.2;
   const q = unassigned().length;
-  setLabel(platform.label, [{ t: 'PLATFORM', c: '#cfe0f5', s: 64 },
-    { t: `pending ${q} · free couriers ${S.couriers.filter((c) => load(c) < COURIER_CAPACITY).length}/${S.couriers.length}`, c: '#a8b6c7', s: 36 },
-    { t: S.policy === 'fifo' ? 'allocation: FIFO' : 'allocation: revenue-weighted', c: S.policy === 'fifo' ? '#a8b6c7' : '#f2c94c', s: 36 }]);
+  setLabel(platform.label, [{ t: 'PLATFORM', c: '#26332b', s: 64 },
+    { t: `pending ${q} · free couriers ${S.couriers.filter((c) => load(c) < COURIER_CAPACITY).length}/${S.couriers.length}`, c: '#66746b', s: 36 },
+    { t: S.policy === 'fifo' ? 'allocation: FIFO' : 'allocation: revenue-weighted', c: S.policy === 'fifo' ? '#66746b' : '#a2740a', s: 36 }]);
   // selection ring
   const s = S.selected;
   selRing.visible = !!s;
@@ -781,7 +819,9 @@ canvas.addEventListener('pointerup', (e) => {
 // ---------- main loop ------------------------------------------------
 function resize() {
   renderer.setSize(innerWidth, innerHeight, false);
-  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  const a = innerWidth / innerHeight;
+  Object.assign(camera, { left: -VIEW * a, right: VIEW * a, top: VIEW, bottom: -VIEW });
+  camera.updateProjectionMatrix();
   document.documentElement.style.setProperty('--tb', $('toolbar').offsetHeight + 'px');
 }
 addEventListener('resize', resize);

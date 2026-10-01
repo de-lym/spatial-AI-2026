@@ -30,3 +30,7 @@ how often each rule bounded an outcome. Left-drag orbits, wheel zooms, right-dra
 
 Revenue-weighted priority is a **simulation hypothesis**, not a claim about any real platform. The stats panel compares
 average delivery time for high- vs low-revenue orders under each policy.
+
+### Look
+The visual style follows the line-drawn isometric aesthetic of *Urban Encounter*: orthographic isometric camera, pale sage
+ground with white roads, white buildings with thin ink outlines and pastel accents, lollipop trees, and a light UI.
