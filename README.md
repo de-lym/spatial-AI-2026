@@ -1,43 +1,41 @@
 # spatial-AI-2026
 
-## Delivery-Platform Semantic Model — "Neighborhood"
+## AIRSPACE — a location-aware drone delivery sandbox
 
-A single-page vanilla-JavaScript web app (three.js) that visualizes a delivery-platform semantic model:
-*how does a platform allocate limited courier capacity across orders with different revenue and fulfillment times?*
+A single-page vanilla-JavaScript web app (three.js) on top of the delivery-platform semantic model:
+*airspace is a volume, not an empty background.* Four drones deliver orders across a fictional block city through
+translucent **3D permitted prisms**, around **restricted prisms** and solid buildings — and every drone is described twice,
+as machine state (XYZ, volume ids) and as a human-readable relational update.
+
+![Airspace in Live Flight](docs/screenshot-airspace.png)
 
 **Run:** serve the folder with any static server (ES modules need http), e.g. `python3 -m http.server`, then open `http://localhost:8000`.
-three.js is vendored in `vendor/`, so no network or build step is needed.
+three.js is vendored in `vendor/`; no network or build step is needed.
 
-### Model
-- **ORDER** (central object): revenue (box size), creation time, status, total delivery time.
-  Status flow: `pending → preparing → ready → assigned → picked_up → delivered`.
-- **CUSTOMER** (houses), **RESTAURANT** (shops, each with its own preparation time and production capacity),
-  **COURIER** (scooters, capacity 2 orders each, max 5 couriers), **PLATFORM** (central tower).
-- Coloured lines show the relationships: customer→order *creates*, restaurant→order *prepares*,
-  platform→order *evaluates*, platform→courier→order *assigns*, courier→order *picks up / delivers*.
+### Four stages (right-panel stepper)
+1. **Airspace** — *Where can I fly?* Mint permitted prisms (decks V-01/V-02, corridor V-03 above V-02, landing columns at every pad) and blush-red restricted prisms (RZ-A, RZ-B, switchable amber hazard HZ-1), each with a floor, a ceiling and dashed edges.
+2. **Candidate Routes** — *Where could I go?* Up to three genuinely different, fully collision-tested routes per leg (direct / left detour / right detour / climb over), shown as fine dashed curves. Never more than actually exist.
+3. **Optimal Route** — *Which is best?* The cheapest candidate (3D distance + 1.5 × climb) is smoothed with Bézier arcs that are re-tested against every volume and building; alternatives fade, one cobalt curve remains.
+4. **Live Flight** — *Where am I now?* Four drones (`D-01…D-04`) fly the validated curves on one clock; a newly blocked route pauses and re-plans, or reports `NO_VALID_ROUTE`.
 
-### Controls
-Everything except the legend lives in the collapsible panel on the right (each section, and the whole panel, can be collapsed).
-The **Simulation** section groups the time controls and one row of actions per entity. The simulation starts by itself with all
-four agents on **auto**; untick an agent's *auto* to take over that role manually. Click an entity in the scene to select it —
-actions use the selection when it applies, otherwise the first eligible order/courier. Refused actions explain which rule blocked
-them, and the Rules section counts how often each rule bounded an outcome. Left-drag orbits, wheel zooms, right-drag pans.
+Stages 1–3 keep the clock frozen; **Start flight** (or stage 4) runs it. **Reset** is deterministic.
 
-- Customer: Create Order
-- Restaurant: Accept Order (limited by production capacity), Mark Ready (only after preparation time)
-- Platform: Evaluate Pending, Estimate ETA, Assign Courier, Priority (FIFO ↔ revenue-weighted)
-- Courier: Accept, Drive → Restaurant, Pick Up, Deliver, ＋/－ fleet size (couriers are cars that follow the road grid)
+### Location, both ways
+* **Agent → location:** click a drone (or a fleet card) → *Robot view* and *Human view* from the same state. Console: `getLocation('D-02')`.
+* **Location → agents:** click a prism or pick it in *Spatial query* → id, X/Y/Z extents, permission, drones inside. Console: `getAgentsAt('V-03')`, `getAgentsInBox(xMin, xMax, yMin, yMax, zMin, zMax)`. Membership uses X, Y **and** Z.
 
-Revenue-weighted priority is a **simulation hypothesis**, not a claim about any real platform. The Statistics section compares
-average delivery time for high- vs low-revenue orders under each policy.
+### Delivery model (unchanged semantics)
+ORDER (revenue = box size; `pending → preparing → ready → assigned → picked_up → delivered`), CUSTOMER houses, RESTAURANT shops with
+preparation time and capacity, PLATFORM tower (= launch hub), COURIER drones (capacity 2 orders). The first four orders are scripted and
+pinned one per drone so the routes previewed in Stages 2–3 are the ones flown. Revenue-weighted priority is a **simulation hypothesis**.
+The *Delivery platform* section keeps the manual controls; every agent can be switched between auto and manual.
 
 ### Look
-Soft "clay" isometric city (orthographic camera, soft shadows, rounded forms, no outlines or grid lines).
-The background city is white massing with green parks and blue water on cool-grey streets; saturated architectural-model colours
-are reserved for the four roles: **restaurants** (coral/orange/salmon), **customers** (forest/denim/teal roofs),
-**platform** (navy) and **couriers** (mustard cars).
+Soft "clay" isometric city (orthographic camera, soft shadows, rounded forms). White massing, green parks, blue water; saturated colour is
+reserved for roles (restaurants coral/orange, customers forest/denim, platform navy, drones mustard with a small identifying cap) and for the
+airspace language: mint = permitted, blush red = restricted, amber = hazard, muted cyan/violet = candidates, cobalt = selected route.
 
-### Drone location layer
-`spatial.js` holds the 3D obstacle/airspace model, route planner and `getAgentsAt`; `main.js` wires it to the scene and panels.
-In the browser console: `getLocation('D-001')` and `getAgentsAt({zone:'Midtown-like Zone', z_min:60, z_max:100})`. All geometry and flight
-parameters are synthetic classroom assumptions, not legal limits.
+### Files
+`spatial.js` — navigable-space model, candidate generation, smoothing, volume queries. `main.js` — scene, delivery model, panels.
+`docs/airspace-simulation.md` — the specification plus the implementation report. All geometry and parameters are synthetic classroom
+assumptions; nothing here claims regulatory compliance or real airspace authorization.

@@ -1,3 +1,5 @@
+> **Superseded** by [airspace-simulation.md](airspace-simulation.md). This file documents the earlier drone-location iteration (ids `D-001…`, flat zone ceilings).
+
 # Above the Streets — drone location layer for the delivery-platform simulation
 
 Spatial AI · Location Workshop (Oct 8, 2026). Classroom simulation with **synthetic** geometry and **illustrative** parameters.

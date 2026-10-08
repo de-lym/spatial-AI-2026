@@ -2,24 +2,26 @@ import * as THREE from 'three';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { RoundedBoxGeometry } from './vendor/RoundedBoxGeometry.js';
 import {
-  SCALE_M, cfg, world, bump, toLocal, fromLocal, dist3, zoneAt, namedZones, segCheck, planRoute, nominalRoute,
-  routeLength, nearestObstacle, buildingsNear, streetsCrossed, nearestLandmark, bearingDeg, compassWord, agentsAt,
+  SCALE_M, cfg, world, bump, toLocal, fromLocal, dist3, zoneAt, segCheck, planRoute, planMission, routeLength,
+  nearestObstacle, buildingsNear, streetsCrossed, nearestLandmark, bearingDeg, compassWord, agentsAt, agentsInBox,
+  namedVolumes, volumesAt, blockAt, roofUnder, ceilingMAt, inPermitted,
 } from './spatial.js';
 
 /* ====================================================================
-   Delivery platform × drone location simulation (synthetic, classroom only)
+   AIRSPACE — a location-aware drone delivery sandbox (synthetic, classroom only)
    ORDER is the central object; CUSTOMER, RESTAURANT, COURIER (a drone) and
-   PLATFORM are the connected agents. Drones fly in 3D over a fictional,
-   SoHo/Midtown-inspired city: buildings are volumetric obstacles, some
-   airspace is restricted, and every drone is described twice —
-   as machine state (XYZ…) and as a human-readable delivery update.
+   PLATFORM are the connected agents. Four drones fly in a fictional block city
+   where airspace is a VOLUME: translucent permitted prisms (mint), restricted
+   prisms (blush red) and solid buildings. Four stages — classify airspace,
+   generate candidate routes, select + smooth one, fly it — and every drone is
+   described twice, as machine state (XYZ…) and as a human-readable update.
    ==================================================================== */
 
 // ---------- constants ------------------------------------------------
 const DRONE_SPEED = 4;            // scene units per simulated second (= 20 m/s, illustrative)
 const VERT_SPEED = 0.7;           // climb / descent speed factor
 const COURIER_CAPACITY = 2;       // Rule 2: orders one drone holds at once
-const MAX_COURIERS = 4;           // Rule 1: fleet capacity is limited
+const MAX_COURIERS = 4;           // Rule 1: fleet capacity is limited (exactly four drones: D-01 … D-04)
 const HIGH_REVENUE = 35;          // threshold used only for the revenue statistics
 const STATUS = ['pending', 'preparing', 'ready', 'assigned', 'picked_up', 'delivered'];
 const STATUS_COLOR = {
@@ -29,7 +31,18 @@ const STATUS_COLOR = {
 const REL_COLOR = {
   creates: 0x3f8f5f, prepares: 0xe8472f, evaluates: 0x9aa3ad, assigns: 0x2c4a8c, carries: 0xd9a21b,
 };
-const PATH_COLOR = { nominal: 0xd9a21b, rerouted: 0x2f9be0, blocked: 0xd32f2f };
+const PATH_COLOR = { blocked: 0xd32f2f };
+// airspace + route language (spec): mint = permitted volume, blush red = restricted, amber = temporary hazard,
+// muted cyan/violet = candidate routes, cobalt = selected route
+const AIR = { permitted: 0x6fcf9f, edgePermitted: 0x3fa874, restricted: 0xe0707c, edgeRestricted: 0xc8404f, hazard: 0xf0b13a, edgeHazard: 0xc8860f, cobalt: 0x1f4fd1 };
+const CAND_COLOR = [0x2f9fc4, 0x7f6fd0, 0x3a9a8a];
+const DRONE_TINT = [0x7b6fd0, 0x2fa89a, 0xc2569b, 0xb5882a]; // small identifying cap on each drone body
+const STAGES = [
+  ['Airspace', 'Where can I fly?', 'Permitted (mint) and restricted (red) volumes are drawn as 3D prisms with a floor and a ceiling. Buildings stay solid obstacles whatever the airspace says.'],
+  ['Candidate Routes', 'Where could I go?', 'For each leg the planner builds a waypoint grid inside the navigable space (permitted − restricted − buildings − clearance) and keeps up to three genuinely different, fully collision-tested routes.'],
+  ['Optimal Route', 'Which route is best?', 'The cheapest candidate is picked and turned into a smooth curve; the smoothed curve is re-tested against every volume and building, and corners are tightened wherever it would cut through.'],
+  ['Live Flight', 'Where am I now?', 'Four drones follow their validated smooth routes on one simulation clock. Select a drone or a volume to ask “where is it?” and “who is here?”.'],
+];
 const RULES = [
   'Courier (drone) capacity is limited.',
   'A drone serves a limited number of orders at one time.',
@@ -38,7 +51,7 @@ const RULES = [
   'Platform assignment affects how long an order waits before pickup.',
   'Revenue may influence allocation priority (simulation hypothesis only).',
   'Total delivery time is not fixed — it varies with all of the above.',
-  'Drones stay inside the permitted simulated airspace (zone ceilings, map edge).',
+  'Drones stay inside the permitted airspace volumes (their floors, ceilings and the map edge).',
   'Buildings and restricted airspace are obstacles; routes must avoid them.',
   'A simulated clearance margin surrounds every obstacle.',
   'If blocked, a drone climbs or detours only where permitted — otherwise it hovers (NO_VALID_ROUTE).',
@@ -68,7 +81,9 @@ const TREE = [0x8fbf6a, 0x6aa35a, 0x4f8a4f, 0x9ccb7a];
 
 // ---------- helpers --------------------------------------------------
 const $ = (id) => document.getElementById(id);
-const rand = (a, b) => a + Math.random() * (b - a);
+let simSeed = 7;
+const simRand = () => ((simSeed = (simSeed * 16807) % 2147483647) / 2147483647); // deterministic simulation clock/orders
+const rand = (a, b) => a + simRand() * (b - a);
 const fmt = (n, d = 1) => (Number.isFinite(n) ? n.toFixed(d) : '–');
 const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const hex = (c) => '#' + c.toString(16).padStart(6, '0');
@@ -88,12 +103,13 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(BG);
 const VIEW = 30; // half-height of the isometric view, in world units
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -400, 600);
-const target = new THREE.Vector3(7, 0, -2);
+const target = new THREE.Vector3(12, 6, -12); // shifted so the city sits clear of the right-hand panel
 camera.position.copy(target).add(new THREE.Vector3(60, 52, 60));
 const controls = new OrbitControls(camera, canvas);
 controls.target.copy(target);
 controls.maxPolarAngle = Math.PI * 0.45;
-controls.minZoom = 0.5; controls.maxZoom = 3.5;
+controls.minZoom = 0.4; controls.maxZoom = 3.5;
+camera.zoom = 0.62; // wide enough to see the whole city and the 120 m corridor in one frame
 controls.enableDamping = true;
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0xaebbd0, 1.6));
@@ -146,7 +162,7 @@ function prism(parent, w, h, d, color, x, y, z, ry = 0) { // pitched roof: trian
 }
 
 // ---------- labels: sized to their text, minimal margin -----------------
-const WORLD_PER_PX = 0.021;
+const WORLD_PER_PX = 0.03;
 function makeLabel() {
   const cv = document.createElement('canvas');
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ depthTest: false, transparent: true }));
@@ -201,17 +217,24 @@ const S = {
   log: [],
   delivered: [],
   showAirspace: true, showRoutes: true, showStreets: true,
+  stage: 1,            // 1 Airspace · 2 Candidate Routes · 3 Optimal Route · 4 Live Flight
+  volSel: null,        // selected airspace volume id
+  showAlt: false,      // keep faded alternatives visible during live flight
+  missions: [],        // scripted first deliveries, one per drone
+  homes: {},           // drone id → parking slot at the launch hub
 };
 
 // ---- fictional airspace + streets (illustrative) -------------------------
-world.zones = [
-  { name: 'SoHo-like Zone', kind: 'neighborhood', x0: -60, x1: 60, z0: -8, z1: 60, ceilingM: 90 },
-  { name: 'Midtown-like Zone', kind: 'neighborhood', x0: -60, x1: 60, z0: -60, z1: -8, ceilingM: 150 },
+world.zones = [ // named districts (labels for the human view)
+  { name: 'South Block District', x0: -60, x1: 60, z0: -8, z1: 60, ceilingM: 90 },
+  { name: 'North Tower District', x0: -60, x1: 60, z0: -60, z1: -8, ceilingM: 120 },
 ];
+// Restricted prisms. The red prism is a volume, not a ground stamp: RZ-A reaches the ceiling, RZ-B is a low band that
+// can be flown OVER (if the permitted volume above it allows), HZ-1 is a temporary hazard that can be switched on.
 world.restricted = [
-  { id: 'RZ-A', name: 'Restricted Zone A', x0: 10, x1: 22, z0: -6, z1: 6, zloM: 0, zhiM: 300, active: true },
-  { id: 'RZ-B', name: 'Restricted Zone B (low band)', x0: -22, x1: -10, z0: -6, z1: 6, zloM: 0, zhiM: 70, active: true },
-  { id: 'RZ-C', name: 'Restricted Zone C (temporary)', x0: 10, x1: 22, z0: 10, z1: 22, zloM: 0, zhiM: 300, active: false },
+  { id: 'RZ-A', name: 'Restricted Zone A', kind: 'restricted', x0: 10, x1: 22, z0: -6, z1: 6, zloM: 0, zhiM: 300, active: true },
+  { id: 'RZ-B', name: 'Restricted Zone B (low band)', kind: 'restricted', x0: -22, x1: -10, z0: -6, z1: 6, zloM: 0, zhiM: 70, active: true },
+  { id: 'HZ-1', name: 'Temporary Hazard HZ-1', kind: 'hazard', x0: 10, x1: 22, z0: 10, z1: 22, zloM: 0, zhiM: 300, active: false },
 ];
 world.ewStreets = ROADS.map((z, i) => ({ name: EW_NAMES[i], z }));
 world.nsStreets = ROADS.map((x, i) => ({ name: NS_NAMES[i], x }));
@@ -290,7 +313,7 @@ function buildPlatform() {
   platform.label = makeLabel(); platform.label.position.set(0, 15, 0); scene.add(platform.label);
   register(g, platform);
   registerBuilding(g, 'Dispatch Tower', 'platform');
-  world.landmarks.push({ name: 'Dispatch Tower (platform hub)', x: 0, z: 0 });
+  world.landmarks.push({ name: 'Central Plaza (launch hub)', x: 0, z: 0 });
   takenAt.add(key(0, 0));
 }
 
@@ -346,7 +369,7 @@ const FIXED = { '0,-16': 'tb1', '16,0': 'dome', '-16,0': 'park' }; // determinis
 let parkN = 0, pondN = 0;
 function buildFiller(x, z) {
   const g = new THREE.Group(); g.position.set(x, SLAB, z); scene.add(g);
-  const mid = z < -8; // Midtown-like (north): taller, denser; SoHo-like (south): lower
+  const mid = z < -8; // North Tower District: taller, denser; South Block District: lower
   let kind = FIXED[key(x, z)];
   if (!kind) {
     const t = srand();
@@ -357,7 +380,7 @@ function buildFiller(x, z) {
   if (kind === 'tb1') { // the guaranteed tall obstacle used by the test scenario (95 m)
     ledged(g, 5.2, 19, 6.4, 0, 2.4, TYPO.tower);
     tree(g, -4.6, 4.6, 0, 0.8);
-    registerBuilding(g, 'Midtown Tower', 'tower'); addLandmark('Midtown Tower');
+    registerBuilding(g, 'Spire Tower', 'tower'); addLandmark('Spire Tower');
   } else if (kind === 'tower') {
     ledged(g, 4 + srand() * 2.4, (mid ? 9 : 3) + srand() * (mid ? 9 : 4), 4 + srand() * 2.4, 0, 0, TYPO.tower);
     tree(g, -4.6, 4.6, 0, 0.8);
@@ -430,34 +453,67 @@ addCustomer('C5', -32, -16, CLR.cream, CLR.denim);
 addCustomer('C6', 32, -16, CLR.white, CLR.forest);
 for (const [x, z] of parcels) if (!takenAt.has(key(x, z))) buildFiller(x, z);
 
-// ---- airspace overlays: zones, restricted volumes, query volume ---------
-const airspace = new THREE.Group(); scene.add(airspace);
-const zoneTint = { 'SoHo-like Zone': 0x7fb0e0, 'Midtown-like Zone': 0xb7a3de };
-for (const zn of world.zones) {
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(zn.x1 - zn.x0, zn.z1 - zn.z0), new THREE.MeshBasicMaterial({ color: zoneTint[zn.name], transparent: true, opacity: 0.13, depthWrite: false }));
-  m.rotation.x = -Math.PI / 2; m.position.set((zn.x0 + zn.x1) / 2, SLAB + 0.04, (zn.z0 + zn.z1) / 2);
-  m.renderOrder = 1; airspace.add(m);
-  const lb = makeLabel(); lb.position.set(-24, 1.2, zn.name.startsWith('SoHo') ? 36 : -32);
-  setLabel(lb, [{ t: zn.name, c: dark(zoneTint[zn.name], 0.55), s: 36 }, { t: `ceiling ${zn.ceilingM} m · synthetic zone`, c: '#7a736b', s: 24 }]);
-  airspace.add(lb);
+// ---- airspace: permitted prisms, restricted prisms, landing columns ------------------
+// Permitted airspace is a set of 3D prisms with explicit floors and ceilings. The two decks tile the city, the corridor
+// sits ABOVE the northern deck (same plan area, different altitude), and every pad has a short landing column that
+// connects the ground to the deck floor — so takeoff and landing are valid transitions, not gaps.
+world.volumes = [
+  { id: 'V-01', name: 'South Block Deck', kind: 'deck', x0: -56, x1: 56, z0: -8, z1: 56, zloM: 20, zhiM: 90 },
+  { id: 'V-02', name: 'North Tower Deck', kind: 'deck', x0: -56, x1: 56, z0: -56, z1: -8, zloM: 20, zhiM: 90 },
+  { id: 'V-03', name: 'Central Air Corridor', kind: 'corridor', x0: -56, x1: 56, z0: -24, z1: -8, zloM: 90, zhiM: 120 },
+  { id: 'T-00', name: 'Launch hub column', kind: 'transition', x0: -4.4, x1: 4.4, z0: 3.0, z1: 7.6, zloM: 0, zhiM: 20 },
+];
+for (const e of [...S.restaurants, ...S.customers]) {
+  world.volumes.push({ id: 'T-' + e.stationId.replace('-', ''), name: `${e.stationId} landing column`, kind: 'transition', x0: e.acc.x - 2.4, x1: e.acc.x + 2.4, z0: e.acc.z - 2.4, z1: e.acc.z + 2.4, zloM: 0, zhiM: 20 });
 }
-const restrictedMesh = new Map();
-for (const r of world.restricted) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: 0xd94f5c, transparent: true, opacity: 0.10, depthWrite: false }));
-  m.renderOrder = 2; airspace.add(m); restrictedMesh.set(r.id, m);
-  const lb = makeLabel(); lb.position.set((r.x0 + r.x1) / 2, 3, (r.z0 + r.z1) / 2); r.label = lb;
-  setLabel(lb, [{ t: r.name, c: '#a2303c', s: 28 }, { t: `0–${r.zhiM >= 300 ? 'ceiling' : r.zhiM + ' m'} · restricted`, c: '#7a736b', s: 22 }]);
-  airspace.add(lb);
+bump();
+
+const airspace = new THREE.Group(); scene.add(airspace);
+const volViz = new Map();       // id → {v, fill, edges, label}
+const volMeshes = [];           // pickable fills
+const VOL_PRI = { restricted: 0, hazard: 0, transition: 1, corridor: 2, deck: 3 };
+function volColors(v) {
+  const k = v.permission ?? (v.kind === 'restricted' || v.kind === 'hazard' ? 'restricted' : 'permitted');
+  if (v.kind === 'hazard') return { fill: AIR.hazard, edge: AIR.edgeHazard };
+  return k === 'restricted' ? { fill: AIR.restricted, edge: AIR.edgeRestricted } : { fill: AIR.permitted, edge: AIR.edgePermitted };
+}
+function addVolume(v, restricted) {
+  const col = volColors(restricted ? { ...v, permission: 'restricted' } : v);
+  const fill = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: col.fill, transparent: true, opacity: 0.1, depthWrite: false, side: THREE.DoubleSide }));
+  fill.renderOrder = 2; fill.userData.volume = v; fill.userData.pri = VOL_PRI[v.kind] ?? 3;
+  const edges = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: col.edge, dashSize: 0.8, gapSize: 0.5, transparent: true, opacity: 0.85, depthWrite: false }));
+  edges.renderOrder = 3;
+  airspace.add(fill, edges); volMeshes.push(fill);
+  let label = null;
+  if (v.kind !== 'transition') { label = makeLabel(); airspace.add(label); }
+  volViz.set(v.id, { v, fill, edges, label, restricted });
+}
+for (const v of world.volumes) addVolume(v, false);
+for (const r of world.restricted) addVolume(r, true);
+function layoutVolume(z) {
+  const v = z.v, lo = v.zloM / SCALE_M, hi = Math.max(lo + 0.05, Math.min(v.zhiM, z.restricted ? cfg.maxAltM + 15 : (v.kind === 'transition' ? v.zhiM : cfg.maxAltM)) / SCALE_M);
+  const w = v.x1 - v.x0, h = hi - lo, d = v.z1 - v.z0;
+  const cx = (v.x0 + v.x1) / 2, cy = SLAB + lo + h / 2, cz = (v.z0 + v.z1) / 2;
+  z.fill.scale.set(w, h, d); z.fill.position.set(cx, cy, cz);
+  const box = new THREE.BoxGeometry(w, h, d);
+  z.edges.geometry.dispose(); z.edges.geometry = new THREE.EdgesGeometry(box); box.dispose();
+  z.edges.computeLineDistances(); z.edges.position.set(cx, cy, cz);
+  z.top = SLAB + hi;
+  if (z.label) {
+    const hz = z.restricted;
+    const pos = v.id === 'V-01' ? [v.x0 + 14, v.z1 - 3] : v.id === 'V-02' ? [v.x0 + 14, v.z0 + 4] : v.id === 'V-03' ? [v.x1 - 16, v.z1 + 0.5] : [cx, cz];
+    z.label.position.set(pos[0], z.top + 1.2, pos[1]);
+    const lo_ = v.zloM, hi_ = Math.round(hi * SCALE_M);
+    setLabel(z.label, [{ t: `${v.id} · ${v.name}`, c: hz ? (v.kind === 'hazard' ? '#8a5d08' : '#a2303c') : '#2f7d55', s: 30 },
+      { t: `${lo_}–${hi_ >= 130 && hz ? 'ceiling' : hi_ + ' m'} · ${hz ? (v.kind === 'hazard' ? 'temporary hazard' : 'restricted') : 'permitted'}`, c: '#7a736b', s: 22 }]);
+  }
 }
 function refreshAirspace() {
   airspace.visible = S.showAirspace;
-  const top = cfg.maxAltM + 15;
-  for (const r of world.restricted) {
-    const m = restrictedMesh.get(r.id), hi = Math.min(r.zhiM, top) / SCALE_M, lo = r.zloM / SCALE_M;
-    m.visible = r.active; r.label.visible = r.active;
-    m.scale.set(r.x1 - r.x0, hi - lo, r.z1 - r.z0);
-    m.position.set((r.x0 + r.x1) / 2, SLAB + lo + (hi - lo) / 2, (r.z0 + r.z1) / 2);
-    r.label.position.y = SLAB + hi + 1.4;
+  for (const z of volViz.values()) {
+    layoutVolume(z);
+    const on = !z.restricted || z.v.active;
+    z.fill.visible = z.edges.visible = on; if (z.label) z.label.visible = on;
   }
 }
 const qBox = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: 0x2f9be0, transparent: true, opacity: 0.16, depthWrite: false }));
@@ -478,13 +534,15 @@ for (const s of world.nsStreets.filter((q) => Math.abs(q.x) <= 40)) {
 function addCourier() {
   if (S.couriers.length >= MAX_COURIERS) return null;
   const idx = S.nextCourier++;
-  const id = 'D-' + String(idx).padStart(3, '0');
+  const id = 'D-' + String(idx).padStart(2, '0');
   let slot = 0; while (slot < 4 && S.couriers.some((d) => !d.task && Math.hypot(d.pos.x - (-2.7 + slot * 1.8), d.pos.z - 5.3) < 0.5)) slot++;
   const c = {
     type: 'courier', id, name: id, pos: new THREE.Vector3(-2.7 + slot * 1.8, 0, 5.3), prev: new THREE.Vector3(),
     orders: [], carry: [], task: null, status: 'IDLE', hold: null, dwell: 0, blocked: null,
-    heading: 0, rot: 0, headingDeg: 0, speedU: 0, bob: Math.random() * 6, nearest: null, lastStreet: null, rerouteWhy: '',
+    heading: 0, rot: 0, headingDeg: 0, speedU: 0, bob: simRand() * 6, nearest: null, lastStreet: null, rerouteWhy: '',
+    tint: DRONE_TINT[(idx - 1) % DRONE_TINT.length], viz: null,
   };
+  S.homes[id] = new THREE.Vector3(-2.7 + slot * 1.8, 0, 5.3);
   c.prev.copy(c.pos);
   const g = new THREE.Group(), inner = new THREE.Group(); g.add(inner);
   const body = box(inner, 1.5, 0.55, 1.5, CLR.mustard, 0, 0.75, 0, 0.25);
@@ -500,8 +558,10 @@ function addCourier() {
   for (const [lx, lz] of [[-0.55, -0.55], [0.55, -0.55], [-0.55, 0.55], [0.55, 0.55]]) {
     const l = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.6, 6), mat(0x8c857c))); l.position.set(lx, 0.3, lz); inner.add(l);
   }
+  const cap = shade(new THREE.Mesh(new THREE.SphereGeometry(0.34, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), mat(c.tint))); // identifying colour cap
+  cap.position.set(0, 1.03, 0); inner.add(cap);
   const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 10), new THREE.MeshStandardMaterial({ color: 0x5fd38d, emissive: 0x5fd38d, emissiveIntensity: 0.6 }));
-  lamp.position.set(0, 1.2, 0); inner.add(lamp);
+  lamp.position.set(0, 0.62, 0.75); inner.add(lamp);
   c.lamp = lamp;
   g.position.set(c.pos.x, SLAB, c.pos.z); scene.add(g);
   c.mesh = g; c.inner = inner;
@@ -566,10 +626,20 @@ function remainingTime(c) { // route length ÷ speed, with the slower vertical l
   for (const q of pts3(c)) { const vert = Math.hypot(q.x - p.x, q.z - p.z) < 0.01; t += dist3(p, q) / (DRONE_SPEED * (vert ? VERT_SPEED : 1)); p = q; }
   return t;
 }
+/** Stage 2 + 3 at dispatch time: candidates are generated and validated BEFORE the drone moves; it flies the smoothed winner. */
 function startTask(c, kind, order) {
   const dest = kind === 'toRestaurant' ? order.restaurant.acc : order.customer.acc;
-  c.task = { kind, order, route: { id: 'RT-' + String(S.nextRoute++).padStart(3, '0'), pts: nominalRoute(c.pos, dest), idx: 0, rerouted: false, travelled: 0 }, start: c.pos.clone() };
+  const plan = planMission(c.pos, dest);
+  c.task = { kind, order, route: { id: 'RT-' + String(S.nextRoute++).padStart(3, '0'), pts: plan.ok ? plan.best.pts : [], plan, idx: 0, rerouted: false, travelled: 0 }, start: c.pos.clone() };
   c.hold = null; c.rerouteWhy = ''; c.dwell = 0;
+  if (plan.ok) {
+    const n = plan.candidates.length;
+    log(`${c.name} route: ${n} feasible candidate${n > 1 ? 's' : ''} → chose ${plan.best.label} (${Math.round(plan.best.len * SCALE_M)} m)`);
+  } else {
+    S.ruleHits[10]++;
+    c.hold = { reason: plan.reason, timer: 1 };
+    log(`${c.name} NO_VALID_ROUTE — ${plan.reason}; hovering (retrying every second)`, 'bad');
+  }
 }
 
 /** pre-move conflict test on the next stretch of the route (look-ahead = simulated sensor range) */
@@ -599,7 +669,7 @@ function replan(c, bad) {
   const plan = planRoute(c.pos, dest);
   if (plan.ok) {
     const R = c.task.route;
-    R.pts = plan.pts; R.idx = 0; R.rerouted = true;
+    R.pts = plan.pts; R.idx = 0; R.rerouted = true; R.plan = plan.mission;
     const why = bad ? reasonWhy(bad, plan) : { log: 'route found again', human: '' };
     c.rerouteWhy = why.human || c.rerouteWhy;
     if (c.hold) log(`${c.name} resumed: ${why.log}`, 'good');
@@ -760,8 +830,8 @@ const atRestaurant = (o) => atPad(o.courier, o.restaurant.acc);
 const act = {
   create() {
     const sel = S.selected;
-    const customer = sel?.type === 'customer' ? sel : S.customers[Math.floor(Math.random() * S.customers.length)];
-    const restaurant = sel?.type === 'restaurant' ? sel : S.restaurants[Math.floor(Math.random() * S.restaurants.length)];
+    const customer = sel?.type === 'customer' ? sel : S.customers[Math.floor(simRand() * S.customers.length)];
+    const restaurant = sel?.type === 'restaurant' ? sel : S.restaurants[Math.floor(simRand() * S.restaurants.length)];
     createOrder(customer, restaurant);
     return true;
   },
@@ -823,10 +893,13 @@ const act = {
     if (!cands.length) return auto ? false : refuse(0, 'No ready order awaits a drone.');
     cands.forEach((o) => { o.priority = priorityOf(o); });
     const byPrio = [...cands].sort((a, b) => b.priority - a.priority);
-    let o = byPrio[0];
-    if (sel?.type === 'order' && cands.includes(sel)) o = sel;
+    // the scripted first deliveries are pinned to their drone; other orders skip drones that are reserved for one
+    const reserved = new Set(S.orders.filter((x) => x.pin && !x.courier).map((x) => x.pin));
+    const freeFor = (o) => S.couriers.filter((c) => load(c) < COURIER_CAPACITY && (o.pin ? c.id === o.pin : !reserved.has(c.id)));
+    const ranked = sel?.type === 'order' && cands.includes(sel) ? [sel, ...byPrio.filter((x) => x !== sel)] : byPrio;
+    const o = ranked.find((x) => freeFor(x).length) ?? ranked[0];
     const fifo = [...cands].sort((a, b) => waitingTime(b) - waitingTime(a))[0];
-    const free = S.couriers.filter((c) => load(c) < COURIER_CAPACITY);
+    const free = freeFor(o);
     if (!free.length) {
       if (auto) return false;
       return refuse(S.couriers.some((c) => load(c) > 0) ? 2 : 1, `All ${S.couriers.length} drones are at capacity (${COURIER_CAPACITY} orders each) — #${o.id} must wait.`);
@@ -873,19 +946,9 @@ const act = {
     log(`${o.courier.name} TAKEOFF → ${o.customer.stationId} (${o.customer.name}) with #${o.id}`);
     return true;
   },
-  addCourier() {
-    if (S.couriers.length >= MAX_COURIERS) return refuse(1, `Fleet capacity is limited to ${MAX_COURIERS} drones.`);
-    const c = addCourier(); log(`${c.name} joined the fleet`); return true;
-  },
-  delCourier() {
-    if (S.couriers.length <= 2) return refuse(0, 'At least two drones are kept so occupancy queries can return several agents.');
-    const c = [...S.couriers].reverse().find((x) => load(x) === 0 && !x.task);
-    if (!c) return refuse(0, 'Every drone is busy — only an idle drone can be removed.');
-    removeCourier(c);
-    log(`${c.name} left the fleet`); return true;
-  },
 };
 function removeCourier(c) {
+  disposeViz(c.viz); c.viz = null;
   scene.remove(c.mesh, c.label, c.halo, c.blockMesh);
   pickables.splice(pickables.indexOf(c.mesh), 1);
   S.couriers.splice(S.couriers.indexOf(c), 1);
@@ -948,71 +1011,196 @@ function step(dt) {
 }
 
 // ---------- spatial queries (both directions) -----------------------------
+const r1 = (n) => Math.round(n * 10) / 10;
 /** A. given an agent, where is it? — derived from the drone's live state */
 function getLocation(droneId) {
   const c = S.couriers.find((d) => d.id === droneId);
   if (!c) return null;
-  const l = toLocal(c.pos), zone = zoneAt(c.pos.x, c.pos.z), lm = nearestLandmark(c.pos), hv = humanView(c);
+  const l = toLocal(c.pos), vols = volumesAt(c.pos), lm = nearestLandmark(c.pos), hv = humanView(c), blk = blockAt(c.pos.x, c.pos.z);
   return {
     drone_id: c.id,
-    xyz: [Math.round(l.x * 10) / 10, Math.round(l.y * 10) / 10, Math.round(l.z * 10) / 10],
+    xyz: [r1(l.x), r1(l.y), r1(l.z)],
     altitude_datum: 'metres above the simulated street-level datum (z = 0)',
-    zone: zone.name,
+    volumes: vols.map((v) => v.id),
+    in_volume: vols.length ? vols.map((v) => `${v.id} ${v.name} (${v.permission})`).join(' + ') : 'none — outside all labelled airspace volumes',
+    district: zoneAt(c.pos.x, c.pos.z).name,
+    block: blk.inside ? blk.name : `over a street near ${blk.name}`,
     nearby_landmark: lm.name,
     status: c.hold ? 'HOVER (NO_VALID_ROUTE)' : c.status,
     description: hv.lines[0] ?? '',
     heading_deg: Math.round(c.headingDeg),
-    speed_mps: Math.round(c.speedU * SCALE_M * 10) / 10,
-    nearest_obstacle: c.nearest ? { id: c.nearest.id, distance_m: Math.round(c.nearest.d * SCALE_M * 10) / 10 } : null,
+    speed_mps: r1(c.speedU * SCALE_M),
+    nearest_obstacle: c.nearest ? { id: c.nearest.id, distance_m: r1(c.nearest.d * SCALE_M) } : null,
     route: c.task ? { id: c.task.route.id, waypoint_index: c.task.route.idx, waypoints: c.task.route.pts.length, destination_id: destOf(c.task).stationId } : null,
   };
 }
-/** B. given a location (zone + optional altitude band, 3D volume, or point + radius), which agents are there? */
+/** B. given a location ("V-03", {volume}, {zone, z_min, z_max}, {box}, {point, radius}), which agents are there? */
 function getAgentsAt(location) {
   return { query: location, agents: agentsAt(S.couriers, location) };
 }
-Object.assign(window, { getLocation, getAgentsAt });
+/** B'. the same question for an arbitrary local-metre box (x east, y north, z up) */
+function getAgentsInBox(xMin, xMax, yMin, yMax, zMin, zMax) {
+  return { query: { box: { x: [xMin, xMax], y: [yMin, yMax], z: [zMin, zMax] } }, agents: agentsInBox(S.couriers, xMin, xMax, yMin, yMax, zMin, zMax) };
+}
+Object.assign(window, { getLocation, getAgentsAt, getAgentsInBox });
 
 // ---------- human-readable translation -----------------------------------
 const stationLabel = (e) => `${e.stationId} (${e.name})`;
+const droneWord = (c) => `Drone ${c.id.slice(2)}`;
+/** relational phrase for the drone's current position: derived from the model each time, never a fixed script */
+function whereText(c) {
+  const p = c.pos, blk = blockAt(p.x, p.z), alt = Math.round(p.y * SCALE_M);
+  if (p.y <= 0.4) {
+    const at = [...S.restaurants, ...S.customers].find((e) => dist3(p, e.acc) < 0.6);
+    return `${droneWord(c)} is parked ${at ? 'on ' + stationLabel(at) : 'at the launch hub (Central Plaza)'}`;
+  }
+  const roof = roofUnder(p, 0), place = blk.inside ? blk.name : `the street near ${blk.name}`;
+  let s;
+  if (roof && p.y > roof.h) s = `${droneWord(c)} is ${Math.round((p.y - roof.h) * SCALE_M)} m above the roof of ${roof.name} in ${blk.name}`;
+  else s = `${droneWord(c)} is ${alt} m above ${place}`;
+  const tall = buildingsNear(p, 5).filter((o) => o.h * SCALE_M >= cfg.tallM && o.h > p.y);
+  if (tall.length) s += `, alongside ${tall[0].name} (${Math.round(tall[0].h * SCALE_M)} m)`;
+  return s;
+}
 function humanView(c) {
-  const st = c.status, zone = zoneAt(c.pos.x, c.pos.z), airborne = c.pos.y > 0.4, task = c.task;
-  const lines = [];
+  const st = c.status, airborne = c.pos.y > 0.4, task = c.task;
+  const lines = [], who = droneWord(c);
   const dest = task ? destOf(task) : null;
   const remM = task ? remainingU(c) * SCALE_M : 0;
-  if (st === 'COMPLETE') lines.push('Your package has arrived at the delivery station.');
-  if (st === 'TAKEOFF') lines.push('Your drone has just departed.');
-  if (st === 'LAND') lines.push('Your drone is landing.');
-  if (st === 'REROUTE') lines.push(`Your drone is adjusting its route${c.rerouteWhy ? ' ' + c.rerouteWhy : ''}.`);
-  if (st === 'HOVER') lines.push('Your drone is holding position — no valid route is available right now.');
-  if (task && task.kind === 'toCustomer' && remM < cfg.arriveM && st !== 'LAND' && st !== 'TAKEOFF') lines.push('Your delivery is approaching the receiving station.');
-  if (c.lastStreet && S.time - c.lastStreet.t < 6 && airborne) lines.push(`Your drone has just passed ${c.lastStreet.name}.`);
+  if (st === 'COMPLETE') lines.push('The package has arrived at the delivery station.');
+  if (st === 'HOVER') lines.push(`${who} is holding position — no valid route is available right now.`);
+  if (st === 'REROUTE') lines.push(`${who} is taking a different route${c.rerouteWhy ? ' ' + c.rerouteWhy : ''}.`);
+  lines.push(whereText(c) + '.');
   if (airborne) {
-    const tall = buildingsNear(c.pos, 8).filter((o) => o.h * SCALE_M >= cfg.tallM);
-    if (tall.length >= 2) lines.push('Your drone is approaching a cluster of tall buildings.');
-    else if (tall.length === 1) lines.push('Your drone is approaching a tall building.');
-    let s = `Your drone is flying over the ${zone.name.replace(' Zone', ' district')}`;
-    const roofs = buildingsNear(c.pos, 4);
-    if (roofs.length) {
-      const top = Math.max(...roofs.map((o) => o.h));
-      s += c.pos.y > top ? ', above nearby rooftops' : ', alongside taller buildings';
-    }
-    lines.push(s + '.');
-  } else if (st === 'IDLE' || st === 'COMPLETE') {
-    const at = [...S.restaurants, ...S.customers].find((e) => dist3(c.pos, e.acc) < 0.6);
-    lines.push(at ? `Your drone is waiting at ${stationLabel(at)}.` : 'Your drone is waiting at the dispatch hub.');
+    const vols = volumesAt(c.pos).filter((v) => v.permission === 'permitted' && v.kind !== 'transition');
+    const trans = volumesAt(c.pos).find((v) => v.kind === 'transition');
+    const top = vols.find((v) => v.kind === 'corridor') ?? vols[0];
+    if (top) lines.push(`Flying through the ${top.name} (${top.id}), ${Math.round(top.zloM)}–${Math.round(top.zhiM)} m.`);
+    else if (trans) lines.push(`${st === 'LAND' ? 'Descending' : 'Climbing'} in the ${trans.name} (${trans.id}).`);
+    else lines.push(`${who} is outside the labelled airspace volumes.`);
   }
+  if (st === 'TAKEOFF') lines.push(`${who} has just departed.`);
+  if (st === 'LAND') lines.push(`${who} is landing.`);
+  if (task && task.kind === 'toCustomer' && remM < cfg.arriveM && st !== 'LAND' && st !== 'TAKEOFF') lines.push('The delivery is approaching the receiving station.');
+  else if (c.lastStreet && S.time - c.lastStreet.t < 6 && airborne) lines.push(`${who} has just passed ${c.lastStreet.name}.`);
   let rel = '';
   if (dest) {
     const e = (dest.acc.x - c.pos.x) * SCALE_M, n = -(dest.acc.z - c.pos.z) * SCALE_M, d = Math.hypot(e, n);
-    rel = d < 3 ? `Above ${stationLabel(dest)}.` : `${task.kind === 'toRestaurant' ? 'Pickup' : 'Delivery'} station ${stationLabel(dest)} is about ${Math.round(d)} m to the ${compassWord(bearingDeg(e, n))}.`;
+    const hd = c.headingDeg;
+    rel = d < 3 ? `Above ${stationLabel(dest)}.` : `Heading ${compassWord(hd)} toward ${task.kind === 'toRestaurant' ? 'pickup' : 'delivery'} station ${stationLabel(dest)}, about ${Math.round(d)} m to the ${compassWord(bearingDeg(e, n))}.`;
   }
   const R = task?.route;
   const progress = R ? R.travelled / Math.max(1e-6, R.travelled + remainingU(c)) : null;
   const eta = !task ? null : c.hold ? 'unavailable while holding' : `≈ ${Math.ceil(remainingTime(c))} s (route length ÷ speed; holds not predicted)`;
-  return { headline: HUMAN_STATUS[st] ?? st, lines: lines.slice(0, 4), rel, progress, eta, leg: task ? (task.kind === 'toRestaurant' ? 'to pickup station' : 'to delivery station') : '', order: (task?.order ?? c.carry[0] ?? c.orders[0]) };
+  return { headline: HUMAN_STATUS[st] ?? st, lines: lines.slice(0, 5), rel, progress, eta, leg: task ? (task.kind === 'toRestaurant' ? 'to pickup station' : 'to delivery station') : '', order: (task?.order ?? c.carry[0] ?? c.orders[0]) };
 }
 const trackedDrone = () => (S.selected?.type === 'courier' ? S.selected : (S.track && S.couriers.includes(S.track) ? S.track : S.couriers[0]));
+
+// ---------- routes: candidates (fine dashed) + the selected smooth cobalt curve ------------
+const routeLayer = new THREE.Group(); scene.add(routeLayer);
+const sceneXYZ = (p) => new THREE.Vector3(p.x, SLAB + p.y, p.z);
+function densify(from, pts, step) { // insert points so a spline through them follows the validated polyline closely
+  const out = [from]; let prev = from;
+  for (const q of pts) {
+    const d = dist3(prev, q); if (d < 1e-6) continue;
+    const n = Math.max(1, Math.ceil(d / step));
+    for (let i = 1; i <= n; i++) out.push({ x: prev.x + (q.x - prev.x) * i / n, y: prev.y + (q.y - prev.y) * i / n, z: prev.z + (q.z - prev.z) * i / n });
+    prev = q;
+  }
+  return out;
+}
+/** thin tube whose fragments are discarded in a dash pattern along its length — a dashed curve that stays visible (GL lines are 1 px) */
+function dashedMaterial(color, dashes) {
+  return new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false,
+    uniforms: { uColor: { value: new THREE.Color(color) }, uOpacity: { value: 0 }, uCount: { value: dashes } },
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: 'uniform vec3 uColor;\nuniform float uOpacity;\nuniform float uCount;\nvarying vec2 vUv;\nvoid main() {\n  if (fract(vUv.x * uCount) > 0.6) discard;\n  gl_FragColor = vec4(uColor, uOpacity);\n  #include <colorspace_fragment>\n}',
+  });
+}
+function buildViz(plan) {
+  const group = new THREE.Group(), lines = [];
+  plan.candidates.forEach((c, i) => {
+    const pts = densify(plan.from, c.pts, 0.8).map(sceneXYZ);
+    const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+    const line = new THREE.Mesh(new THREE.TubeGeometry(curve, Math.min(900, pts.length * 3), 0.075, 4, false), dashedMaterial(CAND_COLOR[i % CAND_COLOR.length], Math.max(6, Math.round(c.len / 1.1))));
+    line.renderOrder = 5; line.visible = false; group.add(line); lines.push(line);
+  });
+  const pts = densify(plan.from, plan.best.pts, 0.9).map(sceneXYZ);
+  const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+  const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, Math.min(900, pts.length * 3), 0.11, 6, false), new THREE.MeshBasicMaterial({ color: AIR.cobalt, transparent: true, opacity: 0 }));
+  tube.renderOrder = 6; tube.visible = false; group.add(tube);
+  routeLayer.add(group);
+  return { group, lines, tube, plan, bi: plan.candidates.indexOf(plan.best) };
+}
+function disposeViz(v) {
+  if (!v) return;
+  routeLayer.remove(v.group);
+  v.group.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); });
+}
+/** eased fade; hidden objects skip rendering */
+function fade(obj, target, k) {
+  const m = obj.material, u = m.uniforms?.uOpacity;
+  const cur = u ? u.value : m.opacity, next = cur + (target - cur) * k;
+  if (u) u.value = next; else m.opacity = next;
+  obj.visible = next > 0.01 || target > 0.01;
+}
+/** mode: 'cands' (Stage 2) · 'optimal' (Stage 3) · 'live' · 'off' */
+function styleViz(v, mode, emph, k) {
+  v.lines.forEach((l, i) => {
+    const best = i === v.bi;
+    const t = mode === 'cands' ? 1 * emph : mode === 'optimal' ? (best ? 0 : 0.22 * emph) : mode === 'live' && S.showAlt && !best ? 0.28 : 0;
+    fade(l, t, k);
+  });
+  fade(v.tube, mode === 'off' || mode === 'cands' ? 0 : mode === 'optimal' ? 1 : 0.95, k);
+}
+const previews = { ver: -1, items: [] };
+/** the four scripted missions, planned before anyone flies: hub → pickup station, pickup → delivery station */
+function ensurePreviews() {
+  if (previews.ver === world.version) return;
+  previews.items.forEach((i) => disposeViz(i.viz)); previews.items = [];
+  for (const m of S.missions) {
+    for (const [leg, from, to] of [['pickup', S.homes[m.drone], m.restaurant.acc], ['delivery', m.restaurant.acc, m.customer.acc]]) {
+      const plan = planMission(from, to);
+      previews.items.push({ drone: m.drone, leg, from, to, plan, viz: plan.ok ? buildViz(plan) : null });
+    }
+  }
+  previews.ver = world.version;
+}
+function syncRoutes(dt) {
+  const k = 1 - Math.exp(-dt * 6);
+  routeLayer.visible = S.showRoutes;
+  ensurePreviews();
+  const sel = S.selected?.type === 'courier' ? S.selected.id : null;
+  for (const it of previews.items) {
+    if (!it.viz) continue;
+    const emph = sel && sel !== it.drone ? 0.35 : 1;
+    styleViz(it.viz, S.stage === 2 ? 'cands' : S.stage === 3 ? 'optimal' : 'off', emph, k);
+  }
+  for (const c of S.couriers) {
+    const plan = c.task?.route.plan;
+    if (plan?.ok) {
+      if (!c.viz || c.viz.plan !== plan) { disposeViz(c.viz); c.viz = buildViz(plan); }
+    } else if (c.viz && !c.task) { disposeViz(c.viz); c.viz = null; }
+    if (c.viz) styleViz(c.viz, S.stage === 4 && c.task ? 'live' : 'off', 1, k);
+  }
+}
+function styleVolumes(dt) {
+  const k = 1 - Math.exp(-dt * 6), st = S.stage;
+  for (const z of volViz.values()) {
+    const v = z.v;
+    if (z.restricted && !v.active) continue;
+    const sel = S.volSel === v.id, tr = v.kind === 'transition';
+    let fillT, edgeT;
+    if (z.restricted) { fillT = st === 1 ? 0.16 : 0.11; edgeT = st === 1 ? 0.95 : 0.75; }
+    else if (tr) { fillT = st === 1 ? 0.16 : 0.08; edgeT = st === 1 ? 0.85 : 0.5; }
+    else { fillT = st === 1 ? 0.06 : 0.025; edgeT = st === 1 ? 0.95 : 0.5; }
+    if (sel) { fillT += 0.1; edgeT = 1; }
+    z.fill.material.opacity += (fillT - z.fill.material.opacity) * k;
+    z.edges.material.opacity += (edgeT - z.edges.material.opacity) * k;
+    if (z.label) z.label.visible = sel || (st === 1 ? true : z.restricted);
+  }
+}
 
 // ---------- visual sync ----------------------------------------------
 const tmp = new THREE.Vector3();
@@ -1074,7 +1262,9 @@ function syncVisuals(dt) {
     c.lamp.material.color.setHex(lc); c.lamp.material.emissive.setHex(lc);
     c.label.position.set(c.pos.x, SLAB + c.pos.y + 3.4, c.pos.z);
     const alt = Math.round(c.pos.y * SCALE_M);
-    setLabel(c.label, [{ t: `${c.id} · ${c.hold ? 'HOVER' : c.status}`, c: c.hold ? '#c0392b' : '#8a6a0a', s: 36 },
+    const parked = !c.task && c.pos.y < 0.3 && !c.hold;
+    if (parked) setLabel(c.label, [{ t: c.id, c: dark(c.tint, 0.8), s: 34 }]); // parked drones: just the ID, so the hub stays legible
+    else setLabel(c.label, [{ t: `${c.id} · ${c.hold ? 'HOVER' : c.status}`, c: c.hold ? '#c0392b' : dark(c.tint, 0.8), s: 36 },
       { t: `z ${alt} m · ${l}/${COURIER_CAPACITY} orders`, c: '#7a736b', s: 26 }]);
     c.halo.visible = live.has(c.id); c.halo.position.copy(c.mesh.position).y += 0.8;
     // highlighted blocked obstacle (a few seconds after a conflict is detected)
@@ -1123,14 +1313,10 @@ function syncVisuals(dt) {
   for (const c of S.couriers) {
     const cp = sceneP(c.pos);
     if (c.pos.y > 0.3) flightLines.add(cp, new THREE.Vector3(c.pos.x, SLAB + 0.05, c.pos.z), 0xaab2ba);
-    if (S.showRoutes && c.task) {
-      let prev = cp;
-      const col = c.task.route.rerouted ? PATH_COLOR.rerouted : PATH_COLOR.nominal;
-      for (const w of pts3(c)) { const wp = sceneP(w); flightLines.add(prev, wp, col); prev = wp; }
-    }
     if (c.blocked && S.time < c.blocked.until) flightLines.add(sceneP(c.blocked.a), sceneP(c.blocked.b), PATH_COLOR.blocked);
   }
   flightLines.flush();
+  syncRoutes(dt); styleVolumes(dt);
 
   // query volume
   const qv = qState.vol;
@@ -1215,7 +1401,9 @@ const logHTML = () => S.log.map((e) => `<div class="${e.kind}">[${fmt(e.t, 0)}s]
 function robotHTML(c) {
   if (!c) return '';
   const l = toLocal(c.pos), zone = zoneAt(c.pos.x, c.pos.z), lm = nearestLandmark(c.pos), n = c.nearest ?? nearestObstacle(c.pos);
-  const ceilM = Math.min(cfg.maxAltM, zone.ceilingM);
+  const ceilM = ceilingMAt(c.pos.x, c.pos.z), vols = volumesAt(c.pos), blk = blockAt(c.pos.x, c.pos.z);
+  const volTxt = vols.length ? vols.map((v) => `<b>${v.id}</b>${v.permission === 'restricted' ? ' <span class="bad">restricted</span>' : ''}`).join(' + ') : '<span class="bad">none — outside all volumes</span>';
+  const P = c.task?.route.plan;
   const R = c.task?.route;
   const stat = c.hold ? `HOVER <span class="bad">NO_VALID_ROUTE</span>` : c.status;
   return `<table>
@@ -1225,8 +1413,10 @@ function robotHTML(c) {
     ${row('heading · speed', `${fmt(c.headingDeg, 0)}° (${compassWord(c.headingDeg)}) · ${fmt(c.speedU * SCALE_M)} m/s`)}
     ${row('flight_status', `<b>${stat}</b>`)}
     ${row('route · waypoint', R ? `${R.id} · ${Math.min(R.idx + 1, R.pts.length)}/${R.pts.length}${R.rerouted ? ' (rerouted)' : ''}` : '—')}
+    ${row('candidates → chosen', P?.ok ? `${P.candidates.length} feasible → <b>${P.best.id}</b> ${P.best.label}` : '—')}
     ${row('destination', c.task ? stationLabel(destOf(c.task)) : '—')}
-    ${row('airspace zone', zone.name)}
+    ${row('airspace volume(s)', volTxt)}
+    ${row('district · block', `${zone.name} · ${blk.name}`)}
     ${row('nearest obstacle', `${fmt(n.d * SCALE_M)} m · ${n.id ?? '—'}${n.kind === 'restricted' ? ' (restricted)' : ''}`)}
     ${row('clearance margin', `${cfg.clearanceM} m`)}
     ${row('nearest landmark', `${lm.name} (${fmt(lm.distM, 0)} m)`)}
@@ -1243,56 +1433,57 @@ function humanHTML(c) {
     ${pct != null ? `<div class="bar"><i style="width:${pct}%"></i></div><div class="dim small">${pct}% of this leg flown (${h.leg}) · ETA ${h.eta}</div>` : ''}`;
 }
 // side elevation: altitude vs distance along the straight line to the destination
+function elevationSource(c) {
+  if (c?.task) return { A: c.task.start, B: destOf(c.task).acc, cur: c.pos, pts: pts3(c), col: '#1f4fd1', title: null };
+  if (c && S.stage < 4) { // before flight: show the drone's first planned (selected) leg
+    ensurePreviews();
+    const it = previews.items.find((i) => i.drone === c.id && i.leg === 'delivery' && i.plan.ok);
+    if (it) return { A: it.from, B: it.to, cur: it.from, pts: it.plan.best.pts, col: '#1f4fd1', title: `${c.id} delivery leg · planned` };
+  }
+  return null;
+}
 function drawElevation(c) {
   const cv = $('elev'); if (!cv) return;
   const g = cv.getContext('2d'), W = cv.width, H = cv.height, padL = 26, padB = 14, padT = 6;
   g.clearRect(0, 0, W, H);
   g.fillStyle = '#f7f4f0'; g.fillRect(0, 0, W, H);
-  if (!c?.task) { g.fillStyle = '#8a8279'; g.font = '12px system-ui'; g.fillText('No active route — start a delivery to see the side elevation.', 10, H / 2); return; }
-  const A = c.task.start, B = destOf(c.task).acc, L = Math.max(1, dist(A, B)), ux = (B.x - A.x) / L, uz = (B.z - A.z) / L;
+  const src = elevationSource(c);
+  if (!src) { g.fillStyle = '#8a8279'; g.font = '12px system-ui'; g.fillText('No active route — step to “Live Flight” or pick a drone.', 10, H / 2); return; }
+  const { A, B } = src, L = Math.max(1, dist(A, B)), ux = (B.x - A.x) / L, uz = (B.z - A.z) / L;
   const zTop = cfg.maxAltM + 20, X = (s) => padL + (s / L) * (W - padL - 6), Y = (zm) => H - padB - (zm / zTop) * (H - padB - padT);
   const sCoord = (p) => (p.x - A.x) * ux + (p.z - A.z) * uz;
-  // obstacle silhouette below the straight line A→B
-  for (let i = 0; i <= 120; i++) {
-    const s = (i / 120) * L, x = A.x + ux * s, z = A.z + uz * s;
+  const N = 120, w = Math.ceil((W - padL) / N) + 1;
+  for (let i = 0; i <= N; i++) { // permitted volumes, buildings and restricted prisms beneath the straight line A→B
+    const s = (i / N) * L, x = A.x + ux * s, z = A.z + uz * s, x0 = X(s);
+    for (const v of world.volumes) if (x >= v.x0 && x <= v.x1 && z >= v.z0 && z <= v.z1) {
+      const hi = Math.min(v.zhiM, v.kind === 'transition' ? v.zhiM : cfg.maxAltM);
+      g.fillStyle = 'rgba(111,207,159,.22)'; g.fillRect(x0, Y(hi), w, Y(v.zloM) - Y(hi));
+    }
     let h = 0, rz = null;
     for (const o of world.obstacles) if (x >= o.x0 && x <= o.x1 && z >= o.z0 && z <= o.z1) h = Math.max(h, o.h * SCALE_M);
     for (const r of world.restricted) if (r.active && x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1) rz = r;
-    const x0 = X(s), w = Math.ceil((W - padL) / 120) + 1;
     if (h) { g.fillStyle = '#cfcac4'; g.fillRect(x0, Y(h), w, Y(0) - Y(h)); }
-    if (rz) { g.fillStyle = 'rgba(217,79,92,.28)'; g.fillRect(x0, Y(Math.min(rz.zhiM, zTop)), w, Y(rz.zloM) - Y(Math.min(rz.zhiM, zTop))); }
+    if (rz) { g.fillStyle = 'rgba(224,112,124,.34)'; g.fillRect(x0, Y(Math.min(rz.zhiM, zTop)), w, Y(rz.zloM) - Y(Math.min(rz.zhiM, zTop))); }
   }
   g.strokeStyle = '#8a8279'; g.beginPath(); g.moveTo(padL, Y(0)); g.lineTo(W - 6, Y(0)); g.stroke();
-  g.setLineDash([4, 3]); g.strokeStyle = '#b08a2a'; g.beginPath(); g.moveTo(padL, Y(cfg.maxAltM)); g.lineTo(W - 6, Y(cfg.maxAltM)); g.stroke(); g.setLineDash([]);
   g.fillStyle = '#8a8279'; g.font = '10px system-ui'; g.fillText(`${cfg.maxAltM} m`, 2, Y(cfg.maxAltM) + 3); g.fillText('0', 14, Y(0) + 3);
   g.fillText('start', padL, H - 2); g.fillText('destination', W - 56, H - 2);
-  // planned route (from current position) and the drone
-  const R = c.task.route, col = R.rerouted ? '#2f9be0' : '#d9a21b';
-  g.strokeStyle = col; g.lineWidth = 2; g.beginPath(); g.moveTo(X(sCoord(c.pos)), Y(c.pos.y * SCALE_M));
-  for (const w of pts3(c)) g.lineTo(X(Math.max(0, Math.min(L, sCoord(w)))), Y(w.y * SCALE_M));
+  g.strokeStyle = src.col; g.lineWidth = 2; g.beginPath(); g.moveTo(X(Math.max(0, Math.min(L, sCoord(src.cur)))), Y(src.cur.y * SCALE_M));
+  for (const p of src.pts) g.lineTo(X(Math.max(0, Math.min(L, sCoord(p)))), Y(p.y * SCALE_M));
   g.stroke(); g.lineWidth = 1;
-  g.fillStyle = '#2c4a8c'; g.beginPath(); g.arc(X(Math.max(0, Math.min(L, sCoord(c.pos)))), Y(c.pos.y * SCALE_M), 4, 0, 7); g.fill();
+  g.fillStyle = '#2c4a8c'; g.beginPath(); g.arc(X(Math.max(0, Math.min(L, sCoord(src.cur)))), Y(src.cur.y * SCALE_M), 4, 0, 7); g.fill();
+  if (src.title) { g.fillStyle = '#5f5a54'; g.fillText(src.title, padL + 4, 12); }
 }
 
 const nameOpt = (a) => a.map((s) => `<option>${s}</option>`).join('');
 let lastDroneKey = '';
 function readQuery() {
   const mode = $('q-mode').value, num = (id, d = 0) => { const v = parseFloat($(id).value); return Number.isFinite(v) ? v : d; };
-  if (mode === 'zone') {
-    const loc = { zone: $('q-zone').value }, zmin = $('q-zmin').value.trim(), zmax = $('q-zmax').value.trim();
-    if (zmin !== '') loc.z_min = parseFloat(zmin);
-    if (zmax !== '') loc.z_max = parseFloat(zmax);
-    return loc;
-  }
+  if (mode === 'volume') return { volume: $('q-vol').value };
   if (mode === 'box') return { box: { x: [num('q-x0', -300), num('q-x1', 300)], y: [num('q-y0', -300), num('q-y1', 300)], z: [num('q-z0', 0), num('q-z1', 120)] } };
   return { point: [num('q-px'), num('q-py'), num('q-pz', 50)], radius: num('q-pr', 40) };
 }
 function queryVolume(loc) {
-  if (loc.zone) {
-    const z = namedZones().find((q) => q.name === loc.zone); if (!z) return null;
-    const lo = (loc.z_min ?? z.zloM) / SCALE_M, hi = Math.max(lo + 0.2, (loc.z_max ?? z.zhiM) / SCALE_M);
-    return { kind: 'box', size: [z.x1 - z.x0, hi - lo, z.z1 - z.z0], centre: [(z.x0 + z.x1) / 2, SLAB + lo + (hi - lo) / 2, (z.z0 + z.z1) / 2] };
-  }
   if (loc.box) {
     const a = fromLocal({ x: loc.box.x[0], y: loc.box.y[0], z: loc.box.z[0] }), b = fromLocal({ x: loc.box.x[1], y: loc.box.y[1], z: loc.box.z[1] });
     const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x), z0 = Math.min(a.z, b.z), z1 = Math.max(a.z, b.z), y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
@@ -1301,13 +1492,92 @@ function queryVolume(loc) {
   const p = fromLocal({ x: loc.point[0], y: loc.point[1], z: loc.point[2] });
   return { kind: 'sphere', r: loc.radius / SCALE_M, centre: [p.x, SLAB + p.y, p.z] };
 }
+const ext = (a, b) => `${Math.round(a)} … ${Math.round(b)} m`;
+function volumeCardHTML(id, ids) {
+  const v = namedVolumes().find((q) => q.id === id);
+  if (!v) return '';
+  const perm = v.permission === 'permitted';
+  const status = v.active ? '' : ' · <span class="dim">inactive</span>';
+  return `<div class="vcard ${perm ? 'ok' : 'no'}"><div class="vhead"><b>${v.id}</b> ${v.name}<span class="pill" style="background:${perm ? '#3fa874' : v.kind === 'hazard' ? '#c8860f' : '#c8404f'}">${v.kind === 'hazard' ? 'hazard' : v.permission}</span></div>
+    <table><tr><td>x (east)</td><td>${ext(v.x0 * SCALE_M, v.x1 * SCALE_M)}</td></tr>
+    <tr><td>y (north)</td><td>${ext(-v.z1 * SCALE_M, -v.z0 * SCALE_M)}</td></tr>
+    <tr><td>z (altitude)</td><td>${ext(v.zloM, v.zhiM)}${status}</td></tr>
+    <tr><td>drones inside</td><td>${ids.length ? ids.map((i) => `<span class="pill drone" style="background:${hex(S.couriers.find((d) => d.id === i)?.tint ?? 0xf1b82d)}">${i}</span>`).join(' ') : '<span class="dim">none right now</span>'}</td></tr></table></div>`;
+}
 function updateQuery() {
   const loc = readQuery(), res = getAgentsAt(loc);
   qState.result = res.agents;
-  qState.vol = $('q-show').checked ? queryVolume(loc) : null;
+  const mode = $('q-mode').value;
+  S.volSel = mode === 'volume' ? loc.volume : null;
+  qState.vol = mode !== 'volume' && $('q-show').checked ? queryVolume(loc) : null;
+  $('q-card').innerHTML = mode === 'volume' ? volumeCardHTML(loc.volume, res.agents) : '';
   $('q-out').textContent = JSON.stringify(res, null, 1).replace(/\n\s+/g, ' ').replace(/\{ /g, '{').replace(/ \}/g, '}');
-  $('q-ids').innerHTML = res.agents.length ? res.agents.map((i) => `<span class="pill drone">${i}</span>`).join(' ') : '<span class="dim">no drones in this volume</span>';
+  $('q-ids').innerHTML = mode === 'volume' ? '' : res.agents.length ? res.agents.map((i) => `<span class="pill drone">${i}</span>`).join(' ') : '<span class="dim">no drones in this volume</span>';
 }
+/** select a volume in the query panel (from a click on the prism or from the list) */
+function selectVolume(id) {
+  $('q-mode').value = 'volume'; $('q-vol').value = id;
+  $('sec-query').open = true;
+  modeSwitch();
+}
+// ---------- stage + fleet panels ------------------------------------------------
+function legTableHTML(plan, title) {
+  if (!plan) return '';
+  if (!plan.ok) return `<div class="legt"><div class="lh">${title}</div><div class="bad">No feasible route — ${plan.reason}.</div></div>`;
+  const shown = S.stage >= 3;
+  return `<div class="legt"><div class="lh">${title} · ${plan.candidates.length} feasible candidate${plan.candidates.length > 1 ? 's' : ''}</div><table>
+    ${plan.candidates.map((c, i) => `<tr class="${shown && c.chosen ? 'win' : ''}"><td><i class="cd" style="background:${hex(CAND_COLOR[i % CAND_COLOR.length])}"></i>${c.id}</td><td>${c.label}</td><td>${Math.round(c.len * SCALE_M)} m</td><td>+${Math.round(c.climbM)} m</td><td>${fmt(c.cost * SCALE_M, 0)}</td><td>${shown && c.chosen ? '✓' : ''}</td></tr>`).join('')}
+    </table></div>`;
+}
+function stageHTML() {
+  const [, q, desc] = STAGES[S.stage - 1];
+  let html = `<div class="stq"><b>${q}</b> ${desc}</div>`;
+  const c = trackedDrone();
+  if (S.stage === 4 && c) {
+    const P = c.task?.route.plan;
+    html += `<div class="dim small" style="margin-top:6px"><b style="color:${dark(c.tint, 0.8)}">${c.id}</b> · ${P?.ok ? `${P.candidates.length} feasible candidate${P.candidates.length > 1 ? 's' : ''} → flying <b>${P.best.label}</b> (${Math.round(P.best.len * SCALE_M)} m)${c.task.route.rerouted ? ', re-planned in flight' : ''}` : c.hold ? `no valid route — ${c.hold.reason}` : 'on the ground — no active leg'}.</div>`;
+  } else if (S.stage >= 2 && c) {
+    ensurePreviews();
+    const its = previews.items.filter((i) => i.drone === c.id);
+    html += `<div class="dim small" style="margin-top:6px">Planned legs for <b style="color:${dark(c.tint, 0.8)}">${c.id}</b> — length · climb · cost</div>`;
+    for (const it of its) html += legTableHTML(it.plan, it.leg === 'pickup' ? `Hub → ${S.missions.find((m) => m.drone === c.id).restaurant.stationId} (pickup)` : `${S.missions.find((m) => m.drone === c.id).restaurant.stationId} → ${S.missions.find((m) => m.drone === c.id).customer.stationId} (delivery)`);
+    html += `<div class="dim small" style="margin-top:4px">Criterion actually used: <b>${its[0]?.plan.criterion ?? '—'}</b>. Selection mode: ${cfg.preference}.</div>`;
+  }
+  return html;
+}
+function fleetHTML() {
+  const cur = trackedDrone();
+  return S.couriers.map((c) => {
+    const m = S.missions.find((q) => q.drone === c.id), h = humanView(c), pct = h.progress != null ? Math.round(h.progress * 100) : 0;
+    const dest = c.task ? destOf(c.task).stationId : c.carry[0] ? c.carry[0].customer.stationId : c.orders[0] ? c.orders[0].restaurant.stationId : '—';
+    const stat = c.hold ? 'HOVER' : c.status;
+    return `<div class="fcard ${cur === c ? 'sel' : ''}" data-drone="${c.id}" style="--tint:${hex(c.tint)}">
+      <i class="sw"></i><b>${c.id}</b><span class="fst ${c.hold ? 'bad' : ''}">${stat}</span>
+      <span class="fz">z ${Math.round(c.pos.y * SCALE_M)} m</span>
+      <span class="fm dim">${m ? `${m.restaurant.stationId} → ${m.customer.stationId}` : ''} · now → ${dest} · ${load(c)}/${COURIER_CAPACITY}</span>
+      <div class="bar"><i style="width:${pct}%;background:${hex(c.tint)}"></i></div></div>`;
+  }).join('');
+}
+function missionBar() {
+  const done = S.missions.filter((m) => m.order.status === 'delivered' || !S.orders.includes(m.order)).length;
+  const frac = S.missions.reduce((a, m) => a + (S.orders.includes(m.order) ? STATUS.indexOf(m.order.status) / 5 : 1), 0) / Math.max(1, S.missions.length);
+  $('t-clock').textContent = `${fmt(S.time, 0)} s`;
+  $('t-bar').style.width = Math.round(frac * 100) + '%';
+  $('t-note').textContent = `first deliveries ${done}/${S.missions.length}`;
+}
+function stageButtons() {
+  document.querySelectorAll('#stages button').forEach((b) => b.classList.toggle('on', +b.dataset.stage === S.stage));
+  $('stage-q').textContent = `Stage ${S.stage} · ${STAGES[S.stage - 1][0]}`;
+}
+function setStage(n) {
+  n = Math.max(1, Math.min(4, n));
+  if (n === S.stage) return;
+  S.stage = n;
+  if (n === 4) S.running = true;
+  log(`Stage ${n}: ${STAGES[n - 1][0]} — ${STAGES[n - 1][1]}`);
+  updatePanels(true);
+}
+
 let panelClock = 0;
 function updatePanels(force) {
   panelClock = 0;
@@ -1317,7 +1587,11 @@ function updatePanels(force) {
   $('rules').innerHTML = rulesHTML();
   if (logDirty || force) { $('log').innerHTML = logHTML(); logDirty = false; }
   $('btn-policy').textContent = 'Priority: ' + (S.policy === 'fifo' ? 'FIFO' : 'Revenue');
-  $('btn-play').textContent = S.running ? '⏸ Pause' : '▶ Run';
+  $('btn-play').textContent = S.stage < 4 ? '▶ Start flight' : S.running ? '⏸ Pause' : '▶ Run';
+  stageButtons(); missionBar();
+  $('alt-row').hidden = S.stage !== 4;
+  $('stage-body').innerHTML = stageHTML();
+  $('fleet').innerHTML = fleetHTML();
   // drone selector
   const k = S.couriers.map((c) => c.id).join();
   const c = trackedDrone();
@@ -1329,22 +1603,30 @@ function updatePanels(force) {
   drawElevation(c);
   updateQuery();
 }
-$('legend').innerHTML = '<b>Order status</b>' + STATUS.map((s) => `<div><i style="background:${hex(STATUS_COLOR[s])}"></i>${s}</div>`).join('')
-  + '<hr><b>Relationships</b>'
-  + [['creates', 'customer → order'], ['prepares', 'restaurant → order'], ['evaluates', 'platform → order'], ['assigns', 'platform → drone → order'], ['carries', 'drone picks up / delivers']]
-    .map(([k, t]) => `<div><i style="background:${hex(REL_COLOR[k])}"></i>${t}</div>`).join('')
-  + '<hr><b>Flight paths</b>'
-  + [['nominal', 'planned path'], ['rerouted', 'rerouted path'], ['blocked', 'blocked stretch / obstacle']]
-    .map(([k, t]) => `<div><i style="background:${hex(PATH_COLOR[k])}"></i>${t}</div>`).join('')
-  + '<div><i style="background:#d94f5c;opacity:.5"></i>restricted airspace</div>'
-  + '<hr><b>Roles</b>'
-  + [['customer', 'customer · delivery station'], ['restaurant', 'restaurant · pickup station'], ['platform', 'platform'], ['courier', 'courier (drone)']]
-    .map(([k, t]) => `<div><i style="background:${hex(ROLE[k])}"></i>${t}</div>`).join('')
-  + '<hr><div class="dim">Box size = revenue · N ↗ (north = up-right)</div>';
+const sw = (bg, t, extra = '') => `<div><i style="background:${bg};${extra}"></i>${t}</div>`;
+const lg = (title, body) => `<section><b>${title}</b>${body}</section>`;
+$('legend').innerHTML =
+  lg('Airspace', sw('rgba(111,207,159,.45)', 'permitted volume (3D prism)', `border:1px dashed ${hex(AIR.edgePermitted)}`)
+    + sw('rgba(224,112,124,.45)', 'restricted volume', `border:1px dashed ${hex(AIR.edgeRestricted)}`)
+    + sw('rgba(240,177,58,.5)', 'temporary hazard (HZ-1)', `border:1px dashed ${hex(AIR.edgeHazard)}`)
+    + sw('#e8e6e2', 'building (solid obstacle)'))
+  + lg('Routes', sw(hex(CAND_COLOR[0]), 'candidate routes (dashed)') + sw(hex(AIR.cobalt), 'selected smooth route') + sw(hex(PATH_COLOR.blocked), 'blocked stretch'))
+  + lg('Drones', DRONE_TINT.map((t, i) => sw(hex(t), 'D-0' + (i + 1))).join(''))
+  + lg('Roles', [['customer', 'customer · delivery station'], ['restaurant', 'restaurant · pickup station'], ['platform', 'platform · launch hub'], ['courier', 'drone body']]
+    .map(([k, t]) => sw(hex(ROLE[k]), t)).join(''))
+  + lg('Order status', STATUS.map((s) => sw(hex(STATUS_COLOR[s]), s)).join('') + '<div class="dim">Box size = revenue · N ↗</div>');
 
 // ---------- panel wiring ---------------------------------------------
 const bind = (id, fn) => $(id).addEventListener('click', () => { fn(); updatePanels(true); });
-bind('btn-play', () => { S.running = !S.running; });
+bind('btn-play', () => { if (S.stage < 4) setStage(4); else S.running = !S.running; });
+document.querySelectorAll('#stages button').forEach((b) => b.addEventListener('click', () => setStage(+b.dataset.stage)));
+$('btn-stage-prev').addEventListener('click', () => setStage(S.stage - 1));
+$('btn-stage-next').addEventListener('click', () => setStage(S.stage + 1));
+$('chk-alt').addEventListener('change', (e) => { S.showAlt = e.target.checked; });
+$('fleet').addEventListener('pointerdown', (e) => { // pointerdown: the cards are re-rendered every 250 ms, which would swallow a slow click
+  const card = e.target.closest('[data-drone]'); if (!card) return;
+  const c = S.couriers.find((d) => d.id === card.dataset.drone); if (c) { S.selected = c; S.track = c; updatePanels(true); }
+});
 bind('btn-reset', () => resetWorld());
 bind('btn-create', () => act.create());
 bind('btn-accept-order', () => act.accept());
@@ -1357,8 +1639,6 @@ bind('btn-c-accept', () => act.cAccept());
 bind('btn-c-travel', () => act.cTravel());
 bind('btn-c-pickup', () => act.cPickup());
 bind('btn-c-deliver', () => act.cDeliver());
-bind('btn-add-courier', () => act.addCourier());
-bind('btn-del-courier', () => act.delCourier());
 $('sel-speed').addEventListener('change', (e) => { S.speed = parseFloat(e.target.value); });
 for (const k of ['customer', 'restaurant', 'platform', 'courier']) {
   $('auto-' + k).checked = S.auto[k];
@@ -1394,40 +1674,55 @@ function scenario(r, c, why, pref) {
   log(`Scenario: order #${o.id} ${R.stationId} → ${C.stationId} — ${why}`, 'good');
   if (!S.auto.restaurant || !S.auto.platform || !S.auto.courier) toast('Auto is off for some agents: accept, mark ready, assign and fly the order manually.');
 }
-bind('sc-open', () => scenario('PS-3', 'DS-4', 'open corridor in the lower-building SoHo-like zone'));
-bind('sc-tall', () => scenario('PS-1', 'DS-6', 'the 95 m Midtown Tower lies on the straight path', 'shortest'));
+bind('sc-open', () => scenario('PS-3', 'DS-4', 'open lane in the low South Block District'));
+bind('sc-tall', () => scenario('PS-1', 'DS-6', 'the 95 m Spire Tower lies on the straight path', 'shortest'));
 bind('sc-tall-climb', () => scenario('PS-1', 'DS-6', 'same route, but the drone prefers climbing over the tower', 'climb'));
-bind('sc-restricted', () => scenario('PS-2', 'DS-3', 'Restricted Zone A blocks the shortest route at every altitude'));
+bind('sc-restricted', () => scenario('PS-2', 'DS-3', 'Restricted Zone A (a full-height prism) blocks the shortest route at every altitude'));
 bind('sc-closed', () => {
-  const rz = world.restricted.find((r) => r.id === 'RZ-C');
+  const rz = world.restricted.find((r) => r.id === 'HZ-1');
   rz.active = !rz.active; bump(); legCache.clear(); refreshAirspace();
-  $('sc-closed').textContent = rz.active ? 'Lift temporary restriction' : 'Close DS-3 (temporary restriction)';
-  log(rz.active ? 'Restricted Zone C activated over DS-3 — routes to DS-3 become impossible' : 'Restricted Zone C lifted', rz.active ? 'bad' : 'good');
+  $('sc-closed').textContent = rz.active ? 'Clear hazard HZ-1' : 'Raise hazard HZ-1 over DS-3';
+  log(rz.active ? 'Temporary hazard HZ-1 raised over DS-3 — affected routes are re-planned; DS-3 itself becomes unreachable' : 'Temporary hazard HZ-1 cleared', rz.active ? 'bad' : 'good');
   if (rz.active) scenario('PS-3', 'DS-3', 'destination inside restricted airspace → expect HOVER / NO_VALID_ROUTE');
 });
 
 // spatial query panel
-$('q-zone').innerHTML = nameOpt(namedZones().map((z) => z.name));
-const modeSwitch = () => { const m = $('q-mode').value; for (const el of document.querySelectorAll('[data-qm]')) el.hidden = el.dataset.qm !== m; updatePanels(true); };
+{
+  const rank = (v) => (v.kind === 'transition' ? 2 : v.permission === 'restricted' ? 1 : 0);
+  $('q-vol').innerHTML = namedVolumes().sort((a, b) => rank(a) - rank(b)).map((v) => `<option value="${v.id}">${v.id} · ${v.name}</option>`).join('');
+  $('q-vol').value = 'V-03';
+}
+const modeSwitch = () => { const m = $('q-mode').value; for (const el of document.querySelectorAll('[data-qm]')) el.hidden = !el.dataset.qm.split(' ').includes(m); updatePanels(true); };
 $('q-mode').addEventListener('change', modeSwitch);
 for (const el of document.querySelectorAll('#sec-query input, #sec-query select')) el.addEventListener('input', () => updateQuery());
-$('q-example').addEventListener('click', () => { $('q-mode').value = 'zone'; $('q-zone').value = 'Midtown-like Zone'; $('q-zmin').value = 60; $('q-zmax').value = 100; modeSwitch(); });
+$('q-example').addEventListener('click', () => { $('q-mode').value = 'box'; $('q-x0').value = -80; $('q-x1').value = 80; $('q-y0').value = 40; $('q-y1').value = 120; $('q-z0').value = 90; $('q-z1').value = 120; modeSwitch(); });
 $('q-here').addEventListener('click', () => {
   const c = trackedDrone(); if (!c) return; const l = toLocal(c.pos);
   $('q-mode').value = 'point'; modeSwitch(); $('q-px').value = Math.round(l.x); $('q-py').value = Math.round(l.y); $('q-pz').value = Math.round(l.z); $('q-pr').value = 40; updateQuery();
 });
 modeSwitch();
 
-function resetWorld() {
+function resetWorld(silent = false) {
   [...S.orders].forEach(removeOrder);
   [...S.couriers].forEach(removeCourier);
-  S.delivered.length = 0; S.log.length = 0; S.track = null;
-  S.time = 0; S.nextOrder = 1; S.nextCourier = 1; S.nextRoute = 1; S.selected = null; S.policy = 'fifo';
-  S.ruleHits.fill(0); S.timers = { spawn: 1.5, evaluate: 0, sense: 0 };
+  S.delivered.length = 0; S.log.length = 0; S.track = null; S.homes = {}; S.missions = [];
+  S.time = 0; S.nextOrder = 1; S.nextCourier = 1; S.nextRoute = 1; S.selected = null; S.policy = 'fifo'; simSeed = 7;
+  S.ruleHits.fill(0); S.timers = { spawn: 40, evaluate: 0, sense: 0 };
   S.customers.forEach((c) => { c.orderTime = null; c.selectedRestaurant = null; });
-  const rz = world.restricted.find((r) => r.id === 'RZ-C'); if (rz.active) { rz.active = false; bump(); legCache.clear(); refreshAirspace(); $('sc-closed').textContent = 'Close DS-3 (temporary restriction)'; }
-  for (let i = 0; i < 2; i++) addCourier();
-  log('World reset');
+  const rz = world.restricted.find((r) => r.id === 'HZ-1');
+  if (rz.active) { rz.active = false; bump(); legCache.clear(); refreshAirspace(); $('sc-closed').textContent = 'Raise hazard HZ-1 over DS-3'; }
+  for (let i = 0; i < MAX_COURIERS; i++) addCourier();
+  // the four scripted first deliveries: each drone's first order is pinned to it, so the previewed routes are the flown routes
+  const plan = [['D-01', 'PS-1', 'DS-6'], ['D-02', 'PS-2', 'DS-3'], ['D-03', 'PS-3', 'DS-4'], ['D-04', 'PS-1', 'DS-5']];
+  for (const [d, r, c] of plan) {
+    const R = S.restaurants.find((x) => x.stationId === r), C = S.customers.find((x) => x.stationId === c);
+    const o = createOrder(C, R); o.pin = d;
+    S.missions.push({ drone: d, restaurant: R, customer: C, order: o });
+  }
+  previews.ver = -1;
+  S.running = true;
+  controls.reset();
+  if (!silent) log('World reset — four drones back at the launch hub');
 }
 
 // ---------- picking --------------------------------------------------
@@ -1439,7 +1734,16 @@ canvas.addEventListener('pointerup', (e) => {
   ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
   ray.setFromCamera(ndc, camera);
   const hit = ray.intersectObjects(pickables, true)[0];
-  S.selected = hit ? hit.object.userData.ref : null;
+  if (hit) S.selected = hit.object.userData.ref;
+  else {
+    S.selected = null;
+    // nothing solid under the cursor: pick an airspace prism (restricted first, then columns, corridor, decks)
+    const hits = S.showAirspace ? ray.intersectObjects(volMeshes.filter((m) => m.visible), false) : [];
+    if (hits.length) {
+      const pri = Math.min(...hits.map((h) => h.object.userData.pri));
+      selectVolume(hits.find((h) => h.object.userData.pri === pri).object.userData.volume.id);
+    }
+  }
   updatePanels(true);
 });
 
@@ -1452,14 +1756,15 @@ function resize() {
 }
 addEventListener('resize', resize);
 
-for (let i = 0; i < 2; i++) addCourier();
+controls.update(); controls.saveState();
 refreshAirspace();
-log('Simulation started — agents are on auto. Untick an agent\'s "auto" to take over manually. All geometry and parameters are synthetic.');
+resetWorld(true);
+log('AIRSPACE ready — step through the four stages, or press Start flight. All geometry and parameters are synthetic.');
 resize();
 let lastT = performance.now();
 function frame() {
   const now = performance.now(), dt = Math.min((now - lastT) / 1000, 0.1); lastT = now;
-  if (S.running) { let t = dt * S.speed; while (t > 1e-6) { const s = Math.min(0.1, t); step(s); t -= s; } }
+  if (S.running && S.stage === 4) { let t = dt * S.speed; while (t > 1e-6) { const s = Math.min(0.1, t); step(s); t -= s; } }
   controls.update();
   syncVisuals(dt);
   if ((panelClock += dt) > 0.25) updatePanels();
@@ -1469,4 +1774,4 @@ function frame() {
 updatePanels(true);
 frame();
 // exposed for debugging / automated checks
-window.__sim = { S, act, step, world, cfg, planRoute, getLocation, getAgentsAt };
+window.__sim = { segCheck, inPermitted, volumesAt, S, act, step, world, cfg, planRoute, planMission, getLocation, getAgentsAt, getAgentsInBox, setStage, previews, selectVolume, resetWorld };
