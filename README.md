@@ -36,3 +36,8 @@ Soft "clay" isometric city (orthographic camera, soft shadows, rounded forms, no
 The background city is white massing with green parks and blue water on cool-grey streets; saturated architectural-model colours
 are reserved for the four roles: **restaurants** (coral/orange/salmon), **customers** (forest/denim/teal roofs),
 **platform** (navy) and **couriers** (mustard cars).
+
+### Drone location layer
+`spatial.js` holds the 3D obstacle/airspace model, route planner and `getAgentsAt`; `main.js` wires it to the scene and panels.
+In the browser console: `getLocation('D-001')` and `getAgentsAt({zone:'Midtown-like Zone', z_min:60, z_max:100})`. All geometry and flight
+parameters are synthetic classroom assumptions, not legal limits.

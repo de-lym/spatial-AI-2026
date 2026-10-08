@@ -16,7 +16,7 @@
   <header>
     <div>
       <h1>Delivery Platform</h1>
-      <p>Semantic model: how courier capacity is allocated across orders of different revenue and fulfillment time.</p>
+      <p>How does a platform allocate limited drone capacity across orders of different revenue and fulfillment time — in a fictional, SoHo/Midtown-inspired airspace? Synthetic data · classroom simulation, not a flight planner.</p>
     </div>
     <button id="btn-panel" class="icon" title="Collapse / expand the whole panel">▾</button>
   </header>
@@ -53,22 +53,75 @@
         <label class="auto"><input type="checkbox" id="auto-platform"> auto</label>
       </div>
       <div class="group courier">
-        <span class="gtitle">Courier</span>
+        <span class="gtitle">Courier · drone</span>
         <button id="btn-c-accept">Accept</button>
-        <button id="btn-c-travel">Drive → Restaurant</button>
+        <button id="btn-c-travel">Fly → Pickup</button>
         <button id="btn-c-pickup">Pick Up</button>
-        <button id="btn-c-deliver">Deliver</button>
-        <button id="btn-add-courier" title="Add a courier (capacity is limited)">＋</button>
-        <button id="btn-del-courier" title="Remove an idle courier">－</button>
+        <button id="btn-c-deliver">Fly → Delivery</button>
+        <button id="btn-add-courier" title="Add a drone (fleet capacity is limited)">＋</button>
+        <button id="btn-del-courier" title="Remove an idle drone">－</button>
         <label class="auto"><input type="checkbox" id="auto-courier"> auto</label>
       </div>
     </details>
 
-    <details open class="sec"><summary>Statistics</summary><div id="stats"></div></details>
-    <details open class="sec"><summary>Selection</summary><div id="info" class="info"></div></details>
+
+    <details open class="sec" id="sec-drone">
+      <summary>Drone location <small>(two views of one position)</small></summary>
+      <div class="pick"><label>Tracked drone <select id="sel-drone"></select></label><span class="dim small">or click a drone in the scene</span></div>
+      <h4 class="sub robot">Robot perspective · machine state</h4>
+      <div id="robot" class="info"></div>
+      <details class="raw"><summary>getLocation(droneId) → JSON</summary><pre id="robot-json"></pre></details>
+      <canvas id="elev" width="310" height="104" title="Side elevation along the straight line to the destination"></canvas>
+      <div class="dim small">Side elevation: grey = building heights under the straight line, red = restricted volume, dashed = simulated max altitude, line = planned route.</div>
+      <h4 class="sub human">Human perspective · delivery update</h4>
+      <div id="human" class="info"></div>
+    </details>
+
+    <details class="sec" id="sec-query">
+      <summary>Spatial query <small>getAgentsAt(location)</small></summary>
+      <div class="qrow"><label>Mode
+        <select id="q-mode"><option value="zone">Named zone + altitude band</option><option value="box">3D volume (local m)</option><option value="point">Point + radius</option></select></label></div>
+      <div class="qrow" data-qm="zone"><label>Zone <select id="q-zone"></select></label></div>
+      <div class="qrow" data-qm="zone"><label>z min (m) <input id="q-zmin" type="number" placeholder="any"></label><label>z max (m) <input id="q-zmax" type="number" placeholder="any"></label></div>
+      <div class="qrow" data-qm="box" hidden><label>x <input id="q-x0" type="number" value="-300"><input id="q-x1" type="number" value="300"></label></div>
+      <div class="qrow" data-qm="box" hidden><label>y <input id="q-y0" type="number" value="-300"><input id="q-y1" type="number" value="300"></label></div>
+      <div class="qrow" data-qm="box" hidden><label>z <input id="q-z0" type="number" value="0"><input id="q-z1" type="number" value="120"></label></div>
+      <div class="qrow" data-qm="point" hidden><label>x,y,z (m) <input id="q-px" type="number" value="0"><input id="q-py" type="number" value="0"><input id="q-pz" type="number" value="50"></label></div>
+      <div class="qrow" data-qm="point" hidden><label>radius (m) <input id="q-pr" type="number" value="40"></label><button id="q-here" type="button">Use tracked drone</button></div>
+      <div class="qrow"><label class="auto"><input type="checkbox" id="q-show" checked> show volume on map</label><button id="q-example" type="button">Example: Midtown 60–100 m</button></div>
+      <div id="q-ids" class="qids"></div>
+      <pre id="q-out"></pre>
+      <div class="dim small">Local frame: x east, y north, z up (m) from the street-level datum. Results come from the drones' live positions and update as they move.</div>
+    </details>
+
+    <details class="sec" id="sec-params">
+      <summary>Flight parameters <small>(illustrative only)</small></summary>
+      <div class="prm"><label>Clearance margin <span id="p-clear-v"></span><input type="range" id="p-clear" min="2" max="8" step="1"></label></div>
+      <div class="prm"><label>Simulated max altitude <span id="p-maxalt-v"></span><input type="range" id="p-maxalt" min="40" max="200" step="10"></label></div>
+      <div class="prm"><label>Nominal cruise altitude <span id="p-cruise-v"></span><input type="range" id="p-cruise" min="20" max="100" step="10"></label></div>
+      <div class="prm"><label>“Tall building” threshold <span id="p-tall-v"></span><input type="range" id="p-tall" min="20" max="100" step="10"></label></div>
+      <div class="prm"><label>“Approaching” message distance <span id="p-arrive-v"></span><input type="range" id="p-arrive" min="20" max="250" step="10"></label></div>
+      <div class="prm"><label>Avoidance preference
+        <select id="p-pref"><option value="shortest">Shortest path</option><option value="detour">Detour first</option><option value="climb">Climb first</option></select></label></div>
+      <div class="qrow"><label class="auto"><input type="checkbox" id="p-airspace" checked> airspace</label><label class="auto"><input type="checkbox" id="p-routes" checked> routes</label><label class="auto"><input type="checkbox" id="p-streets" checked> street names</label></div>
+      <h4 class="sub">Test situations</h4>
+      <div class="scen">
+        <button id="sc-open">Open corridor</button>
+        <button id="sc-tall">Tall building</button>
+        <button id="sc-tall-climb">Tall building · climb</button>
+        <button id="sc-restricted">Restricted zone</button>
+        <button id="sc-closed">Close DS-3 (temporary restriction)</button>
+      </div>
+      <div class="dim small">These parameters are classroom assumptions — not Chinese, U.S. or any other legal flight limits. Routes shown are never safe, authorized or legal for real flight.</div>
+    </details>
+    <details class="sec"><summary>Statistics</summary><div id="stats"></div></details>
+    <details class="sec"><summary>Selection</summary><div id="info" class="info"></div></details>
     <details class="sec"><summary>Platform queue <small>(unassigned orders)</small></summary><div id="queue" class="info"></div></details>
     <details class="sec"><summary>Rules <small>(times they bound an outcome)</small></summary><ol id="rules"></ol></details>
     <details class="sec"><summary>Event log</summary><div id="log"></div></details>
+    <details class="sec"><summary>About &amp; limits</summary>
+      <div class="dim small about">Fictional, Manhattan-inspired scene: a “SoHo-like” zone with lower buildings (south) and a “Midtown-like” zone with taller, denser buildings (north). All buildings, street names, heights, zones and numbers are synthetic. Coordinates: local Cartesian x east, y north, z up in metres above one shared ground datum; 1 scene unit = 5 m. Obstacle checks are a simplified classroom rule, not certified collision avoidance. Regulatory inspiration (categories only, no compliance claimed): China's Interim Regulations on the Flight Management of Unmanned Aircraft (2024), CAAC CCAR-92 (2024), Shenzhen Low-Altitude Economy Regulations (2024), T/CSAA 21-2022. Real New York operations would need separate FAA and local-rule verification.</div>
+    </details>
   </div>
 </aside>
 
