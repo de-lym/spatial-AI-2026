@@ -20,12 +20,28 @@ export const cfg = {
   arriveM: 80,          // remaining-route distance that triggers the "approaching" message
   senseU: 6,            // look-ahead range (scene units) used for the pre-move conflict test
   preference: 'shortest', // 'shortest' | 'climb' | 'detour'
+  w: { len: 1, climb: 0.5, lu: 1 },   // route objective weights (classroom assumptions)
+  sepM: 30,             // simulated minimum drone-to-drone separation (m)
+  lookS: 6,             // look-ahead horizon (s) for predicted closest approach
+};
+/**
+ * Land-use policy table. These are deliberate SIMULATION policies, not legal rules: every number is adjustable and the
+ * airspace and route costs are regenerated from them. minAltM = floor of the permitted volume above a block of that use;
+ * risk (0–10) is the soft cost accumulated per metre flown over it.
+ */
+export const LAND = {
+  housing:   { label: 'Housing', short: 'residential', minAltM: 45, risk: 6, ground: 0xdfc3ad, policy: 'Conditional: low-altitude restriction; the higher corridor carries a privacy / noise cost' },
+  cbd:       { label: 'CBD / Office', short: 'office', minAltM: 20, risk: 4, ground: 0xbcc5d0, policy: 'Conditional: collision-free altitude and passage required; moderate congestion cost' },
+  park:      { label: 'Green Space / Park', short: 'park', minAltM: 20, risk: 3, ground: 0xaec3a1, policy: 'Conditional: modest wildlife / public-activity penalty' },
+  logistics: { label: 'Logistics / Commercial', short: 'commercial', minAltM: 20, risk: 1, ground: 0xe6d3a3, policy: 'Preferred: launch / landing and corridor connection, low modelled cost' },
+  sensitive: { label: 'Sensitive Facility', short: 'sensitive-facility', minAltM: 20, risk: 8, ground: 0xe8bdb3, policy: 'Restricted volume over the designated block up to a configurable altitude' },
 };
 export const world = {
   bounds: 58,           // permitted airspace extends to ±bounds (scene units)
   obstacles: [],        // {id,name,typo,x0,x1,z0,z1,h}  (h in scene units above datum)
   restricted: [],       // RESTRICTED prisms {id,name,kind:'restricted'|'hazard',x0,x1,z0,z1,zloM,zhiM,active}
   zones: [],            // named districts {name,x0,x1,z0,z1,ceilingM} — labels only
+  tiles: [],            // 7×7 land-use tiles (16 × 16 units: the parcel plus half of each surrounding street) {id,i,j,landUse,risk,x0,x1,z0,z1,loM,hiM}
   volumes: [],          // PERMITTED airspace prisms {id,name,kind:'deck'|'corridor'|'transition',x0,x1,z0,z1,zloM,zhiM}
   ewStreets: [],        // {name,z}
   nsStreets: [],        // {name,x}
@@ -34,6 +50,11 @@ export const world = {
 };
 const cache = new Map();
 export function bump() { world.version++; cache.clear(); }
+/** land-use tile under a plan position (positions outside the grid clamp to the nearest edge tile) */
+export function tileAt(x, z) {
+  const i = Math.max(-3, Math.min(3, Math.round(x / 16))), j = Math.max(-3, Math.min(3, Math.round(z / 16)));
+  return world.tiles[(i + 3) * 7 + (j + 3)];
+}
 
 const u = (m) => m / SCALE_M;
 export const toLocal = (p) => ({ x: p.x * SCALE_M, y: -p.z * SCALE_M, z: p.y * SCALE_M });
@@ -95,6 +116,37 @@ function segHitsBox(a, b, x0, x1, y0, y1, z0, z1) {
   return true;
 }
 
+/** parameter interval [t0, t1] ⊂ [0, 1] over which segment a→b lies inside a closed box, or null */
+function segInterval(a, b, x0, x1, y0, y1, z0, z1) {
+  let t0 = 0, t1 = 1;
+  const d = [b.x - a.x, b.y - a.y, b.z - a.z], lo = [x0, y0, z0], hi = [x1, y1, z1], p = [a.x, a.y, a.z];
+  for (let i = 0; i < 3; i++) {
+    if (Math.abs(d[i]) < 1e-9) { if (p[i] < lo[i] - E || p[i] > hi[i] + E) return null; }
+    else {
+      let ta = (lo[i] - E - p[i]) / d[i], tb = (hi[i] + E - p[i]) / d[i];
+      if (ta > tb) [ta, tb] = [tb, ta];
+      t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
+      if (t0 > t1) return null;
+    }
+  }
+  return [t0, t1];
+}
+/** exact test: the whole segment lies inside the UNION of the permitted prisms (no point sampling, so a clipped corner cannot slip between samples) */
+function coveredByPermitted(a, b) {
+  const iv = [];
+  for (const v of world.volumes) {
+    const r = segInterval(a, b, v.x0, v.x1, u(v.zloM), u(v.kind === 'transition' ? v.zhiM : Math.min(v.zhiM, cfg.maxAltM)), v.z0, v.z1);
+    if (r) iv.push(r);
+  }
+  iv.sort((p, q) => p[0] - q[0]);
+  let reach = 0;
+  for (const [t0, t1] of iv) {
+    if (t0 > reach + 1e-6) return false;
+    reach = Math.max(reach, t1);
+    if (reach >= 1 - 1e-9) return true;
+  }
+  return reach >= 1 - 1e-9;
+}
 /**
  * Tests a straight segment against the simulated airspace rules:
  * map edge, building volumes (+clearance), restricted volumes (+clearance), and membership in the permitted volumes.
@@ -117,11 +169,7 @@ export function segCheck(a, b, extra = 0) {
       return { reason: 'restricted', id: r.id, name: r.name, marginOnly: !raw, obstacle: r };
     }
   }
-  const len = dist3(a, b), n = Math.max(1, Math.ceil(len / 1.5));
-  for (let i = 0; i <= n; i++) {
-    const k = i / n, x = a.x + (b.x - a.x) * k, y = a.y + (b.y - a.y) * k, z = a.z + (b.z - a.z) * k;
-    if (!inPermitted(x, y, z)) return { reason: 'airspace', name: 'airspace outside the permitted volumes' };
-  }
+  if (!coveredByPermitted(a, b)) return { reason: 'airspace', name: 'airspace outside the permitted volumes' };
   return null;
 }
 
@@ -161,8 +209,16 @@ function gridWith(L, disks) {
   return h;
 }
 
-function aStar(L, s, e, disks) {
-  const N = gridN(), g = gridWith(L, disks);
+function riskGrid() {
+  const key = `risk:${world.version}`;
+  if (cache.has(key)) return cache.get(key);
+  const N = gridN(), g = new Float32Array(N * N);
+  for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) g[i * N + j] = (tileAt(cellCentre(i), cellCentre(j))?.risk ?? 0) / 10;
+  cache.set(key, g);
+  return g;
+}
+function aStar(L, s, e, disks, lu = 0) {
+  const N = gridN(), g = gridWith(L, disks), rg = lu > 0 ? riskGrid() : null;
   const si = cellOf(s.x), sj = cellOf(s.z), ei = cellOf(e.x), ej = cellOf(e.z);
   const idx = (i, j) => i * N + j, goal = idx(ei, ej);
   const open = [], gS = new Float32Array(N * N).fill(Infinity), from = new Int32Array(N * N).fill(-1), closed = new Uint8Array(N * N);
@@ -186,7 +242,7 @@ function aStar(L, s, e, disks) {
       const ni = ci + di, nj = cj + dj;
       if (!free(ni, nj)) continue;
       if (di && dj && (!free(ci + di, cj) || !free(ci, cj + dj))) continue; // no corner cutting
-      const nk = idx(ni, nj), ng = gS[k] + Math.hypot(di, dj) * CELL;
+      const nk = idx(ni, nj), ng = gS[k] + Math.hypot(di, dj) * CELL * (rg ? 1 + lu * rg[nk] : 1);
       if (ng < gS[nk]) { gS[nk] = ng; from[nk] = k; push(ng + h(ni, nj), nk); }
     }
   }
@@ -203,22 +259,36 @@ const segDist2 = (a, b, c) => { // distance from point c to segment ab (plan vie
   const t = l2 < 1e-12 ? 0 : Math.max(0, Math.min(1, ((c.x - a.x) * dx + (c.z - a.z) * dz) / l2));
   return Math.hypot(a.x + dx * t - c.x, a.z + dz * t - c.z);
 };
-/** horizontal path at altitude L from s to e: straight if free, otherwise A* + line-of-sight shortening. `disks` are virtual obstacles. */
-function planePath(L, s, e, disks = []) {
+const segCost = (a, b, lu) => { // length × (1 + lu·risk), sampled along a plan-view segment
+  const d = Math.hypot(b.x - a.x, b.z - a.z), n = Math.max(1, Math.ceil(d / 0.5));
+  let c = 0;
+  for (let k = 0; k < n; k++) { const f = (k + 0.5) / n, t = tileAt(a.x + (b.x - a.x) * f, a.z + (b.z - a.z) * f); c += (d / n) * (1 + lu * (t?.risk ?? 0) / 10); }
+  return c;
+};
+/**
+ * horizontal path at altitude L from s to e. lu = 0: straight if free, otherwise A* + line-of-sight shortening.
+ * lu > 0: the same, but A* edges are weighted by land-use risk and a shortcut is only taken if it is not costlier.
+ * `disks` are virtual obstacles used to force a topologically different candidate.
+ */
+function planePath(L, s, e, disks = [], lu = 0) {
   const P = (q) => ({ x: q.x, y: L, z: q.z });
   const clear = (a, b) => !segCheck(P(a), P(b), EPS) && disks.every((d) => segDist2(a, b, d) >= d.r * 0.9);
-  if (clear(s, e)) return [s, e];
-  const raw = aStar(L, s, e, disks);
-  if (!raw) return null;
+  const direct = clear(s, e) ? [s, e] : null;
+  if (direct && lu === 0) return direct;
+  const raw = aStar(L, s, e, disks, lu);
+  if (!raw) return direct;
   const out = [raw[0]]; let i = 0;
+  const rawCost = (i0, j0) => { let c = 0; for (let k = i0; k < j0; k++) c += segCost(raw[k], raw[k + 1], lu); return c; };
   while (i < raw.length - 1) {
     let j = raw.length - 1;
-    while (j > i + 1 && !clear(raw[i], raw[j])) j--;
-    if (!clear(raw[i], raw[j])) return null;
+    while (j > i + 1 && (!clear(raw[i], raw[j]) || (lu > 0 && segCost(raw[i], raw[j], lu) > rawCost(i, j) * 1.02 + 1e-6))) j--;
+    if (!clear(raw[i], raw[j])) return direct;
     out.push(raw[j]); i = j;
   }
+  if (direct && lu > 0 && segCost(s, e, lu) <= planCostOf(out, lu)) return direct;
   return out;
 }
+const planCostOf = (p, lu) => { let c = 0; for (let k = 1; k < p.length; k++) c += segCost(p[k - 1], p[k], lu); return c; };
 const planLen = (p) => { let t = 0; for (let i = 1; i < p.length; i++) t += Math.hypot(p[i].x - p[i - 1].x, p[i].z - p[i - 1].z); return t; };
 function planAt(p, f) { // plan-view point at fraction f of the path length
   let want = planLen(p) * f;
@@ -311,26 +381,49 @@ const mkWaypoints = (from, to, L, plane) => {
   return pts;
 };
 
-export const CRITERION = 'energy-weighted length = 3D distance + 1.5 × climb (time ∝ distance at constant speed; no risk model)';
+/** metres flown per land-use class and the risk-weighted penalty (Σ metres × risk/10), accumulated along the actual curve */
+export function exposureOf(from, pts) {
+  const by = {}; let pen = 0, prev = from;
+  for (const q of pts) {
+    const d = dist3(prev, q), n = Math.max(1, Math.ceil(d / 0.5));
+    for (let k = 0; k < n; k++) {
+      const f = (k + 0.5) / n, t = tileAt(prev.x + (q.x - prev.x) * f, prev.z + (q.z - prev.z) * f), ds = (d / n) * SCALE_M;
+      if (!t) continue;
+      by[t.landUse] = (by[t.landUse] ?? 0) + ds; pen += (ds * t.risk) / 10;
+    }
+    prev = q;
+  }
+  return { penaltyM: pen, byClass: by };
+}
+
+export function criterionText() {
+  const w = cfg.w;
+  return `cost = ${w.len}·(length ÷ straight distance) + ${w.climb}·(climb ÷ 100 m) + ${w.lu}·(risk-weighted metres over land use ÷ straight distance). Congestion delay is not modelled.`;
+}
 
 /**
- * Stage 2 + 3 for one leg. Generates up to three genuinely different, fully validated routes
- * (direct / left detour / right detour / climb over), smooths each one with collision re-testing, and selects one.
- * Returns {ok, candidates:[{id,label,level,climbed,detoured,pts,len,climbM,cost,chosen}], best, criterion}
- * or {ok:false, reason, info}.
+ * Stage 3 for one leg. Generates up to three genuinely different, fully validated routes
+ * (direct / left detour / right detour / climb over), scores them with the land-use-aware objective,
+ * smooths each one with collision re-testing, and selects one.
+ * opts.avoid = [{loM, hiM}] cruise-altitude bands to skip (used for drone-separation re-routing).
+ * Returns {ok, candidates, best, shortest, avoided, criterion} or {ok:false, reason, info}.
  */
-export function planMission(from, to) {
-  const ceilU = u(cfg.maxAltM), base = Math.min(u(cfg.cruiseM), ceilU);
+export function planMission(from, to, opts = {}) {
+  const ceilU = u(cfg.maxAltM), base = Math.min(u(opts.base ?? cfg.cruiseM), ceilU);   // opts.base: this drone's cruise lane (m)
   const levels = new Set([+base.toFixed(3)]);
   for (let L = base + 2; L <= ceilU + 1e-6; L += 2) levels.add(+L.toFixed(3));
   if (from.y > 1) levels.add(+from.y.toFixed(3));
+  if (opts.only != null) { levels.clear(); levels.add(+opts.only.toFixed(3)); } // keep a given altitude band (used after a separation sidestep)
   let lastFail = null;
   const RANK = { restricted: 4, building: 3, airspace: 2, bounds: 1 };
   const note = (f) => { if (!lastFail || (RANK[f.reason] ?? 0) > (RANK[lastFail.reason] ?? 0)) lastFail = f; };
   const s2 = { x: from.x, z: from.z }, e2 = { x: to.x, z: to.z };
+  const lu = cfg.w.lu / Math.max(1e-6, cfg.w.len);
   const found = []; // {L, plane}
+  const add = (L, plane) => { if (plane && found.every((c) => c.L !== L || distinct(c.plane, plane))) { found.push({ L, plane }); return true; } return false; };
   let low = null;
   for (const L of [...levels].sort((a, b) => a - b)) {
+    if (opts.avoid?.some((a) => L * SCALE_M >= a.loM && L * SCALE_M <= a.hiM)) continue;
     const p0 = { x: from.x, y: L, z: from.z }, pe = { x: to.x, y: L, z: to.z };
     const up = Math.abs(from.y - L) > 0.05 ? segCheck(from, p0, EPS) : null;
     if (up) { note(up); continue; }
@@ -339,32 +432,40 @@ export function planMission(from, to) {
     const plane = planePath(L, s2, e2);
     if (!plane) { note({ reason: 'building', name: 'the surrounding buildings' }); continue; }
     if (low === null) {
-      low = L; found.push({ L, plane });
+      low = L; add(L, plane);
+      if (lu > 0) add(L, planePath(L, s2, e2, [], lu)); // the land-use-aware route
       // alternates at the lowest feasible altitude: block the middle of the latest path with a virtual disk and plan again
-      const r = Math.max(2.5, Math.min(6, planLen(plane) * 0.18)), disks = [];
-      let last = plane;
-      for (let k = 0; k < 2; k++) {
-        const m = planAt(last, 0.5);
-        if (Math.hypot(m.x - s2.x, m.z - s2.z) < r + 2 || Math.hypot(m.x - e2.x, m.z - e2.z) < r + 2) break;
-        disks.push({ x: m.x, z: m.z, r });
-        const alt = planePath(L, s2, e2, disks);
-        if (!alt || !found.every((c) => distinct(c.plane, alt))) break;
-        found.push({ L, plane: alt }); last = alt;
+      const r = Math.max(2.5, Math.min(6, planLen(plane) * 0.18));
+      for (const start of lu > 0 ? [plane, found[found.length - 1].plane] : [plane]) {
+        const disks = []; let last = start;
+        for (let k = 0; k < 2; k++) {
+          const m = planAt(last, 0.5);
+          if (Math.hypot(m.x - s2.x, m.z - s2.z) < r + 2 || Math.hypot(m.x - e2.x, m.z - e2.z) < r + 2) break;
+          disks.push({ x: m.x, z: m.z, r });
+          const alt = planePath(L, s2, e2, disks, lu);
+          if (!alt || !add(L, alt)) break;
+          last = alt;
+        }
       }
     } else if (plane.length === 2 && found[0].plane.length > 2 && found.every((c) => c.L <= low + 1e-6)) {
       found.push({ L, plane }); // lowest altitude that clears the obstruction in a straight line: "climb over"
     }
   }
   if (!found.length) return { ok: false, reason: describeFail(lastFail), info: lastFail };
-  const labels = new Set();
+  const D = Math.max(1, dist3(from, to) * SCALE_M), w = cfg.w, labels = new Set();
+  const shortestPlane = found[0];
   let cands = found.map((c) => {
     const wps = mkWaypoints(from, to, c.L, c.plane), pts = smoothRoute(from, wps);
     const climbed = c.L > base + 0.05, straight = c.plane.length === 2, side = sideOf(c.plane, s2, e2);
     let label = climbed && straight ? `Climb over · ${Math.round(c.L * SCALE_M)} m` : straight ? 'Direct' : side > 0 ? 'Left detour' : 'Right detour';
     if (labels.has(label)) label += ' (wide)';
     labels.add(label);
-    return { label, level: c.L, climbed, detoured: !straight, over: climbed && straight, pts, len: pathLen3(from, pts), climbM: climbOf(from, pts) * SCALE_M, cost: pathCost(from, pts) };
+    const len = pathLen3(from, pts), climbM = climbOf(from, pts) * SCALE_M, ex = exposureOf(from, pts);
+    const terms = { len: (len * SCALE_M) / D, climb: climbM / 100, lu: ex.penaltyM / D };
+    return { label, level: c.L, climbed, detoured: !straight, over: climbed && straight, pts, len, lenM: len * SCALE_M, climbM, penaltyM: ex.penaltyM, exposure: ex.byClass, terms,
+      cost: w.len * terms.len + w.climb * terms.climb + w.lu * terms.lu, isShortestPlane: c === shortestPlane };
   });
+  const shortest = cands.find((c) => c.isShortestPlane);
   cands.sort((a, b) => a.cost - b.cost);
   // keep up to three DIFFERENT kinds of route (direct / left / right / climb over) before any second variant of the same kind
   const kind = (c) => (c.over ? 'over' : c.label.startsWith('Left') ? 'left' : c.label.startsWith('Right') ? 'right' : 'direct');
@@ -376,12 +477,21 @@ export function planMission(from, to) {
   if (cfg.preference === 'detour' && cands.some((c) => !c.climbed)) pool = cands.filter((c) => !c.climbed);
   const best = pool[0];
   cands.forEach((c) => { c.chosen = c === best; });
-  return { ok: true, from: { ...from }, to: { ...to }, candidates: cands, best, criterion: CRITERION };
+  // did the planner really go around a land use? (only then may the human view say so)
+  let avoided = null;
+  if (shortest && best.lenM > shortest.lenM + 3) {
+    let top = 0;
+    for (const k of Object.keys(LAND)) {
+      const red = (shortest.exposure[k] ?? 0) - (best.exposure[k] ?? 0);
+      if (red > 25 && red > top) { top = red; avoided = { landUse: k, metres: Math.round(red), extraM: Math.round(best.lenM - shortest.lenM) }; }
+    }
+  }
+  return { ok: true, from: { ...from }, to: { ...to }, candidates: cands, best, shortest: shortest ? { lenM: shortest.lenM, exposure: shortest.exposure, penaltyM: shortest.penaltyM } : null, avoided, criterion: criterionText(), D };
 }
 
 /** planner summary used by the platform's ETA estimate and by re-planning */
-export function planRoute(from, to) {
-  const m = planMission(from, to);
+export function planRoute(from, to, opts) {
+  const m = planMission(from, to, opts);
   if (!m.ok) return m;
   const b = m.best;
   return { ok: true, pts: b.pts, len: b.len, level: b.level, climbed: b.climbed, detoured: b.detoured, mission: m };
@@ -429,6 +539,7 @@ export const compassWord = (deg) => COMPASS[Math.round(deg / 45) % 8];
 /**
  * getAgentsAt(drones, location) — location is one of
  *   "V-03" | {volume:"V-03"}               a labelled airspace volume (permitted or restricted), full XYZ test
+ *   {block:"C3"}                          every drone above that land-use tile (any altitude)
  *   {zone, z_min?, z_max?}                 named district + optional altitude band (m)
  *   {box:{x:[a,b], y:[a,b], z:[a,b]}}      3D volume in local metres
  *   {point:[x,y,z], radius}                declared-radius proximity (m), no exact equality
@@ -439,11 +550,14 @@ export function agentsAt(drones, location) {
   const ids = [];
   const vol = loc.volume ? namedVolumes().find((q) => q.id === loc.volume) : null;
   const zone = loc.zone ? world.zones.find((q) => q.name === loc.zone) : null;
+  const tile = loc.block ? world.tiles.find((q) => q.id === loc.block) : null;
   for (const d of drones) {
     const l = toLocal(d.pos);
     let hit = false;
     if (vol) {
       hit = vol.active && within(vol, d.pos.x, d.pos.y, d.pos.z, vol.zhiM);
+    } else if (tile) {
+      hit = d.pos.x >= tile.x0 && d.pos.x <= tile.x1 && d.pos.z >= tile.z0 && d.pos.z <= tile.z1;
     } else if (zone) {
       const inside = d.pos.x >= zone.x0 && d.pos.x <= zone.x1 && d.pos.z >= zone.z0 && d.pos.z <= zone.z1;
       hit = inside && l.z >= (loc.z_min ?? 0) - 1e-6 && l.z <= (loc.z_max ?? 1e9) + 1e-6;

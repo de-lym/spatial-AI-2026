@@ -16,7 +16,7 @@
   <header>
     <div>
       <h1>Airspace</h1>
-      <p>A location-aware drone delivery sandbox. Airspace is a volume, not an empty background: four drones deliver orders across a fictional block city through permitted 3D prisms. Synthetic data · classroom simulation, not a flight planner.</p>
+      <p>A land-use-aware drone delivery sandbox. Navigable airspace is shaped not only by buildings but by the urban activity underneath: land use sets permission and cost, four drones fly validated smooth routes and keep their distance. Synthetic data · classroom simulation, not a flight planner.</p>
     </div>
     <button id="btn-panel" class="icon" title="Collapse / expand the whole panel">▾</button>
   </header>
@@ -25,8 +25,8 @@
     <details open class="sec">
       <summary>Simulation</summary>
       <div class="group sim">
-        <span class="gtitle">Time</span>
-        <button id="btn-play" title="Run / pause simulation time">▶ Start flight</button>
+        <span class="gtitle">Run · Pause · Reset</span>
+        <button id="btn-play" title="Run / pause simulation time">▶ Run</button>
         <select id="sel-speed" title="Simulation speed">
           <option value="0.5">0.5×</option><option value="1" selected>1×</option>
           <option value="2">2×</option><option value="4">4×</option>
@@ -43,15 +43,26 @@
       <div class="stepper">
         <button id="btn-stage-prev" title="Previous stage">‹</button>
         <div id="stages">
-          <button data-stage="1"><i>1</i>Airspace</button>
-          <button data-stage="2"><i>2</i>Candidates</button>
-          <button data-stage="3"><i>3</i>Optimal</button>
+          <button data-stage="1"><i>1</i>Land Use</button>
+          <button data-stage="2"><i>2</i>Airspace</button>
+          <button data-stage="3"><i>3</i>Routes</button>
           <button data-stage="4"><i>4</i>Live</button>
         </div>
         <button id="btn-stage-next" title="Next stage">›</button>
       </div>
       <div id="stage-body" class="info"></div>
-      <label class="auto alt" id="alt-row" hidden><input type="checkbox" id="chk-alt"> show faded alternatives</label>
+    </details>
+
+    <details open class="sec">
+      <summary>Layers <small>(independent of the stage)</small></summary>
+      <div class="layers">
+        <label><input type="checkbox" id="lay-land"> Land use</label>
+        <label><input type="checkbox" id="lay-perm"> Permitted airspace</label>
+        <label><input type="checkbox" id="lay-rest"> Restricted airspace</label>
+        <label><input type="checkbox" id="lay-cand"> Candidate routes</label>
+        <label><input type="checkbox" id="lay-sel"> Selected route</label>
+        <label><input type="checkbox" id="p-streets"> Street names</label>
+      </div>
     </details>
 
     <details open class="sec">
@@ -72,21 +83,55 @@
     </details>
 
     <details class="sec" id="sec-query">
-      <summary>Spatial query <small>getAgentsAt(volumeId)</small></summary>
-      <div class="qrow"><label>Mode
-        <select id="q-mode"><option value="volume">Airspace volume</option><option value="box">3D box (local m)</option><option value="point">Point + radius</option></select></label></div>
-      <div class="qrow" data-qm="volume"><label>Volume <select id="q-vol"></select></label></div>
+      <summary>Spatial inspector <small>block · volume · getAgentsAt</small></summary>
+      <div class="qrow"><label>Inspect
+        <select id="q-mode"><option value="block">Land-use block</option><option value="volume">Airspace volume</option><option value="box">3D box (local m)</option><option value="point">Point + radius</option></select></label></div>
+      <div class="qrow" data-qm="block"><label>Block <select id="q-block"></select></label></div>
+      <div class="qrow" data-qm="volume" hidden><label>Volume <select id="q-vol"></select></label></div>
       <div id="q-card"></div>
-      <div class="dim small" data-qm="volume">Or click a prism in the scene (red prisms win over columns, columns over the corridor, the corridor over the decks).</div>
+      <div class="dim small" data-qm="block volume">Or click the ground (a block) or a translucent prism (a volume) in the scene. Red prisms win over columns, columns over the other prisms.</div>
       <div class="qrow" data-qm="box" hidden><label>x <input id="q-x0" type="number" value="-300"><input id="q-x1" type="number" value="300"></label></div>
       <div class="qrow" data-qm="box" hidden><label>y <input id="q-y0" type="number" value="-300"><input id="q-y1" type="number" value="300"></label></div>
       <div class="qrow" data-qm="box" hidden><label>z <input id="q-z0" type="number" value="0"><input id="q-z1" type="number" value="120"></label></div>
       <div class="qrow" data-qm="point" hidden><label>x,y,z (m) <input id="q-px" type="number" value="0"><input id="q-py" type="number" value="0"><input id="q-pz" type="number" value="50"></label></div>
       <div class="qrow" data-qm="point" hidden><label>radius (m) <input id="q-pr" type="number" value="40"></label><button id="q-here" type="button">Use tracked drone</button></div>
-      <div class="qrow" data-qm="box point" hidden><label class="auto"><input type="checkbox" id="q-show" checked> show volume on map</label><button id="q-example" type="button" data-qm="box">Example: corridor box</button></div>
+      <div class="qrow" data-qm="box point" hidden><label class="auto"><input type="checkbox" id="q-show" checked> show volume on map</label><button id="q-example" type="button" data-qm="box">Example box</button></div>
       <div id="q-ids" class="qids"></div>
       <pre id="q-out"></pre>
       <div class="dim small">Local frame: x east, y north, z up (m) from the street-level datum. Membership uses X, Y <b>and</b> Z of each drone's live position, so two drones stacked at different altitudes are told apart.</div>
+    </details>
+
+    <details class="sec" id="sec-rules">
+      <summary>Land-use rules <small>(change one → airspace and costs regenerate)</small></summary>
+      <div id="lu-rules"></div>
+      <div class="dim small">Simulation policies, not legal rules. The floor is the lowest permitted altitude above a block of that use; risk (0–10) is the soft cost per metre flown over it. Permission is a hard constraint, risk is only a preference.</div>
+    </details>
+
+    <details class="sec" id="sec-params">
+      <summary>Route cost &amp; separation <small>(classroom parameters)</small></summary>
+      <div class="dim small" id="cost-formula"></div>
+      <div class="prm"><label>w_length <span id="w-len-v"></span><input type="range" id="w-len" min="0" max="3" step="0.1"></label></div>
+      <div class="prm"><label>w_climb <span id="w-climb-v"></span><input type="range" id="w-climb" min="0" max="3" step="0.1"></label></div>
+      <div class="prm"><label>w_landuse (risk weight) <span id="w-lu-v"></span><input type="range" id="w-lu" min="0" max="6" step="0.25"></label></div>
+      <div class="prm"><label>Minimum drone separation <span id="p-sep-v"></span><input type="range" id="p-sep" min="15" max="40" step="5"></label></div>
+      <div class="prm"><label>Look-ahead horizon <span id="p-look-v"></span><input type="range" id="p-look" min="2" max="12" step="1"></label></div>
+      <div class="prm"><label>Route selection
+        <select id="p-pref"><option value="shortest">Cheapest candidate</option><option value="detour">Detour first</option><option value="climb">Climb first</option></select></label></div>
+      <div class="prm"><label>Clearance margin <span id="p-clear-v"></span><input type="range" id="p-clear" min="2" max="8" step="1"></label></div>
+      <div class="prm"><label>Altitude envelope (ceiling) <span id="p-maxalt-v"></span><input type="range" id="p-maxalt" min="60" max="160" step="10"></label></div>
+      <div class="prm"><label>Nominal cruise altitude <span id="p-cruise-v"></span><input type="range" id="p-cruise" min="20" max="100" step="10"></label></div>
+      <div class="prm"><label>“Tall building” threshold <span id="p-tall-v"></span><input type="range" id="p-tall" min="20" max="100" step="10"></label></div>
+      <div class="prm"><label>“Approaching” message distance <span id="p-arrive-v"></span><input type="range" id="p-arrive" min="20" max="250" step="10"></label></div>
+      <h4 class="sub">Test situations</h4>
+      <div class="scen">
+        <button id="sc-conflict" title="Resets with a 40 m separation, so predicted conflicts, yielding and waiting appear within seconds">Conflict test</button>
+        <button id="sc-open">Open lane</button>
+        <button id="sc-tall">Tall tower</button>
+        <button id="sc-tall-climb">Tall tower · climb</button>
+        <button id="sc-restricted">Restricted zone</button>
+        <button id="sc-closed">Raise hazard HZ-1 over DS-3</button>
+      </div>
+      <div class="dim small">These parameters are classroom assumptions — not real legal flight limits or validated risk scores. Routes shown are never safe, authorized or legal for real flight.</div>
     </details>
 
     <details class="sec">
@@ -118,28 +163,7 @@
         <button id="btn-c-deliver">Fly → Delivery</button>
         <label class="auto"><input type="checkbox" id="auto-courier"> auto</label>
       </div>
-      <div class="dim small">The first four orders are scripted — one per drone, to different stations — so the routes previewed in Stages 2–3 are the routes flown in Stage 4. Later orders arrive on their own.</div>
-    </details>
-
-    <details class="sec" id="sec-params">
-      <summary>Flight parameters <small>(illustrative only)</small></summary>
-      <div class="prm"><label>Clearance margin <span id="p-clear-v"></span><input type="range" id="p-clear" min="2" max="8" step="1"></label></div>
-      <div class="prm"><label>Simulated max altitude <span id="p-maxalt-v"></span><input type="range" id="p-maxalt" min="40" max="200" step="10"></label></div>
-      <div class="prm"><label>Nominal cruise altitude <span id="p-cruise-v"></span><input type="range" id="p-cruise" min="20" max="100" step="10"></label></div>
-      <div class="prm"><label>“Tall building” threshold <span id="p-tall-v"></span><input type="range" id="p-tall" min="20" max="100" step="10"></label></div>
-      <div class="prm"><label>“Approaching” message distance <span id="p-arrive-v"></span><input type="range" id="p-arrive" min="20" max="250" step="10"></label></div>
-      <div class="prm"><label>Route selection
-        <select id="p-pref"><option value="shortest">Cheapest candidate</option><option value="detour">Detour first</option><option value="climb">Climb first</option></select></label></div>
-      <div class="qrow"><label class="auto"><input type="checkbox" id="p-airspace" checked> airspace</label><label class="auto"><input type="checkbox" id="p-routes" checked> routes</label><label class="auto"><input type="checkbox" id="p-streets" checked> street names</label></div>
-      <h4 class="sub">Test situations</h4>
-      <div class="scen">
-        <button id="sc-open">Open lane</button>
-        <button id="sc-tall">Tall tower</button>
-        <button id="sc-tall-climb">Tall tower · climb</button>
-        <button id="sc-restricted">Restricted zone</button>
-        <button id="sc-closed">Raise hazard HZ-1 over DS-3</button>
-      </div>
-      <div class="dim small">These parameters are classroom assumptions — not real legal flight limits. Routes shown are never safe, authorized or legal for real flight.</div>
+      <div class="dim small">The first four orders are scripted — one per drone, a short, a medium and two long trips to different edges of the city — so the routes previewed in Stage 3 are the routes flown in Stage 4. Later orders arrive on their own.</div>
     </details>
     <details class="sec"><summary>Statistics</summary><div id="stats"></div></details>
     <details class="sec"><summary>Selection</summary><div id="info" class="info"></div></details>
@@ -147,7 +171,7 @@
     <details class="sec"><summary>Rules <small>(times they bound an outcome)</small></summary><ol id="rules"></ol></details>
     <details class="sec"><summary>Event log</summary><div id="log"></div></details>
     <details class="sec"><summary>About &amp; limits</summary>
-      <div class="dim small about">A fictional block-based architectural sandbox: a South Block District with lower buildings and a North Tower District with taller, denser ones. All buildings, street names, heights, volumes and numbers are synthetic and invented. Coordinates: local Cartesian x east, y north, z up in metres above one shared ground datum; 1 scene unit = 5 m. <code>navigable = permitted − restricted − buildings − clearance</code>, and it can be disconnected: a drone may not climb over a building if the altitude above lies outside every permitted volume. Obstacle checks are a simplified classroom rule, not certified collision avoidance, and nothing here claims regulatory compliance or real airspace authorization.</div>
+      <div class="dim small about">A fictional block-based architectural sandbox: a South Block District with lower buildings and a North Tower District with taller, denser ones. All buildings, street names, heights, land uses, volumes and numbers are synthetic and invented. Coordinates: local Cartesian x east, y north, z up in metres above one shared ground datum; 1 scene unit = 5 m. <code>navigable = (land-use airspace ∩ altitude envelope) − buildings − restricted volumes − clearance</code>; it can be disconnected, and a drone may not climb over a building if that altitude is not permitted. Obstacle and drone-separation checks are simplified classroom rules, not certified collision avoidance. Nothing here claims regulatory compliance, real airspace authorization or validated risk scores.</div>
     </details>
   </div>
 </aside>

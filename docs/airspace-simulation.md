@@ -1,3 +1,5 @@
+> **Superseded** by [airspace-simulation-v3.md](airspace-simulation-v3.md) (land use, derived airspace, drone separation). Kept as the V2 record.
+
 # AIRSPACE / A Location-Aware Drone Delivery Sandbox
 
 > **Spatial AI — Location Workshop · Revised design & implementation prompt**  
