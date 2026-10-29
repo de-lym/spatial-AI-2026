@@ -12,7 +12,13 @@ every drone is described twice — as machine state and as a human-readable upda
 **Run:** serve the folder with any static server (ES modules need http), e.g. `python3 -m http.server`, then open `http://localhost:8000`.
 three.js is vendored in `vendor/`; no network or build step is needed.
 
-### Four stages (right-panel stepper) and independent layers
+### Operations interface (greyscale low-fi chrome around the unchanged 3D scene)
+Header (Run/Pause, speed, Reset with confirmation, Advanced) · one status bar (time, fleet total/active, first deliveries, on-time, active alerts, simulation state) · left column (In Progress: Flight Ops / Hub Ops; Order Intake, Fleet Allocation, Emergency Response; Incident Queue tabs Critical / Low battery / Updates) · full-width map with the existing canvas · Fleet Monitoring table for all drones.
+A **drone inspector** (Flight details / Location / History) overlays the map's right side only when a drone is explicitly selected (map click, fleet row, event). It is an absolute overlay: the map rect, renderer buffer and camera are identical with and without it. Close button, Escape or a click on empty map clears the selection. `DR-0x` is a display alias for the internal `D-0x`.
+The stages, layers, spatial query, land-use rules, route-cost / separation parameters, test situations, statistics and log live in the **Advanced** drawer; nothing was removed.
+Incidents come from a structured event store (`ops-events.js`) fed by real state transitions, not by parsing the log: `NO_VALID_ROUTE` opens one critical incident per drone and closes when the route recovers; Updates keep the newest 200. **Not modelled:** there is no battery model (Low battery stays 0 / "not connected"), no delivery deadline (On-time shows "—") and no emergency flight-command API (return / land / stop are shown disabled).
+
+### Four stages (Advanced drawer stepper) and independent layers
 1. **Land Use** — *What kind of place is this?* Each of the 49 blocks is Housing, CBD / Office, Green Space / Park, Logistics / Commercial or a Sensitive Facility, tinted softly on the ground. Click a block (the ground) for its ID, building height, simulated permission policy and risk cost.
 2. **Airspace** — *Where can a drone fly?* Mint permitted prisms and blush-red restricted prisms with real height and dashed edges, generated from each block's rule, the building volumes and the altitude envelope. A green park block is not automatically green airspace.
 3. **Routes** — *Which feasible route should it take?* Up to three different, fully collision-tested candidates per leg (thin dashed), scored with `w_length·length + w_climb·climb + w_landuse·risk-weighted exposure`; the cheapest becomes a smooth cobalt curve that was re-tested against every volume and building.
@@ -34,6 +40,6 @@ ORDER (revenue = box size; `pending → preparing → ready → assigned → pic
 Soft "clay" isometric city (orthographic camera, soft shadows, rounded forms). White massing, green parks, blue water; saturated colour is reserved for roles (restaurants coral/orange, customers forest/denim, platform navy, drones mustard with a small identifying cap) and for the airspace language: mint = permitted, blush red = restricted, amber = hazard, muted cyan/violet = candidates, cobalt = selected route; land-use tints are low-saturation ground colours.
 
 ### Files
-`spatial.js` — land-use table, navigable-space model, candidate generation, cost, smoothing, volume queries. `main.js` — scene, delivery model, land use, airspace generation, separation, panels.
+`spatial.js` — land-use table, navigable-space model, candidate generation, cost, smoothing, volume queries. `main.js` — scene, delivery model, land use, airspace generation, separation, panels. `ops-events.js` — structured operations events for the Incident Queue. `index.html` / `style.css` — operations layout.
 `docs/airspace-simulation-v3.md` — the V3 brief plus the implementation report (what worked, what was simplified); `docs/airspace-simulation.md` — the V2 record.
 All geometry, land-use rules and parameters are synthetic classroom assumptions; nothing here claims regulatory compliance, real airspace authorization or validated risk scores.

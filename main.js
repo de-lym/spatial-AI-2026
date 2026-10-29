@@ -6,6 +6,7 @@ import {
   nearestObstacle, buildingsNear, streetsCrossed, nearestLandmark, bearingDeg, compassWord, agentsAt, agentsInBox,
   namedVolumes, volumesAt, blockAt, roofUnder, ceilingMAt, inPermitted, LAND, tileAt, exposureOf, criterionText,
 } from './spatial.js';
+import { createEventStore } from './ops-events.js';
 
 /* ====================================================================
    AIRSPACE — a location-aware drone delivery sandbox (synthetic, classroom only)
@@ -16,6 +17,11 @@ import {
    generate candidate routes, select + smooth one, fly it — and every drone is
    described twice, as machine state (XYZ…) and as a human-readable update.
    ==================================================================== */
+
+// ---------- operations UI model (adapter state; the simulation S stays the single source of truth) ------
+const dispId = (id) => 'DR-' + id.slice(2);          // display alias only: every read / command still uses the internal D-0x id
+const ops = createEventStore();                       // structured incidents + updates for the Incident Queue
+const opsUpdate = (code, title, description, droneId = null, orderId = null) => ops.update({ code, droneId, orderId, occurredAtSimSeconds: S.time, title, description });
 
 // ---------- constants ------------------------------------------------
 const DRONE_SPEED = 4;            // scene units per simulated second (= 20 m/s, illustrative)
@@ -715,6 +721,7 @@ function startTask(c, kind, order) {
   const plan = planMission(c.pos, dest);
   c.task = { kind, order, route: { id: 'RT-' + String(S.nextRoute++).padStart(3, '0'), pts: plan.ok ? plan.best.pts : [], plan, idx: 0, rerouted: false, travelled: 0 }, start: c.pos.clone() };
   c.hold = null; c.rerouteWhy = ''; c.dwell = 0; c.launchedAt = S.time; c.sepWait = 0;
+  if (order) c.lastOrder = order;
   if (plan.ok) {
     const n = plan.candidates.length;
     log(`${c.name} route: ${n} feasible candidate${n > 1 ? 's' : ''} → chose ${plan.best.label} (${Math.round(plan.best.len * SCALE_M)} m)`);
@@ -722,7 +729,12 @@ function startTask(c, kind, order) {
     S.ruleHits[10]++;
     c.hold = { reason: plan.reason, timer: 1 };
     log(`${c.name} NO_VALID_ROUTE — ${plan.reason}; hovering (retrying every second)`, 'bad');
+    openRouteIncident(c, plan.reason);
   }
+}
+function openRouteIncident(c, reason) {
+  ops.open({ code: 'NO_VALID_ROUTE', category: 'critical', droneId: c.id, orderId: c.task?.order?.id ?? null, occurredAtSimSeconds: S.time,
+    title: 'Route blocked', description: `${dispId(c.id)} · ${reason}` });
 }
 
 /** pre-move conflict test on the next stretch of the route (look-ahead = simulated sensor range) */
@@ -755,8 +767,8 @@ function replan(c, bad) {
     R.pts = plan.pts; R.idx = 0; R.rerouted = true; R.plan = plan.mission;
     const why = bad ? reasonWhy(bad, plan) : { log: 'route found again', human: '' };
     c.rerouteWhy = why.human || c.rerouteWhy;
-    if (c.hold) log(`${c.name} resumed: ${why.log}`, 'good');
-    else log(`${c.name} REROUTE — ${why.log}`, 'good');
+    if (c.hold) { log(`${c.name} resumed: ${why.log}`, 'good'); ops.resolve('NO_VALID_ROUTE', c.id, S.time); opsUpdate('ROUTE_RESTORED', 'Route restored', `${dispId(c.id)} · ${why.log}`, c.id); }
+    else { log(`${c.name} REROUTE — ${why.log}`, 'good'); opsUpdate('REROUTED', 'Route recalculated', `${dispId(c.id)} · ${why.log}`, c.id); }
     c.hold = null;
     return true;
   }
@@ -764,6 +776,7 @@ function replan(c, bad) {
     S.ruleHits[10]++;
     c.hold = { reason: plan.reason, timer: 1 };
     log(`${c.name} NO_VALID_ROUTE — ${plan.reason}; hovering (retrying every second)`, 'bad');
+    openRouteIncident(c, plan.reason);
   } else c.hold.reason = plan.reason;
   return false;
 }
@@ -814,13 +827,14 @@ function droneStep(c, dt) {
     const arrived = flyStep(c, dt);
     if (arrived) {
       const o = c.task.order;
-      if (c.task.kind === 'toRestaurant') { log(`${c.name} landed at ${o.restaurant.stationId} (${o.restaurant.name})`); c.dwell = 0.8; c.dwellKind = 'DOCK'; }
+      if (c.task.kind === 'toRestaurant') { log(`${c.name} landed at ${o.restaurant.stationId} (${o.restaurant.name})`); opsUpdate('LANDED', 'Landed at pickup', `${dispId(c.id)} · ${o.restaurant.stationId} (${o.restaurant.name})`, c.id, o.id); c.dwell = 0.8; c.dwellKind = 'DOCK'; }
       else {
         o.deliveredAt = S.time; setStatus(o, 'delivered');
         c.carry.splice(c.carry.indexOf(o), 1);
         S.delivered.push(o);
         o.goneAt = S.time + 5;
         c.dwell = 3; c.dwellKind = 'COMPLETE';
+        opsUpdate('DELIVERED', 'Mission completed', `${dispId(c.id)} · order #${o.id} delivered to ${o.customer.stationId} in ${fmt(o.deliveredAt - o.createdAt)} s`, c.id, o.id);
         log(`${c.name} COMPLETE — #${o.id} delivered to ${o.customer.stationId} (${o.customer.name}) in ${fmt(o.deliveredAt - o.createdAt)}s`, 'good');
       }
       c.task = null; c.speedU = 0;
@@ -958,7 +972,7 @@ function sepPlan(dt) {
     if (!grp.every((e) => e.sep.state === 'waiting')) continue;
     grp.sort((a, b) => (rank.get(b.id) ?? 99) - (rank.get(a.id) ?? 99));      // lowest priority first
     const mover = grp.find((e) => e.pos.y > 0.3 && sepEvade(e));
-    if (mover) { mover.parkUntil = S.time + 10; mover.parkBy = grp.filter((e) => e !== mover).map((e) => e.id); log(`${mover.name} REROUTE — sidestepped to keep ${cfg.sepM} m from ${mover.parkBy.map((i) => i.replace('D-', 'D-')).join(', ')}`, 'good'); }
+    if (mover) { opsUpdate('SEPARATION_REROUTE', 'Sidestepped for separation', `${dispId(mover.id)} · kept clear of ${grp.filter((e) => e !== mover).map((e) => dispId(e.id)).join(', ')}`, mover.id); mover.parkUntil = S.time + 10; mover.parkBy = grp.filter((e) => e !== mover).map((e) => e.id); log(`${mover.name} REROUTE — sidestepped to keep ${cfg.sepM} m from ${mover.parkBy.map((i) => i.replace('D-', 'D-')).join(', ')}`, 'good'); }
     else { grp[0].boost = S.time + 10; log(`${grp[0].name} gets priority after a mutual wait with ${grp.slice(1).map((e) => e.name).join(', ')}`, ''); }
     grp.forEach((e) => { e.sepWait = 0; });
     break; // one deadlock action per step
@@ -1032,6 +1046,7 @@ function createOrder(customer, restaurant) {
   register(g, o);
   S.orders.push(o);
   log(`${customer.name} created order #${o.id} ($${o.revenue}) at ${restaurant.name}`);
+  opsUpdate('ORDER_CREATED', 'Order created', `Order #${o.id} · ${customer.stationId} from ${restaurant.stationId}`, null, o.id);
   return o;
 }
 function setStatus(o, s) { o.status = s; o.box.material = mat(STATUS_COLOR[s]); }
@@ -1174,6 +1189,7 @@ const act = {
     if (S.policy === 'revenue' && fifo !== byPrio[0] && o === byPrio[0]) S.ruleHits[5]++;
     S.ruleHits[4]++; // Rule 5: every assignment sets the pickup wait
     log(`Platform assigned ${c.name} to #${o.id} ($${o.revenue}, waited ${fmt(waitingTime(o))}s)`, 'good');
+    opsUpdate('ASSIGNED', 'Order assigned', `${dispId(c.id)} · order #${o.id}`, c.id, o.id);
     o.eta = estimate(o);
     return true;
   },
@@ -1223,6 +1239,7 @@ function pickupFor(c, o) {
   setStatus(o, 'picked_up');
   c.dwell = 0.8; c.dwellKind = 'DOCK';
   log(`${c.name} picked up #${o.id} (order waited ${fmt(o.pickedAt - o.readyAt)}s for pickup)`);
+  opsUpdate('PICKED_UP', 'Departed pickup', `${dispId(c.id)} · order #${o.id}`, c.id, o.id);
 }
 
 // ---------- simulation step ------------------------------------------
@@ -1445,7 +1462,7 @@ function syncRoutes(dt) {
   const k = 1 - Math.exp(-dt * 6);
   routeLayer.visible = true;
   ensurePreviews();
-  const cur = trackedDrone();
+  const cur = S.selected?.type === 'courier' ? S.selected : null;   // no selection: every route at full strength
   for (const it of previews.items) {
     if (!it.viz) continue;
     const emph = cur && cur.id !== it.drone ? 0.22 : 1; // unselected routes are dimmed substantially
@@ -1540,7 +1557,7 @@ function syncVisuals(dt) {
     c.label.position.set(c.pos.x, SLAB + c.pos.y + 3.4, c.pos.z);
     const alt = Math.round(c.pos.y * SCALE_M);
     c.label.visible = S.selected === c;
-    if (c.label.visible) setLabel(c.label, [{ t: `${c.id} · ${statusWord(c)}`, c: c.hold || c.sep?.state === 'waiting' ? '#c0392b' : dark(c.tint, 0.8), s: 36 },
+    if (c.label.visible) setLabel(c.label, [{ t: `${dispId(c.id)} · ${statusWord(c)}`, c: c.hold || c.sep?.state === 'waiting' ? '#c0392b' : dark(c.tint, 0.8), s: 36 },
       { t: `z ${alt} m · ${sepLabel(c)} · ${l}/${COURIER_CAPACITY} orders`, c: '#7a736b', s: 26 }]);
     c.halo.visible = live.has(c.id); c.halo.position.copy(c.mesh.position).y += 0.8;
     // highlighted blocked obstacle (a few seconds after a conflict is detected)
@@ -1762,8 +1779,6 @@ function drawElevation(c) {
   if (src.title) { g.fillStyle = '#5f5a54'; g.fillText(src.title, padL + 4, 12); }
 }
 
-const nameOpt = (a) => a.map((s) => `<option>${s}</option>`).join('');
-let lastDroneKey = '';
 function readQuery() {
   const mode = $('q-mode').value, num = (id, d = 0) => { const v = parseFloat($(id).value); return Number.isFinite(v) ? v : d; };
   if (mode === 'block') return { block: $('q-block').value };
@@ -1853,25 +1868,167 @@ function stageHTML() {
   }
   return html;
 }
-function fleetHTML() {
-  const cur = trackedDrone();
-  return S.couriers.map((c) => {
-    const m = S.missions.find((q) => q.drone === c.id), h = humanView(c), pct = h.progress != null ? Math.round(h.progress * 100) : 0;
-    const dest = c.task ? destOf(c.task).stationId : c.carry[0] ? c.carry[0].customer.stationId : c.orders[0] ? c.orders[0].restaurant.stationId : '—';
-    const stat = c.hold ? 'HOVER' : c.sep?.state === 'waiting' ? 'WAITING' : c.status;
-    return `<div class="fcard ${cur === c ? 'sel' : ''}" data-drone="${c.id}" style="--tint:${hex(c.tint)}">
-      <i class="sw"></i><b>${c.id}</b><span class="fst ${c.hold ? 'bad' : ''}">${stat}</span>
-      <span class="fz">z ${Math.round(c.pos.y * SCALE_M)} m</span>
-      <span class="fm dim">${m ? `${m.restaurant.stationId} → ${m.customer.stationId}` : ''} · now → ${dest} · <b class="sepchip ${c.sep?.state ?? 'clear'}">${sepLabel(c)}</b></span>
-      <div class="bar"><i style="width:${pct}%;background:${hex(c.tint)}"></i></div></div>`;
-  }).join('');
+// ---------- operations UI: status bar, left column, fleet monitoring, inspector, incident queue ----------
+// Read-only views over S; selection only changes highlight + the inspector. Nothing here steps the simulation, re-plans or moves the camera.
+const ui = { activeIncidentTab: 'critical', activeInspectorTab: 'flight', shownDrone: null, lastTrigger: null };
+const esc = (t) => String(t).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+const setHTML = (el, html) => { if (el._h !== html) { el._h = html; el.innerHTML = html; } };
+const setText = (el, t) => { if (el.textContent !== t) el.textContent = t; };
+const selectedDrone = () => (S.selected?.type === 'courier' ? S.selected : null);
+const atHub = (c) => !c.task && c.pos.y < 0.3 && !!S.homes[c.id] && Math.hypot(c.pos.x - S.homes[c.id].x, c.pos.z - S.homes[c.id].z) < 1.5;
+const missionLabel = (c) => { const o = c.task?.order ?? c.orders[0] ?? c.carry[0] ?? c.lastOrder; return o ? `${o.restaurant.stationId} → ${o.customer.stationId}` : 'No task'; };
+const flightState = (c) => (c.hold ? 'NO_VALID_ROUTE' : c.sep?.state === 'waiting' ? 'WAITING_FOR_CLEARANCE' : c.status);
+const aliases = (ids) => ids.map(dispId).join(', ');
+function etaText(c) { // seconds left on the current leg; never Infinity / NaN
+  if (!c.task) return '—';
+  if (c.hold) return 'Unavailable';
+  const t = remainingTime(c);
+  return Number.isFinite(t) ? `≈ ${Math.ceil(t)} s` : '—';
 }
-function missionBar() {
+function attentionText(c) {
+  if (c.hold) return 'Holding · route blocked';
+  if (c.sep?.state === 'waiting') return `Waiting for ${aliases(c.sep.by) || 'another drone'}`;
+  if (c.sep?.state === 'yielding') return `Giving way to ${aliases(c.sep.by) || 'another drone'}`;
+  if (c.task) { const p = humanView(c).progress; return `${c.task.kind === 'toRestaurant' ? 'Pickup' : 'Delivery'} leg${p != null ? ' · ' + Math.round(p * 100) + '%' : ''}`; }
+  if (c.status === 'COMPLETE') return 'Delivered';
+  return atHub(c) ? 'At hub' : 'No active task';
+}
+
+function renderStatus() {
+  const active = S.couriers.filter((c) => c.task).length, hub = S.couriers.filter(atHub).length;
   const done = S.missions.filter((m) => m.order.status === 'delivered' || !S.orders.includes(m.order)).length;
-  const frac = S.missions.reduce((a, m) => a + (S.orders.includes(m.order) ? STATUS.indexOf(m.order.status) / 5 : 1), 0) / Math.max(1, S.missions.length);
-  $('t-clock').textContent = `${fmt(S.time, 0)} s`;
-  $('t-bar').style.width = Math.round(frac * 100) + '%';
-  $('t-note').textContent = `first deliveries ${done}/${S.missions.length}`;
+  const cnt = ops.counts(), running = S.running && S.stage === 4;
+  setText($('st-time'), `${fmt(S.time, 0)} s`);
+  setText($('st-fleet'), `${S.couriers.length} total / ${active} active`);
+  setText($('st-first'), `${done} / ${S.missions.length}`);
+  setText($('st-alerts'), String(cnt.critical + cnt.battery));
+  setText($('st-sim'), running ? 'RUNNING' : S.stage < 4 ? `PAUSED · Stage ${S.stage}` : 'PAUSED');
+  setText($('ip-flight'), `${active} active`);
+  setText($('ip-hub'), `${hub} at hub`);
+  setText($('map-sub'), `Stage ${S.stage} · ${STAGES[S.stage - 1][0]}`);
+  for (const k of ['critical', 'battery', 'updates']) { const t = cnt[k] > 99 ? '99+' : String(cnt[k]); const el = $('cnt-' + k); setText(el, t); el.setAttribute('aria-label', `${cnt[k]} items`); }
+}
+
+const fleetRows = new Map();
+function renderFleet() {
+  const body = $('fleet-body'), ids = S.couriers.map((c) => c.id), sel = selectedDrone();
+  for (const [id, row] of fleetRows) if (!ids.includes(id)) { row.tr.remove(); fleetRows.delete(id); }
+  for (const c of S.couriers) {
+    let row = fleetRows.get(c.id);
+    if (!row) {       // rows are created once and only their text changes, so focus, scroll position and slow clicks survive the 250 ms refresh
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td><button type="button"></button></td><td></td><td></td><td></td><td></td><td></td><td></td>';
+      row = { tr, tds: [...tr.children], btn: tr.querySelector('button') };
+      row.btn.addEventListener('click', (e) => selectDrone(c.id, e.currentTarget));
+      row.btn.dataset.select = c.id; row.btn.setAttribute('aria-label', `Inspect ${dispId(c.id)}`);
+      body.append(tr); fleetRows.set(c.id, row);
+    }
+    const fs = flightState(c), att = attentionText(c), on = sel === c;
+    const cells = [dispId(c.id), fs, missionLabel(c), `${Math.round(c.pos.y * SCALE_M)} m`, etaText(c), '—', att];
+    setText(row.btn, cells[0]);
+    for (let i = 1; i < 7; i++) { setText(row.tds[i], cells[i]); row.tds[i].title = cells[i]; }
+    row.tr.classList.toggle('selected', on);
+    row.btn.setAttribute('aria-pressed', String(on));
+  }
+  for (const c of S.couriers) body.append(fleetRows.get(c.id).tr);   // keep the simulator's order
+  setText($('fleet-count'), `${S.couriers.length} drone${S.couriers.length === 1 ? '' : 's'} · all statuses`);
+  $('fleet-empty').hidden = S.couriers.length > 0; $('fleet-table').hidden = S.couriers.length === 0;
+}
+
+// ---- incident queue -------------------------------------------------------
+let evCat = null, evKey = '', evSeen = new Set();
+function renderEvents(force) {
+  const cat = ui.activeIncidentTab, list = $('events');
+  document.querySelectorAll('[data-category]').forEach((b) => { const on = b.dataset.category === cat; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; });
+  list.setAttribute('aria-labelledby', 'tab-' + cat);
+  const key = `${cat}:${ops.state.version}:${S.couriers.map((c) => c.id).join()}`;
+  if (!force && key === evKey) return;
+  evKey = key;
+  const items = ops.list(cat), sameTab = evCat === cat, prevTop = list.scrollTop, prevH = list.scrollHeight;
+  const fresh = items.filter((e) => !evSeen.has(e.id)).length;
+  evSeen = new Set(items.map((e) => e.id)); evCat = cat;
+  if (!items.length) {
+    list.replaceChildren(Object.assign(document.createElement('p'), { className: 'empty', textContent:
+      cat === 'critical' ? 'No open critical incidents.' : cat === 'battery' ? 'Battery model not connected — no low-battery incidents can be raised in this simulator.' : 'No updates yet in this session.' }));
+  } else {
+    list.replaceChildren(...items.map((e) => {
+      const b = document.createElement('button'); b.className = 'event'; b.dataset.id = e.id; if (e.droneId) b.dataset.drone = e.droneId;
+      const t = document.createElement('strong'), d = document.createElement('span'), m = document.createElement('span');
+      t.textContent = e.title; d.textContent = e.description;
+      m.textContent = `${Math.round(e.occurredAtSimSeconds)} s simulation time${e.droneId ? ' · View drone →' : ''}`;
+      b.append(t, d, m);
+      b.addEventListener('click', () => openEvent(e, b));
+      return b;
+    }));
+  }
+  const note = $('new-events');
+  if (sameTab && prevTop > 8) { list.scrollTop = prevTop + (list.scrollHeight - prevH); if (fresh > 0) { note.textContent = `${fresh} new event${fresh === 1 ? '' : 's'} · show`; note.hidden = false; } }
+  else { list.scrollTop = 0; note.hidden = true; }
+}
+function openEvent(e, trigger) {   // opening an event selects its drone; it never resolves or acknowledges the incident
+  if (!e.droneId) { toast(`${e.title}: ${e.description}`); return; }
+  if (!S.couriers.some((c) => c.id === e.droneId)) { toast('The linked drone is not in the current simulation.'); return; }
+  selectDrone(e.droneId, trigger);
+}
+
+// ---- inspector --------------------------------------------------------------
+const dlRow = (k, v) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`;
+function renderInspector() {
+  const c = selectedDrone(), ins = $('inspector');
+  if (!c) { ins.hidden = true; ui.shownDrone = null; return; }
+  if (ui.shownDrone !== c.id) { ui.shownDrone = c.id; ui.activeInspectorTab = 'flight'; $('inspector-body').scrollTop = 0; }
+  ins.hidden = false;
+  setText($('inspector-title'), dispId(c.id));
+  setText($('inspector-subtitle'), `Selected drone · display alias for ${c.id}`);
+  const tab = ui.activeInspectorTab;
+  document.querySelectorAll('[data-detail]').forEach((b) => { const on = b.dataset.detail === tab; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; });
+  $('inspector-body').setAttribute('aria-labelledby', 'detail-' + tab);
+  document.querySelectorAll('[data-pane]').forEach((p) => { p.hidden = p.dataset.pane !== tab; });
+  if (tab === 'flight') {
+    const hv = humanView(c);
+    setHTML($('insp-human'), `<p><b>${esc(hv.headline)}</b></p>` + hv.lines.slice(0, 3).map((l) => `<p>${esc(l)}</p>`).join(''));
+    setHTML($('insp-dl'), dlRow('Flight state', flightState(c) + (c.hold ? ` · ${c.hold.reason}` : '')) + dlRow('Separation', sepLabel(c) + (c.sep?.by?.length ? ` · ${aliases(c.sep.by)}` : ''))
+      + dlRow('Mission', missionLabel(c)) + dlRow('Current leg', attentionText(c)) + dlRow('Altitude', `${Math.round(c.pos.y * SCALE_M)} m`)
+      + dlRow('ETA', etaText(c)) + dlRow('Battery', 'Unavailable · no model'));
+  } else if (tab === 'location') {
+    setHTML($('robot'), robotHTML(c));
+    setText($('robot-json'), JSON.stringify(getLocation(c.id), null, 1).replace(/\[\s+([^\]]*?)\s+\]/g, (m, inner) => '[' + inner.replace(/\s+/g, ' ') + ']'));
+    setHTML($('human'), humanHTML(c));
+    drawElevation(c);
+  } else {
+    const ev = ops.forDrone(c.id);
+    setHTML($('insp-history'), ev.length ? ev.map((e) => `<p><b>${Math.round(e.occurredAtSimSeconds)} s · ${esc(e.title)}</b>${e.resolvedAtSimSeconds != null ? ' (resolved)' : ''}<br>${esc(e.description)}</p>`).join('')
+      : '<p class="small">No events for this drone in the current session.</p>');
+  }
+}
+function triggerSelector(el) {
+  if (el?.matches?.('[data-select]')) return `[data-select="${el.dataset.select}"]`;
+  if (el?.matches?.('.event')) return `.event[data-id="${el.dataset.id}"]`;
+  return null;
+}
+function selectDrone(id, trigger) {
+  const c = S.couriers.find((d) => d.id === id);
+  if (!c) { toast('That drone is no longer in the current simulation.'); return; }
+  ui.lastTrigger = triggerSelector(trigger);
+  S.selected = c; S.track = c;
+  updatePanels(true);
+  setText($('selection-announcement'), `${dispId(id)} selected. Drone inspector opened.`);
+  if (trigger) $('close-inspector').focus({ preventScroll: true });
+}
+function clearDroneSelection() {
+  if (!selectedDrone()) return;
+  S.selected = null;
+  updatePanels(true);
+  setText($('selection-announcement'), 'Drone selection cleared.');
+  const t = ui.lastTrigger ? document.querySelector(ui.lastTrigger) : null;
+  (t ?? document.querySelector('#fleet-body button') ?? $('fleet-title')).focus({ preventScroll: true });
+}
+
+// ---- emergency response (read-only view; no flight commands exist in the simulator) --------------------
+function renderEmergency() {
+  const crit = ops.list('critical');
+  setHTML($('em-incidents'), crit.length ? crit.map((e) => `<p><b>${esc(e.title)}</b> · ${esc(e.description)} · ${Math.round(e.occurredAtSimSeconds)} s</p>`).join('') : '<p>No open critical incidents.</p>');
+  setHTML($('em-fleet'), S.couriers.map((c) => `<p><b>${esc(dispId(c.id))}</b> · ${esc(flightState(c))} · separation ${esc(sepLabel(c))}${c.hold ? ' · ' + esc(c.hold.reason) : ''}</p>`).join('') || '<p>No drones in the simulation.</p>');
 }
 const STAGE_LAYERS = [
   { land: true, perm: false, rest: false, cand: false, sel: false },
@@ -1910,19 +2067,13 @@ function updatePanels(force) {
   $('rules').innerHTML = rulesHTML();
   if (logDirty || force) { $('log').innerHTML = logHTML(); logDirty = false; }
   $('btn-policy').textContent = 'Priority: ' + (S.policy === 'fifo' ? 'FIFO' : 'Revenue');
-  $('btn-play').textContent = S.stage < 4 ? '▶ Run' : S.running ? '⏸ Pause' : '▶ Run';
-  stageButtons(); missionBar();
+  const running = S.stage === 4 && S.running;
+  setText($('btn-play'), running ? 'Pause' : 'Run');
+  $('btn-play').setAttribute('aria-pressed', String(running));
+  stageButtons();
   $('stage-body').innerHTML = stageHTML();
-  $('fleet').innerHTML = fleetHTML();
-  // drone selector
-  const k = S.couriers.map((c) => c.id).join();
-  const c = trackedDrone();
-  if (k !== lastDroneKey) { $('sel-drone').innerHTML = nameOpt(S.couriers.map((d) => d.id)); lastDroneKey = k; }
-  if (c) { $('sel-drone').value = c.id; S.track = c; }
-  $('robot').innerHTML = robotHTML(c);
-  $('robot-json').textContent = JSON.stringify(getLocation(c?.id), null, 1).replace(/\[\s+([^\]]*?)\s+\]/g, (m, inner) => '[' + inner.replace(/\s+/g, ' ') + ']');
-  $('human').innerHTML = humanHTML(c);
-  drawElevation(c);
+  renderStatus(); renderFleet(); renderEvents(force); renderInspector();
+  if ($('dlg-emergency').open) renderEmergency();
   updateQuery();
 }
 const sw = (bg, t, extra = '') => `<div><i style="background:${bg};${extra}"></i>${t}</div>`;
@@ -1933,7 +2084,7 @@ $('legend').innerHTML =
     + sw('rgba(224,112,124,.45)', 'restricted volume', `border:1px dashed ${hex(AIR.edgeRestricted)}`)
     + sw('rgba(240,177,58,.5)', 'temporary hazard', `border:1px dashed ${hex(AIR.edgeHazard)}`))
   + lg('Routes', sw(hex(CAND_COLOR[0]), 'candidates (dashed)') + sw(hex(AIR.cobalt), 'selected smooth route') + sw(hex(PATH_COLOR.blocked), 'blocked stretch'))
-  + lg('Drones', DRONE_TINT.map((t, i) => sw(hex(t), 'D-0' + (i + 1))).join(''))
+  + lg('Drones', DRONE_TINT.map((t, i) => sw(hex(t), 'DR-0' + (i + 1))).join(''))
   + lg('Order status', STATUS.map((s) => sw(hex(STATUS_COLOR[s]), s)).join('') + '<div class="dim">Box size = revenue · N ↗</div>');
 
 // ---------- panel wiring ---------------------------------------------
@@ -1942,11 +2093,6 @@ bind('btn-play', () => { if (S.stage < 4) setStage(4); else S.running = !S.runni
 document.querySelectorAll('#stages button').forEach((b) => b.addEventListener('click', () => setStage(+b.dataset.stage)));
 $('btn-stage-prev').addEventListener('click', () => setStage(S.stage - 1));
 $('btn-stage-next').addEventListener('click', () => setStage(S.stage + 1));
-$('fleet').addEventListener('pointerdown', (e) => { // pointerdown: the cards are re-rendered every 250 ms, which would swallow a slow click
-  const card = e.target.closest('[data-drone]'); if (!card) return;
-  const c = S.couriers.find((d) => d.id === card.dataset.drone); if (c) { S.selected = c; S.track = c; updatePanels(true); }
-});
-bind('btn-reset', () => resetWorld());
 bind('btn-create', () => act.create());
 bind('btn-accept-order', () => act.accept());
 bind('btn-mark-ready', () => act.ready());
@@ -1963,12 +2109,44 @@ for (const k of ['customer', 'restaurant', 'platform', 'courier']) {
   $('auto-' + k).checked = S.auto[k];
   $('auto-' + k).addEventListener('change', (e) => { S.auto[k] = e.target.checked; log(`Auto ${k}: ${e.target.checked ? 'on' : 'off'}`); });
 }
-$('btn-panel').addEventListener('click', () => {
-  const c = $('panel').classList.toggle('collapsed');
-  $('btn-panel').textContent = c ? '▸' : '▾';
-});
-$('sel-drone').addEventListener('change', (e) => { const c = S.couriers.find((d) => d.id === e.target.value); if (c) { S.selected = c; S.track = c; updatePanels(true); } });
 
+// ---- operations shell wiring
+document.querySelectorAll('[data-category]').forEach((b) => b.addEventListener('click', () => { ui.activeIncidentTab = b.dataset.category; renderEvents(true); }));
+$('new-events').addEventListener('click', () => { $('events').scrollTop = 0; $('new-events').hidden = true; });
+$('events').addEventListener('scroll', () => { if ($('events').scrollTop < 8) $('new-events').hidden = true; });
+document.querySelectorAll('[data-detail]').forEach((b) => b.addEventListener('click', () => { ui.activeInspectorTab = b.dataset.detail; renderInspector(); }));
+function tabKeys(sel, apply) { // roving tablist: arrows / Home / End
+  document.querySelectorAll(sel).forEach((b, i, all) => b.addEventListener('keydown', (e) => {
+    const k = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: all.length - 1 }[e.key]; if (k == null) return;
+    e.preventDefault(); const n = all[(k + all.length) % all.length]; apply(n); n.focus();
+  }));
+}
+tabKeys('[data-category]', (n) => { ui.activeIncidentTab = n.dataset.category; renderEvents(true); });
+tabKeys('[data-detail]', (n) => { ui.activeInspectorTab = n.dataset.detail; renderInspector(); });
+$('close-inspector').addEventListener('click', clearDroneSelection);
+const dlgOf = { intake: 'dlg-intake', allocation: 'dlg-allocation', emergency: 'dlg-emergency' };
+document.querySelectorAll('[data-operation]').forEach((b) => b.addEventListener('click', () => {
+  const d = $(dlgOf[b.dataset.operation]); if (b.dataset.operation === 'emergency') renderEmergency();
+  d.returnFocus = b; d.showModal();
+}));
+document.querySelectorAll('dialog').forEach((d) => {
+  d.addEventListener('close', () => { updatePanels(true); (d.returnFocus ?? document.body).focus?.({ preventScroll: true }); });
+  d.querySelectorAll('.dlg-close').forEach((b) => b.addEventListener('click', () => d.close()));
+});
+const adv = $('advanced');
+function setAdvanced(open) { adv.classList.toggle('open', open); adv.hidden = !open; $('btn-advanced').setAttribute('aria-expanded', String(open)); if (open) $('close-advanced').focus({ preventScroll: true }); else if (adv.contains(document.activeElement)) $('btn-advanced').focus({ preventScroll: true }); }
+setAdvanced(false);
+$('btn-advanced').addEventListener('click', () => setAdvanced(!adv.classList.contains('open')));
+$('close-advanced').addEventListener('click', () => setAdvanced(false));
+$('em-open-tests').addEventListener('click', () => { $('dlg-emergency').close(); setAdvanced(true); $('sec-params').scrollIntoView?.(); });
+$('btn-reset').addEventListener('click', () => { $('dlg-reset').returnFocus = $('btn-reset'); $('dlg-reset').showModal(); });
+$('reset-cancel').addEventListener('click', () => $('dlg-reset').close());
+$('reset-confirm').addEventListener('click', () => { $('dlg-reset').close(); resetWorld(); updatePanels(true); });
+addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || e.defaultPrevented || document.querySelector('dialog[open]')) return;   // an open dialog handles Escape itself
+  if (adv.classList.contains('open')) { setAdvanced(false); return; }
+  clearDroneSelection();
+});
 // route-cost, separation and flight parameters (classroom assumptions)
 const updateFormula = () => { $('cost-formula').textContent = criterionText(); };
 const replanAll = () => { bump(); legCache.clear(); };
@@ -2052,12 +2230,13 @@ $('q-mode').addEventListener('change', modeSwitch);
 for (const el of document.querySelectorAll('#sec-query input, #sec-query select')) el.addEventListener('input', () => updateQuery());
 $('q-example').addEventListener('click', () => { $('q-mode').value = 'box'; $('q-x0').value = -80; $('q-x1').value = 80; $('q-y0').value = 40; $('q-y1').value = 120; $('q-z0').value = 90; $('q-z1').value = 120; modeSwitch(); });
 $('q-here').addEventListener('click', () => {
-  const c = trackedDrone(); if (!c) return; const l = toLocal(c.pos);
+  const c = selectedDrone() ?? trackedDrone(); if (!c) return; const l = toLocal(c.pos);
   $('q-mode').value = 'point'; modeSwitch(); $('q-px').value = Math.round(l.x); $('q-py').value = Math.round(l.y); $('q-pz').value = Math.round(l.z); $('q-pr').value = 40; updateQuery();
 });
 modeSwitch();
 
 function resetWorld(silent = false) {
+  ops.reset(); ui.shownDrone = null; evKey = ''; evSeen = new Set();
   [...S.orders].forEach(removeOrder);
   [...S.couriers].forEach(removeCourier);
   S.delivered.length = 0; S.log.length = 0; S.track = null; S.homes = {}; S.missions = [];
@@ -2086,43 +2265,55 @@ function resetWorld(silent = false) {
 const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
 let down = null;
 canvas.addEventListener('pointerdown', (e) => { down = [e.clientX, e.clientY]; });
+canvas.addEventListener('pointercancel', () => { down = null; });
 canvas.addEventListener('pointerup', (e) => {
-  if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5) return;
-  ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5) { down = null; return; }   // a drag is a camera move, not a click
+  down = null;
+  const r = canvas.getBoundingClientRect();
+  ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
   ray.setFromCamera(ndc, camera);
   const hit = ray.intersectObjects(pickables, true)[0];
-  if (hit) S.selected = hit.object.userData.ref;
-  else {
+  if (hit) {
+    const ref = hit.object.userData.ref;
+    if (ref?.type === 'courier') { selectDrone(ref.id, null); ui.lastTrigger = null; return; }
+    if (selectedDrone()) { S.selected = null; }
+    S.selected = ref;
+  } else {
+    const had = !!selectedDrone();
     S.selected = null;
     // nothing solid under the cursor: a translucent prism if the airspace layers are on (red first, then columns), otherwise the block on the ground.
     // Shift-click always picks the ground block.
     const vh = !e.shiftKey && (S.layers.perm || S.layers.rest) ? ray.intersectObjects(volMeshes.filter((m) => m.visible), false) : [];
     if (vh.length) {
       const pri = Math.min(...vh.map((h) => h.object.userData.pri));
-      selectVolume(vh.find((h) => h.object.userData.pri === pri).object.userData.volume.id);
+      selectVolume(vh.find((h) => h.object.userData.pri === pri).object.userData.volume.id); setAdvanced(true);
     } else {
       const bh = ray.intersectObjects(slabs, false)[0];
-      if (bh) selectBlock(bh.object.userData.tile.id);
+      if (bh) { selectBlock(bh.object.userData.tile.id); setAdvanced(true); }
     }
+    if (had) setText($('selection-announcement'), 'Drone selection cleared.');
   }
   updatePanels(true);
 });
 
 // ---------- main loop ------------------------------------------------
-function resize() {
-  renderer.setSize(innerWidth, innerHeight, false);
-  const a = innerWidth / innerHeight;
+const mapEl = $('map');
+function resizeMap() { // size from the map container only: the inspector overlay never changes it
+  const w = Math.max(1, mapEl.clientWidth), h = Math.max(1, mapEl.clientHeight);
+  renderer.setSize(w, h, false);
+  const a = w / h;
   Object.assign(camera, { left: -VIEW * a, right: VIEW * a, top: VIEW, bottom: -VIEW });
   camera.updateProjectionMatrix();
 }
-addEventListener('resize', resize);
+new ResizeObserver(resizeMap).observe(mapEl);
+addEventListener('resize', resizeMap);
 
 controls.update(); controls.saveState();
 finishBlocks(); regenAirspace();
 resetWorld(true);
 applyLayers();
 log('AIRSPACE ready — step through the four stages, or press Start flight. All geometry and parameters are synthetic.');
-resize();
+resizeMap();
 let lastT = performance.now();
 function frame() {
   const now = performance.now(), dt = Math.min((now - lastT) / 1000, 0.1); lastT = now;
@@ -2136,4 +2327,4 @@ function frame() {
 updatePanels(true);
 frame();
 // exposed for debugging / automated checks
-window.__sim = { sepEvade, sepPlan, posAfter, prioCmp, scene, LAND, regenAirspace, segCheck, inPermitted, volumesAt, S, act, step, world, cfg, planRoute, planMission, getLocation, getAgentsAt, getAgentsInBox, setStage, previews, selectVolume, resetWorld };
+window.__sim = { sepEvade, sepPlan, posAfter, prioCmp, scene, LAND, regenAirspace, segCheck, inPermitted, volumesAt, S, act, step, world, cfg, planRoute, planMission, getLocation, getAgentsAt, getAgentsInBox, setStage, previews, selectVolume, resetWorld, ui, ops, selectDrone, clearDroneSelection, renderEvents, camera, renderer, controls };

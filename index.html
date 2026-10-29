@@ -3,41 +3,132 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Airspace · Location-Aware Drone Delivery Sandbox</title>
+<title>AIRSPACE · Drone Operations</title>
 <link rel="stylesheet" href="style.css">
 <script type="importmap">
 { "imports": { "three": "./vendor/three.module.js" } }
 </script>
 </head>
 <body>
-<canvas id="view"></canvas>
+<div class="app" id="app">
+<header class="topbar">
+  <h1>AIRSPACE / Drone Operations</h1>
+  <div class="simcontrols" role="group" aria-label="Simulation controls">
+    <small>Simulation controls</small>
+    <button id="btn-play" title="Run / pause simulation time">Run</button>
+    <select id="sel-speed" title="Simulation speed" aria-label="Simulation speed">
+      <option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option>
+    </select>
+    <button id="btn-reset">Reset</button>
+    <button id="btn-advanced" aria-expanded="false" aria-controls="advanced">Advanced</button>
+  </div>
+</header>
 
-<aside id="panel">
-  <header>
-    <div>
-      <h1>Airspace</h1>
-      <p>A land-use-aware drone delivery sandbox. Navigable airspace is shaped not only by buildings but by the urban activity underneath: land use sets permission and cost, four drones fly validated smooth routes and keep their distance. Synthetic data · classroom simulation, not a flight planner.</p>
+<div class="statusbar" id="statusbar" aria-label="Continuous operational status">
+  <span>Time <b id="st-time">0 s</b></span>
+  <span>Fleet <b id="st-fleet">—</b></span>
+  <span>First deliveries <b id="st-first">—</b></span>
+  <span>On-time <b>—</b> <small>not modeled</small></span>
+  <span>Active alerts <b id="st-alerts">0</b></span>
+  <span>Simulation <b id="st-sim">PAUSED</b></span>
+</div>
+
+<div class="workspace">
+<aside class="left" aria-label="Operational overview">
+  <section class="inprogress">
+    <h2>In Progress <small>All operations</small></h2>
+    <p><span>Flight Ops</span><b id="ip-flight">0 active</b></p>
+    <p><span>Hub Ops</span><b id="ip-hub">0 at hub</b></p>
+    <small>Fleet-wide summary; unaffected by selection.</small>
+  </section>
+  <section class="fixedcontrols">
+    <h2>Operations</h2>
+    <button data-operation="intake">Order Intake</button>
+    <button data-operation="allocation">Fleet Allocation</button>
+    <button data-operation="emergency">Emergency Response</button>
+  </section>
+  <section class="incidents">
+    <div class="incidenthead"><h2>Incident Queue</h2><small>Alerts: open items · Updates: retained events.</small></div>
+    <div class="tabs" role="tablist" aria-label="Incident categories">
+      <button role="tab" id="tab-critical" aria-controls="events" data-category="critical">Critical <span class="count" id="cnt-critical">0</span></button>
+      <button role="tab" id="tab-battery" aria-controls="events" data-category="battery">Low battery <span class="count" id="cnt-battery">0</span></button>
+      <button role="tab" id="tab-updates" aria-controls="events" data-category="updates">Updates <span class="count" id="cnt-updates">0</span></button>
     </div>
-    <button id="btn-panel" class="icon" title="Collapse / expand the whole panel">▾</button>
-  </header>
+    <div class="newevents" id="new-events" hidden></div>
+    <div class="eventlist" id="events" role="tabpanel" tabindex="0"></div>
+    <div class="eventfooter">Independent scroll · latest first · simulation time</div>
+  </section>
+</aside>
 
-  <div id="panel-body">
-    <details open class="sec">
-      <summary>Simulation</summary>
-      <div class="group sim">
-        <span class="gtitle">Run · Pause · Reset</span>
-        <button id="btn-play" title="Run / pause simulation time">▶ Run</button>
-        <select id="sel-speed" title="Simulation speed">
-          <option value="0.5">0.5×</option><option value="1" selected>1×</option>
-          <option value="2">2×</option><option value="4">4×</option>
-        </select>
-        <button id="btn-reset">↺ Reset</button>
-        <span class="clock" id="t-clock">0 s</span>
+<main class="main">
+  <section class="map" id="map" aria-label="Full-width 3D map workspace">
+    <canvas id="view"></canvas>
+    <div class="maptitle"><h2>3D Map</h2><small id="map-sub">Stage 1 · Land Use</small></div>
+    <div class="maptools">
+      <span>Layers</span>
+      <label><input type="checkbox" id="lay-land"> Land use</label>
+      <label><input type="checkbox" id="lay-perm"> Permitted</label>
+      <label><input type="checkbox" id="lay-rest"> Restricted</label>
+      <label><input type="checkbox" id="lay-cand"> Candidates</label>
+      <label><input type="checkbox" id="lay-sel"> Routes</label>
+      <label><input type="checkbox" id="p-streets"> Street names</label>
+      <details class="legendbox"><summary>Legend</summary><div id="legend"></div></details>
+    </div>
+    <aside class="inspector" id="inspector" aria-labelledby="inspector-title" hidden>
+      <div class="inspectorhead">
+        <div><h2 id="inspector-title">DR-03</h2><small id="inspector-subtitle">Selected drone</small></div>
+        <button id="close-inspector" aria-label="Close drone inspector">×</button>
       </div>
-      <div class="bar tl"><i id="t-bar"></i></div>
-      <div class="dim small" id="t-note"></div>
-    </details>
+      <div class="tabs inspectortabs" role="tablist" aria-label="Drone inspector sections">
+        <button role="tab" id="detail-flight" data-detail="flight" aria-controls="inspector-body">Flight details</button>
+        <button role="tab" id="detail-location" data-detail="location" aria-controls="inspector-body">Location</button>
+        <button role="tab" id="detail-history" data-detail="history" aria-controls="inspector-body">History</button>
+      </div>
+      <div id="inspector-body" class="inspectorbody" role="tabpanel" tabindex="0">
+        <div id="pane-flight" data-pane="flight">
+          <h3>Current status</h3>
+          <div id="insp-human" class="humanbox"></div>
+          <dl id="insp-dl"></dl>
+          <h3>Operational context</h3>
+          <p class="small">Route validity and separation are separate states. Opening this inspector does not pause, replan or reset the simulation.</p>
+        </div>
+        <div id="pane-location" data-pane="location" hidden>
+          <h3>Machine view</h3>
+          <div id="robot" class="info"></div>
+          <details class="raw"><summary>getLocation(droneId) → JSON</summary><pre id="robot-json"></pre></details>
+          <canvas id="elev" width="288" height="100" title="Side elevation along the straight line to the destination"></canvas>
+          <p class="small">Side elevation: mint = permitted volumes, grey = buildings, red = restricted prism, blue = the selected route.</p>
+          <h3>Human view</h3>
+          <div id="human" class="info"></div>
+        </div>
+        <div id="pane-history" data-pane="history" hidden>
+          <h3>Drone event history</h3>
+          <div id="insp-history"></div>
+        </div>
+      </div>
+      <div class="inspectorfoot">Floating overlay · no canvas resize or camera change</div>
+    </aside>
+  </section>
 
+  <section class="fleet" aria-labelledby="fleet-title">
+    <div class="fleethead"><h2 id="fleet-title">Fleet Monitoring <small id="fleet-count">0 drones</small></h2><small>Select a drone to inspect; all rows stay visible.</small></div>
+    <div class="tablewrap" id="fleet-wrap">
+      <table id="fleet-table">
+        <thead><tr><th scope="col">Drone</th><th scope="col">Flight state</th><th scope="col">Mission</th><th scope="col">Altitude</th><th scope="col">ETA</th><th scope="col">Battery</th><th scope="col">Progress / attention</th></tr></thead>
+        <tbody id="fleet-body"></tbody>
+      </table>
+      <div class="empty" id="fleet-empty" hidden><b>No drones in this simulation.</b><p>Check the simulation setup under Advanced; no drone is auto-selected.</p></div>
+    </div>
+    <div class="fleetnote">DR-01…04 are display aliases for the simulator's D-01…04. Battery is not modelled; on-time delivery has no deadline model.</div>
+  </section>
+</main>
+</div>
+</div>
+
+<aside id="advanced" class="advanced" aria-labelledby="advanced-title" hidden>
+  <div class="advhead"><h2 id="advanced-title">Advanced simulation tools</h2><button id="close-advanced" aria-label="Close advanced tools">×</button></div>
+  <div class="advbody">
+    <p class="small">Stages, spatial queries, land-use rules, route-cost and separation parameters, test situations and the original classroom statistics live here. Nothing was removed.</p>
     <details open class="sec">
       <summary>Stage <small id="stage-q"></small></summary>
       <div class="stepper">
@@ -52,36 +143,6 @@
       </div>
       <div id="stage-body" class="info"></div>
     </details>
-
-    <details open class="sec">
-      <summary>Layers <small>(independent of the stage)</small></summary>
-      <div class="layers">
-        <label><input type="checkbox" id="lay-land"> Land use</label>
-        <label><input type="checkbox" id="lay-perm"> Permitted airspace</label>
-        <label><input type="checkbox" id="lay-rest"> Restricted airspace</label>
-        <label><input type="checkbox" id="lay-cand"> Candidate routes</label>
-        <label><input type="checkbox" id="lay-sel"> Selected route</label>
-        <label><input type="checkbox" id="p-streets"> Street names</label>
-      </div>
-    </details>
-
-    <details open class="sec">
-      <summary>Fleet <small>(four drones — click to inspect)</small></summary>
-      <div id="fleet"></div>
-    </details>
-
-    <details open class="sec" id="sec-drone">
-      <summary>Location inspector <small>(two views of one position)</small></summary>
-      <div class="pick"><label>Drone <select id="sel-drone"></select></label><span class="dim small">or click a drone in the scene</span></div>
-      <h4 class="sub robot">Robot view · machine state</h4>
-      <div id="robot" class="info"></div>
-      <details class="raw"><summary>getLocation(droneId) → JSON</summary><pre id="robot-json"></pre></details>
-      <canvas id="elev" width="310" height="104" title="Side elevation along the straight line to the destination"></canvas>
-      <div class="dim small">Side elevation: mint = permitted volumes, grey = buildings, red = restricted prism, blue = the selected route.</div>
-      <h4 class="sub human">Human view · relational description</h4>
-      <div id="human" class="info"></div>
-    </details>
-
     <details class="sec" id="sec-query">
       <summary>Spatial inspector <small>block · volume · getAgentsAt</small></summary>
       <div class="qrow"><label>Inspect
@@ -100,13 +161,11 @@
       <pre id="q-out"></pre>
       <div class="dim small">Local frame: x east, y north, z up (m) from the street-level datum. Membership uses X, Y <b>and</b> Z of each drone's live position, so two drones stacked at different altitudes are told apart.</div>
     </details>
-
     <details class="sec" id="sec-rules">
       <summary>Land-use rules <small>(change one → airspace and costs regenerate)</small></summary>
       <div id="lu-rules"></div>
       <div class="dim small">Simulation policies, not legal rules. The floor is the lowest permitted altitude above a block of that use; risk (0–10) is the soft cost per metre flown over it. Permission is a hard constraint, risk is only a preference.</div>
     </details>
-
     <details class="sec" id="sec-params">
       <summary>Route cost &amp; separation <small>(classroom parameters)</small></summary>
       <div class="dim small" id="cost-formula"></div>
@@ -133,38 +192,6 @@
       </div>
       <div class="dim small">These parameters are classroom assumptions — not real legal flight limits or validated risk scores. Routes shown are never safe, authorized or legal for real flight.</div>
     </details>
-
-    <details class="sec">
-      <summary>Delivery platform <small>(orders, restaurants, couriers)</small></summary>
-      <div class="group customer">
-        <span class="gtitle">Customer</span>
-        <button id="btn-create" title="Create an order (uses the selected customer / restaurant if any)">＋ Create Order</button>
-        <label class="auto"><input type="checkbox" id="auto-customer"> auto</label>
-      </div>
-      <div class="group restaurant">
-        <span class="gtitle">Restaurant</span>
-        <button id="btn-accept-order">Accept Order</button>
-        <button id="btn-mark-ready">Mark Ready</button>
-        <label class="auto"><input type="checkbox" id="auto-restaurant"> auto</label>
-      </div>
-      <div class="group platform">
-        <span class="gtitle">Platform</span>
-        <button id="btn-evaluate">Evaluate Pending</button>
-        <button id="btn-estimate">Estimate ETA</button>
-        <button id="btn-assign">Assign Courier</button>
-        <button id="btn-policy" title="Update order priority: switch allocation logic">Priority: FIFO</button>
-        <label class="auto"><input type="checkbox" id="auto-platform"> auto</label>
-      </div>
-      <div class="group courier">
-        <span class="gtitle">Courier · drone</span>
-        <button id="btn-c-accept">Accept</button>
-        <button id="btn-c-travel">Fly → Pickup</button>
-        <button id="btn-c-pickup">Pick Up</button>
-        <button id="btn-c-deliver">Fly → Delivery</button>
-        <label class="auto"><input type="checkbox" id="auto-courier"> auto</label>
-      </div>
-      <div class="dim small">The first four orders are scripted — one per drone, a short, a medium and two long trips to different edges of the city — so the routes previewed in Stage 3 are the routes flown in Stage 4. Later orders arrive on their own.</div>
-    </details>
     <details class="sec"><summary>Statistics</summary><div id="stats"></div></details>
     <details class="sec"><summary>Selection</summary><div id="info" class="info"></div></details>
     <details class="sec"><summary>Platform queue <small>(unassigned orders)</small></summary><div id="queue" class="info"></div></details>
@@ -176,8 +203,57 @@
   </div>
 </aside>
 
-<div id="legend"></div>
+<dialog id="dlg-intake" aria-labelledby="dlg-intake-title">
+  <h2 id="dlg-intake-title">Order Intake</h2>
+  <div class="group"><span class="gtitle">Customer</span>
+    <button id="btn-create" title="Create an order (uses the selected customer / restaurant if any)">＋ Create Order</button>
+    <label class="auto"><input type="checkbox" id="auto-customer"> auto</label></div>
+  <div class="group"><span class="gtitle">Restaurant</span>
+    <button id="btn-accept-order">Accept Order</button>
+    <button id="btn-mark-ready">Mark Ready</button>
+    <label class="auto"><input type="checkbox" id="auto-restaurant"> auto</label></div>
+  <p class="small">Create Order uses the selected customer / restaurant on the map if there is one, otherwise a random one. Accepting respects the restaurant's production capacity; Mark Ready respects the preparation time. Refused actions explain which rule applied.</p>
+  <div class="actions"><button class="dlg-close">Return to operations</button></div>
+</dialog>
+
+<dialog id="dlg-allocation" aria-labelledby="dlg-allocation-title">
+  <h2 id="dlg-allocation-title">Fleet Allocation</h2>
+  <div class="group"><span class="gtitle">Platform</span>
+    <button id="btn-evaluate">Evaluate Pending</button>
+    <button id="btn-estimate">Estimate ETA</button>
+    <button id="btn-assign">Assign Courier</button>
+    <button id="btn-policy" title="Update order priority: switch allocation logic">Priority: FIFO</button>
+    <label class="auto"><input type="checkbox" id="auto-platform"> auto</label></div>
+  <div class="group"><span class="gtitle">Courier · drone</span>
+    <button id="btn-c-accept">Accept</button>
+    <button id="btn-c-travel">Fly → Pickup</button>
+    <button id="btn-c-pickup">Pick Up</button>
+    <button id="btn-c-deliver">Fly → Delivery</button>
+    <label class="auto"><input type="checkbox" id="auto-courier"> auto</label></div>
+  <p class="small">Assignment chooses the drone itself (availability, capacity, scripted pins, FIFO or revenue-weighted priority); a selected drone is not forced onto an order. The first four orders are scripted: one short, one medium and two long trips.</p>
+  <div class="actions"><button class="dlg-close">Return to operations</button></div>
+</dialog>
+
+<dialog id="dlg-emergency" aria-labelledby="dlg-emergency-title">
+  <h2 id="dlg-emergency-title">Emergency Response</h2>
+  <h3>Open critical incidents</h3>
+  <div id="em-incidents"></div>
+  <h3>Fleet route and separation state</h3>
+  <div id="em-fleet"></div>
+  <h3>Flight commands</h3>
+  <div class="group"><button disabled>Return to hub</button><button disabled>Land now</button><button disabled>Stop drone</button></div>
+  <p class="small">Unavailable: the current simulator has no emergency flight-command API, and none is invented here. Existing holding and separation behaviour is unchanged. The classroom hazard and conflict tests are test situations, not emergency commands.</p>
+  <div class="actions"><button id="em-open-tests">Open test situations</button><button class="dlg-close">Return to operations</button></div>
+</dialog>
+
+<dialog id="dlg-reset" aria-labelledby="dlg-reset-title">
+  <h2 id="dlg-reset-title">Reset simulation?</h2>
+  <p>This clears all orders and progress, sets the time back to 0 and restores the four scripted deliveries. Land-use rules and parameters are kept.</p>
+  <div class="actions"><button id="reset-cancel">Cancel</button><button id="reset-confirm">Reset simulation</button></div>
+</dialog>
+
 <div id="toast"></div>
+<div class="screenreader" role="status" id="selection-announcement"></div>
 
 <script type="module" src="main.js"></script>
 </body>
