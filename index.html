@@ -31,6 +31,7 @@
   <span>On-time <b>—</b> <small>not modeled</small></span>
   <span>Active alerts <b id="st-alerts">0</b></span>
   <span>Simulation <b id="st-sim">PAUSED</b></span>
+  <span id="st-stage"><b id="map-sub">Stage 1 · Land Use</b></span>
 </div>
 
 <div class="workspace">
@@ -41,11 +42,17 @@
     <p><span>Hub Ops</span><b id="ip-hub">0 at hub</b></p>
     <small>Fleet-wide summary; unaffected by selection.</small>
   </section>
-  <section class="fixedcontrols">
+  <section class="fixedcontrols" aria-label="Direct operations panel">
     <h2>Operations</h2>
-    <button data-operation="intake">Order Intake</button>
-    <button data-operation="allocation">Fleet Allocation</button>
-    <button data-operation="emergency">Emergency Response</button>
+    <div class="controlrow"><h3 id="intake-label">Order Intake</h3><div class="switchwrap"><span id="intake-state">On</span><button class="intakeswitch" id="intake-toggle" role="switch" aria-checked="true" aria-labelledby="intake-label" title="Start / stop new order intake; click or slide"><span class="thumb" aria-hidden="true"></span></button></div></div>
+    <div class="controlrow"><h3 id="allocation-label">Fleet Allocation</h3><div class="stepper" role="group" aria-labelledby="allocation-label"><button id="fleet-minus" aria-label="Decrease active fleet target" title="Decrease active fleet target">−</button><output id="fleet-target" aria-live="polite" aria-label="Active fleet target">4 / 4</output><button id="fleet-plus" aria-label="Increase active fleet target" title="Increase active fleet target">+</button></div></div>
+    <div class="emergencyhead"><h3>Emergency Response</h3><small id="emergency-target">Select a drone</small></div>
+    <div class="quickactions" role="group" aria-label="Emergency commands for the selected drone">
+      <button data-command="return" disabled aria-label="Return selected drone to hub (unavailable)" title="Return to hub — unavailable"><span class="symbol" aria-hidden="true">⌂</span><span class="caption">Return</span></button>
+      <button data-command="repair" disabled aria-label="Dispatch repair for selected drone (unavailable)" title="Dispatch repair — unavailable"><span class="symbol" aria-hidden="true">⚒</span><span class="caption">Repair</span></button>
+      <button data-command="land" disabled aria-label="Land selected drone (unavailable)" title="Land — unavailable"><span class="symbol" aria-hidden="true">↓</span><span class="caption">Land</span></button>
+    </div>
+    <p class="opsfeedback" id="ops-feedback" role="status"></p>
   </section>
   <section class="incidents">
     <div class="incidenthead"><h2>Incident Queue</h2><small>Alerts: open items · Updates: retained events.</small></div>
@@ -62,7 +69,6 @@
 <main class="main">
   <section class="map" id="map" aria-label="Full-width 3D map workspace">
     <canvas id="view"></canvas>
-    <div class="maptitle"><h2>3D Map</h2><small id="map-sub">Stage 1 · Land Use</small></div>
     <div class="maptools" id="maptools">
       <button id="layers-toggle" class="roundbtn" aria-expanded="false" aria-controls="layers-panel" aria-label="Map layers">&gt;</button>
       <div class="layerspanel" id="layers-panel" hidden>
@@ -78,24 +84,11 @@
       </div>
     </div>
     <aside class="inspector" id="inspector" aria-labelledby="inspector-title" hidden>
-      <div class="inspectorart"><svg class="droneimg" viewBox="0 0 220 120" role="img" aria-label="Drone illustration">
-          <ellipse cx="110" cy="108" rx="62" ry="6" fill="#000" opacity=".08"/>
-          <path d="M70 78 q-14 16 -6 26 M150 78 q14 16 6 26" stroke="#f3f1ee" stroke-width="5" fill="none" stroke-linecap="round"/>
-          <path d="M96 58 L36 72 M124 58 L184 72 M100 50 L66 38 M120 50 L156 38" stroke="#f7f6f4" stroke-width="9" stroke-linecap="round"/>
-          <path d="M96 58 L36 72 M124 58 L184 72 M100 50 L66 38 M120 50 L156 38" stroke="#d9d6d2" stroke-width="9" stroke-linecap="round" opacity=".35" transform="translate(0 2)"/>
-          <g fill="#ff5a14"><rect x="26" y="62" width="20" height="14" rx="5"/><rect x="174" y="62" width="20" height="14" rx="5"/><rect x="57" y="30" width="18" height="12" rx="5"/><rect x="147" y="30" width="18" height="12" rx="5"/></g>
-          <g fill="#fff" opacity=".9"><rect x="30" y="66" width="3" height="10"/><rect x="38" y="66" width="3" height="10"/><rect x="178" y="66" width="3" height="10"/><rect x="186" y="66" width="3" height="10"/></g>
-          <g fill="#2b2b2b" opacity=".85"><ellipse cx="36" cy="56" rx="30" ry="4"/><ellipse cx="184" cy="56" rx="30" ry="4"/><ellipse cx="66" cy="24" rx="24" ry="3"/><ellipse cx="156" cy="24" rx="24" ry="3"/></g>
-          <path d="M78 58 Q110 28 142 58 L146 70 Q110 84 74 70 Z" fill="#ff5a14"/>
-          <path d="M84 56 Q110 38 136 56" stroke="#ff8a55" stroke-width="3" fill="none" stroke-linecap="round"/>
-          <rect x="98" y="72" width="24" height="8" rx="3" fill="#2b2b2b"/>
-          <circle cx="110" cy="88" r="10" fill="#2b2b2b"/><circle cx="110" cy="88" r="5" fill="#4a5a68"/><circle cx="108" cy="86" r="1.6" fill="#cfe3f0"/>
-        </svg>
-        </div>
       <div class="inspectorhead">
         <div><h2 id="inspector-title">DR-03</h2><small id="inspector-subtitle">Selected drone</small></div>
         <button id="close-inspector" aria-label="Close drone inspector">×</button>
       </div>
+      <div class="inspectorart"><svg class="droneimg" viewBox="62 22 136 112" role="img" aria-label="Axonometric drone illustration"><ellipse cx="130.0" cy="96.0" rx="49.0" ry="28.3" fill="#000" opacity=".07"/><line x1="130.0" y1="75.0" x2="130.0" y2="82.5" stroke="#b9b4ae" stroke-width="2.6" stroke-linecap="round"/><line x1="114.4" y1="84.0" x2="106.6" y2="96.0" stroke="#b9b4ae" stroke-width="2.6" stroke-linecap="round"/><line x1="145.6" y1="84.0" x2="153.4" y2="96.0" stroke="#b9b4ae" stroke-width="2.6" stroke-linecap="round"/><line x1="130.0" y1="81.0" x2="98.8" y2="62.0" stroke="#bdb8b2" stroke-width="9" stroke-linecap="round"/><line x1="130.0" y1="80.5" x2="98.8" y2="61.5" stroke="#fbfaf8" stroke-width="6.2" stroke-linecap="round"/><ellipse cx="98.8" cy="62.0" rx="8.0" ry="4.6" fill="#c9420a"/><path d="M90.9,62.0 L90.9,55.0 L106.8,55.0 L106.8,62.0 Z" fill="#ff5a14"/><path d="M90.9,58.5 L106.8,58.5" stroke="#fff" stroke-width="2.6"/><ellipse cx="98.8" cy="55.0" rx="8.0" ry="4.6" fill="#ff8a55"/><ellipse cx="98.8" cy="54.5" rx="2.4" ry="1.4" fill="#333"/><ellipse cx="98.8" cy="51.0" rx="23.3" ry="13.4" fill="#2b2b2b" opacity=".18" stroke="#2b2b2b" stroke-width=".6"/><line x1="98.8" y1="39.0" x2="98.8" y2="63.0" stroke="#2b2b2b" stroke-width="2.4" opacity=".85" stroke-linecap="round"/><line x1="130.0" y1="81.0" x2="161.2" y2="62.0" stroke="#bdb8b2" stroke-width="9" stroke-linecap="round"/><line x1="130.0" y1="80.5" x2="161.2" y2="61.5" stroke="#fbfaf8" stroke-width="6.2" stroke-linecap="round"/><ellipse cx="161.2" cy="62.0" rx="8.0" ry="4.6" fill="#c9420a"/><path d="M153.2,62.0 L153.2,55.0 L169.1,55.0 L169.1,62.0 Z" fill="#ff5a14"/><path d="M153.2,58.5 L169.1,58.5" stroke="#fff" stroke-width="2.6"/><ellipse cx="161.2" cy="55.0" rx="8.0" ry="4.6" fill="#ff8a55"/><ellipse cx="161.2" cy="54.5" rx="2.4" ry="1.4" fill="#333"/><ellipse cx="161.2" cy="51.0" rx="23.3" ry="13.4" fill="#2b2b2b" opacity=".18" stroke="#2b2b2b" stroke-width=".6"/><line x1="161.2" y1="39.0" x2="161.2" y2="63.0" stroke="#2b2b2b" stroke-width="2.4" opacity=".85" stroke-linecap="round"/><polygon points="156.0,74.0 130.0,89.0 130.0,101.0 156.0,86.0" fill="#d9480b"/><polygon points="104.0,74.0 130.0,89.0 130.0,101.0 104.0,86.0" fill="#ff5a14"/><polygon points="130.0,59.0 156.0,74.0 130.0,89.0 104.0,74.0" fill="#ff8a55"/><polygon points="130.0,65.8 143.9,73.8 130.0,81.8 116.1,73.8" fill="#fff" opacity=".92"/><line x1="117.9" y1="92.0" x2="115.3" y2="98.5" stroke="#2b2b2b" stroke-width="4"/><circle cx="115.7" cy="101.8" r="7" fill="#2b2b2b"/><circle cx="117.2" cy="102.8" r="3.2" fill="#46576a"/><circle cx="116.2" cy="101.8" r="1.1" fill="#d6e6f2"/><line x1="130.0" y1="81.0" x2="161.2" y2="98.0" stroke="#bdb8b2" stroke-width="9" stroke-linecap="round"/><line x1="130.0" y1="80.5" x2="161.2" y2="97.5" stroke="#fbfaf8" stroke-width="6.2" stroke-linecap="round"/><ellipse cx="161.2" cy="98.0" rx="8.0" ry="4.6" fill="#c9420a"/><path d="M153.2,98.0 L153.2,91.0 L169.1,91.0 L169.1,98.0 Z" fill="#ff5a14"/><path d="M153.2,94.5 L169.1,94.5" stroke="#fff" stroke-width="2.6"/><ellipse cx="161.2" cy="91.0" rx="8.0" ry="4.6" fill="#ff8a55"/><ellipse cx="161.2" cy="90.5" rx="2.4" ry="1.4" fill="#333"/><ellipse cx="161.2" cy="87.0" rx="23.3" ry="13.4" fill="#2b2b2b" opacity=".18" stroke="#2b2b2b" stroke-width=".6"/><line x1="161.2" y1="75.0" x2="161.2" y2="99.0" stroke="#2b2b2b" stroke-width="2.4" opacity=".85" stroke-linecap="round"/><line x1="130.0" y1="81.0" x2="98.8" y2="98.0" stroke="#bdb8b2" stroke-width="9" stroke-linecap="round"/><line x1="130.0" y1="80.5" x2="98.8" y2="97.5" stroke="#fbfaf8" stroke-width="6.2" stroke-linecap="round"/><ellipse cx="98.8" cy="98.0" rx="8.0" ry="4.6" fill="#c9420a"/><path d="M90.9,98.0 L90.9,91.0 L106.8,91.0 L106.8,98.0 Z" fill="#ff5a14"/><path d="M90.9,94.5 L106.8,94.5" stroke="#fff" stroke-width="2.6"/><ellipse cx="98.8" cy="91.0" rx="8.0" ry="4.6" fill="#ff8a55"/><ellipse cx="98.8" cy="90.5" rx="2.4" ry="1.4" fill="#333"/><ellipse cx="98.8" cy="87.0" rx="23.3" ry="13.4" fill="#2b2b2b" opacity=".18" stroke="#2b2b2b" stroke-width=".6"/><line x1="98.8" y1="75.0" x2="98.8" y2="99.0" stroke="#2b2b2b" stroke-width="2.4" opacity=".85" stroke-linecap="round"/><line x1="130.0" y1="93.0" x2="130.0" y2="109.5" stroke="#b9b4ae" stroke-width="2.6" stroke-linecap="round"/></svg></div>
       <div class="tabs inspectortabs" role="tablist" aria-label="Drone inspector sections">
         <button role="tab" id="detail-flight" data-detail="flight" aria-controls="inspector-body">Flight details</button>
         <button role="tab" id="detail-location" data-detail="location" aria-controls="inspector-body">Location</button>
@@ -123,7 +116,6 @@
           <div id="insp-history"></div>
         </div>
       </div>
-      <div class="inspectorfoot">Floating overlay · no canvas resize or camera change</div>
     </aside>
   </section>
 
@@ -158,6 +150,28 @@
         <button id="btn-stage-next" title="Next stage">›</button>
       </div>
       <div id="stage-body" class="info"></div>
+    </details>
+    <details class="sec"><summary>Manual order &amp; fleet actions <small>(Accept, Mark Ready, Evaluate, Assign…)</small></summary>
+      <div class="group"><span class="gtitle">Customer</span>
+    <button id="btn-create" title="Create an order (uses the selected customer / restaurant if any)">＋ Create Order</button>
+    <label class="auto"><input type="checkbox" id="auto-customer"> auto</label></div>
+      <div class="group"><span class="gtitle">Restaurant</span>
+    <button id="btn-accept-order">Accept Order</button>
+    <button id="btn-mark-ready">Mark Ready</button>
+    <label class="auto"><input type="checkbox" id="auto-restaurant"> auto</label></div>
+      <div class="group"><span class="gtitle">Platform</span>
+    <button id="btn-evaluate">Evaluate Pending</button>
+    <button id="btn-estimate">Estimate ETA</button>
+    <button id="btn-assign">Assign Courier</button>
+    <button id="btn-policy" title="Update order priority: switch allocation logic">Priority: FIFO</button>
+    <label class="auto"><input type="checkbox" id="auto-platform"> auto</label></div>
+      <div class="group"><span class="gtitle">Courier · drone</span>
+    <button id="btn-c-accept">Accept</button>
+    <button id="btn-c-travel">Fly → Pickup</button>
+    <button id="btn-c-pickup">Pick Up</button>
+    <button id="btn-c-deliver">Fly → Delivery</button>
+    <label class="auto"><input type="checkbox" id="auto-courier"> auto</label></div>
+      <p class="small">Create Order uses the selected customer / restaurant on the map if there is one. Accepting respects production capacity; Mark Ready respects preparation time; assignment chooses the drone itself and honours the Fleet Allocation target. Refused actions explain which rule applied.</p>
     </details>
     <details class="sec" id="sec-query">
       <summary>Spatial inspector <small>block · volume · getAgentsAt</small></summary>
@@ -218,49 +232,6 @@
     </details>
   </div>
 </aside>
-
-<dialog id="dlg-intake" aria-labelledby="dlg-intake-title">
-  <h2 id="dlg-intake-title">Order Intake</h2>
-  <div class="group"><span class="gtitle">Customer</span>
-    <button id="btn-create" title="Create an order (uses the selected customer / restaurant if any)">＋ Create Order</button>
-    <label class="auto"><input type="checkbox" id="auto-customer"> auto</label></div>
-  <div class="group"><span class="gtitle">Restaurant</span>
-    <button id="btn-accept-order">Accept Order</button>
-    <button id="btn-mark-ready">Mark Ready</button>
-    <label class="auto"><input type="checkbox" id="auto-restaurant"> auto</label></div>
-  <p class="small">Create Order uses the selected customer / restaurant on the map if there is one, otherwise a random one. Accepting respects the restaurant's production capacity; Mark Ready respects the preparation time. Refused actions explain which rule applied.</p>
-  <div class="actions"><button class="dlg-close">Return to operations</button></div>
-</dialog>
-
-<dialog id="dlg-allocation" aria-labelledby="dlg-allocation-title">
-  <h2 id="dlg-allocation-title">Fleet Allocation</h2>
-  <div class="group"><span class="gtitle">Platform</span>
-    <button id="btn-evaluate">Evaluate Pending</button>
-    <button id="btn-estimate">Estimate ETA</button>
-    <button id="btn-assign">Assign Courier</button>
-    <button id="btn-policy" title="Update order priority: switch allocation logic">Priority: FIFO</button>
-    <label class="auto"><input type="checkbox" id="auto-platform"> auto</label></div>
-  <div class="group"><span class="gtitle">Courier · drone</span>
-    <button id="btn-c-accept">Accept</button>
-    <button id="btn-c-travel">Fly → Pickup</button>
-    <button id="btn-c-pickup">Pick Up</button>
-    <button id="btn-c-deliver">Fly → Delivery</button>
-    <label class="auto"><input type="checkbox" id="auto-courier"> auto</label></div>
-  <p class="small">Assignment chooses the drone itself (availability, capacity, scripted pins, FIFO or revenue-weighted priority); a selected drone is not forced onto an order. The first four orders are scripted: one short, one medium and two long trips.</p>
-  <div class="actions"><button class="dlg-close">Return to operations</button></div>
-</dialog>
-
-<dialog id="dlg-emergency" aria-labelledby="dlg-emergency-title">
-  <h2 id="dlg-emergency-title">Emergency Response</h2>
-  <h3>Open critical incidents</h3>
-  <div id="em-incidents"></div>
-  <h3>Fleet route and separation state</h3>
-  <div id="em-fleet"></div>
-  <h3>Flight commands</h3>
-  <div class="group"><button disabled>Return to hub</button><button disabled>Land now</button><button disabled>Stop drone</button></div>
-  <p class="small">Unavailable: the current simulator has no emergency flight-command API, and none is invented here. Existing holding and separation behaviour is unchanged. The classroom hazard and conflict tests are test situations, not emergency commands.</p>
-  <div class="actions"><button id="em-open-tests">Open test situations</button><button class="dlg-close">Return to operations</button></div>
-</dialog>
 
 <dialog id="dlg-reset" aria-labelledby="dlg-reset-title">
   <h2 id="dlg-reset-title">Reset simulation?</h2>

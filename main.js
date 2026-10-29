@@ -217,6 +217,7 @@ const S = {
   nextOrder: 1, nextCourier: 1, nextRoute: 1,
   orders: [], couriers: [], restaurants: [], customers: [],
   selected: null, track: null,
+  intake: true, activeTarget: MAX_COURIERS, // Order Intake switch / Fleet Allocation target (operations panel)
   auto: { customer: true, restaurant: true, platform: true, courier: true }, // simulation starts on its own
   timers: { spawn: 1.5, evaluate: 0, sense: 0 },
   ruleHits: new Array(RULES.length).fill(0),
@@ -1107,6 +1108,7 @@ const atRestaurant = (o) => atPad(o.courier, o.restaurant.acc);
 
 const act = {
   create() {
+    if (!S.intake) return refuse(0, 'Order intake is off — no new orders are accepted. Existing orders continue.');
     const sel = S.selected;
     const customer = sel?.type === 'customer' ? sel : S.customers[Math.floor(simRand() * S.customers.length)];
     const restaurant = sel?.type === 'restaurant' ? sel : S.restaurants[Math.floor(simRand() * S.restaurants.length)];
@@ -1173,7 +1175,9 @@ const act = {
     const byPrio = [...cands].sort((a, b) => b.priority - a.priority);
     // the scripted first deliveries are pinned to their drone; other orders skip drones that are reserved for one
     const reserved = new Set(S.orders.filter((x) => x.pin && !x.courier).map((x) => x.pin));
-    const freeFor = (o) => S.couriers.filter((c) => load(c) < COURIER_CAPACITY && (o.pin ? c.id === o.pin : !reserved.has(c.id)));
+    const inService = S.couriers.filter((c) => load(c) > 0 || c.task).length; // Fleet Allocation target: idle drones are only drawn into service up to the target
+    const eligible = (c) => load(c) > 0 || c.task || inService < S.activeTarget;
+    const freeFor = (o) => S.couriers.filter((c) => load(c) < COURIER_CAPACITY && eligible(c) && (o.pin ? c.id === o.pin : !reserved.has(c.id)));
     const ranked = sel?.type === 'order' && cands.includes(sel) ? [sel, ...byPrio.filter((x) => x !== sel)] : byPrio;
     const o = ranked.find((x) => freeFor(x).length) ?? ranked[0];
     const fifo = [...cands].sort((a, b) => waitingTime(b) - waitingTime(a))[0];
@@ -1274,7 +1278,7 @@ function step(dt) {
 
   // autonomous agents (each can be switched off in the panel)
   const A = S.auto;
-  if (A.customer && (S.timers.spawn -= dt) <= 0) {
+  if (A.customer && S.intake && (S.timers.spawn -= dt) <= 0) {
     S.timers.spawn = rand(7, 12);
     if (S.orders.filter((o) => o.status !== 'delivered').length < 8) act.create();
   }
@@ -2025,12 +2029,17 @@ function clearDroneSelection() {
   (t ?? document.querySelector('#fleet-body button') ?? $('fleet-title')).focus({ preventScroll: true });
 }
 
-// ---- emergency response (read-only view; no flight commands exist in the simulator) --------------------
-function renderEmergency() {
-  const crit = ops.list('critical');
-  setHTML($('em-incidents'), crit.length ? crit.map((e) => `<p><b>${esc(e.title)}</b> · ${esc(e.description)} · ${Math.round(e.occurredAtSimSeconds)} s</p>`).join('') : '<p>No open critical incidents.</p>');
-  setHTML($('em-fleet'), S.couriers.map((c) => `<p><b>${esc(dispId(c.id))}</b> · ${esc(flightState(c))} · separation ${esc(sepLabel(c))}${c.hold ? ' · ' + esc(c.hold.reason) : ''}</p>`).join('') || '<p>No drones in the simulation.</p>');
+// ---- operations panel: Order Intake switch, Fleet Allocation target, emergency commands (capability-gated) ----
+function renderOperations() {
+  const sel = selectedDrone(), total = S.couriers.length;
+  S.activeTarget = Math.max(0, Math.min(S.activeTarget, total));
+  $('intake-toggle').setAttribute('aria-checked', String(S.intake)); setText($('intake-state'), S.intake ? 'On' : 'Off');
+  setText($('fleet-target'), `${S.activeTarget} / ${total}`);
+  $('fleet-minus').disabled = S.activeTarget <= 0; $('fleet-plus').disabled = S.activeTarget >= total;
+  setText($('emergency-target'), sel ? dispId(sel.id) : 'Select a drone');
+  if (!ui.opsNote) setText($('ops-feedback'), 'Return / Repair / Land are unavailable: the simulator has no emergency flight-command API.');
 }
+function opsNote(t) { ui.opsNote = true; setText($('ops-feedback'), t); }
 const STAGE_LAYERS = [
   { land: true, perm: false, rest: false, cand: false, sel: false },
   { land: true, perm: true, rest: true, cand: false, sel: false },
@@ -2074,7 +2083,7 @@ function updatePanels(force) {
   stageButtons();
   $('stage-body').innerHTML = stageHTML();
   renderStatus(); renderFleet(); renderEvents(force); renderInspector();
-  if ($('dlg-emergency').open) renderEmergency();
+  renderOperations();
   updateQuery();
 }
 const sw = (bg, t, extra = '') => `<div><i style="background:${bg};${extra}"></i>${t}</div>`;
@@ -2125,11 +2134,6 @@ function tabKeys(sel, apply) { // roving tablist: arrows / Home / End
 tabKeys('[data-category]', (n) => { ui.activeIncidentTab = n.dataset.category; renderEvents(true); });
 tabKeys('[data-detail]', (n) => { ui.activeInspectorTab = n.dataset.detail; renderInspector(); });
 $('close-inspector').addEventListener('click', clearDroneSelection);
-const dlgOf = { intake: 'dlg-intake', allocation: 'dlg-allocation', emergency: 'dlg-emergency' };
-document.querySelectorAll('[data-operation]').forEach((b) => b.addEventListener('click', () => {
-  const d = $(dlgOf[b.dataset.operation]); if (b.dataset.operation === 'emergency') renderEmergency();
-  d.returnFocus = b; d.showModal();
-}));
 document.querySelectorAll('dialog').forEach((d) => {
   d.addEventListener('close', () => { updatePanels(true); (d.returnFocus ?? document.body).focus?.({ preventScroll: true }); });
   d.querySelectorAll('.dlg-close').forEach((b) => b.addEventListener('click', () => d.close()));
@@ -2143,7 +2147,17 @@ $('layers-toggle').addEventListener('click', () => {
 });
 $('btn-advanced').addEventListener('click', () => setAdvanced(!adv.classList.contains('open')));
 $('close-advanced').addEventListener('click', () => setAdvanced(false));
-$('em-open-tests').addEventListener('click', () => { $('dlg-emergency').close(); setAdvanced(true); $('sec-params').scrollIntoView?.(); });
+// direct operations (no menus): switch, stepper
+let swStart = null, skipClick = false;
+const swEl = $('intake-toggle');
+const setIntake = (on) => { S.intake = on; log(`Order intake ${on ? 'on' : 'off'}${on ? '' : ' — existing orders continue'}`, on ? 'good' : ''); opsNote(`Order intake ${on ? 'on. New orders accepted.' : 'off. Existing orders continue.'}`); updatePanels(true); };
+swEl.addEventListener('pointerdown', (e) => { swStart = e.clientX; swEl.setPointerCapture(e.pointerId); });
+swEl.addEventListener('pointerup', (e) => { if (swStart !== null && Math.abs(e.clientX - swStart) >= 8) { setIntake(e.clientX > swStart); skipClick = true; } swStart = null; });
+swEl.addEventListener('pointercancel', () => { swStart = null; skipClick = false; });
+swEl.addEventListener('click', (e) => { if (skipClick && e.detail !== 0) { skipClick = false; return; } skipClick = false; setIntake(!S.intake); });
+const stepTarget = (d) => { S.activeTarget = Math.max(0, Math.min(S.couriers.length, S.activeTarget + d)); opsNote(`Active fleet target ${S.activeTarget} / ${S.couriers.length}. Flights in progress are not interrupted.`); log(`Fleet allocation target: ${S.activeTarget} / ${S.couriers.length} drones in service`); updatePanels(true); };
+$('fleet-minus').addEventListener('click', () => stepTarget(-1));
+$('fleet-plus').addEventListener('click', () => stepTarget(1));
 $('btn-reset').addEventListener('click', () => { $('dlg-reset').returnFocus = $('btn-reset'); $('dlg-reset').showModal(); });
 $('reset-cancel').addEventListener('click', () => $('dlg-reset').close());
 $('reset-confirm').addEventListener('click', () => { $('dlg-reset').close(); resetWorld(); updatePanels(true); });
@@ -2241,12 +2255,12 @@ $('q-here').addEventListener('click', () => {
 modeSwitch();
 
 function resetWorld(silent = false) {
-  ops.reset(); ui.shownDrone = null; evKey = ''; evSeen = new Set();
+  ops.reset(); ui.shownDrone = null; ui.opsNote = false; evKey = ''; evSeen = new Set();
   [...S.orders].forEach(removeOrder);
   [...S.couriers].forEach(removeCourier);
   S.delivered.length = 0; S.log.length = 0; S.track = null; S.homes = {}; S.missions = [];
   S.sepEvents = 0; S.minSepM = Infinity;
-  S.time = 0; S.nextOrder = 1; S.nextCourier = 1; S.nextRoute = 1; S.selected = null; S.policy = 'fifo'; simSeed = S.seed ?? 7;
+  S.intake = true; S.activeTarget = MAX_COURIERS; S.time = 0; S.nextOrder = 1; S.nextCourier = 1; S.nextRoute = 1; S.selected = null; S.policy = 'fifo'; simSeed = S.seed ?? 7;
   S.ruleHits.fill(0); S.timers = { spawn: 40, evaluate: 0, sense: 0 };
   S.customers.forEach((c) => { c.orderTime = null; c.selectedRestaurant = null; });
   const rz = world.restricted.find((r) => r.id === 'HZ-1');
