@@ -12,7 +12,8 @@ every drone is described twice — as machine state and as a human-readable upda
 **Run:** serve the folder with any static server (ES modules need http), e.g. `python3 -m http.server`, then open `http://localhost:8000`.
 three.js is vendored in `vendor/`; no network or build step is needed.
 
-### Operations interface (greyscale low-fi chrome around the unchanged 3D scene)
+### Operations interface (full-page map with floating translucent panels)
+The 3D map fills the whole page; the header, status pills, left cards, Fleet Monitoring and the drone inspector float over it as soft glass cards, with one orange accent for emphasis (Run, selection, counts, the drone illustration in the inspector). Map layers are collapsed behind a `>` button. Tall and low buildings, parks, water and utility lots are scattered across the whole city (no single tower district).
 Header (Run/Pause, speed, Reset with confirmation, Advanced) · one status bar (time, fleet total/active, first deliveries, on-time, active alerts, simulation state) · left column (In Progress: Flight Ops / Hub Ops; Order Intake, Fleet Allocation, Emergency Response; Incident Queue tabs Critical / Low battery / Updates) · full-width map with the existing canvas · Fleet Monitoring table for all drones.
 A **drone inspector** (Flight details / Location / History) overlays the map's right side only when a drone is explicitly selected (map click, fleet row, event). It is an absolute overlay: the map rect, renderer buffer and camera are identical with and without it. Close button, Escape or a click on empty map clears the selection. `DR-0x` is a display alias for the internal `D-0x`.
 The stages, layers, spatial query, land-use rules, route-cost / separation parameters, test situations, statistics and log live in the **Advanced** drawer; nothing was removed.

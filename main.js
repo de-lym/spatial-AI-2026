@@ -115,7 +115,7 @@ const controls = new OrbitControls(camera, canvas);
 controls.target.copy(target);
 controls.maxPolarAngle = Math.PI * 0.45;
 controls.minZoom = 0.4; controls.maxZoom = 3.5;
-camera.zoom = 0.62; // wide enough to see the whole city and the 120 m corridor in one frame
+camera.zoom = 0.42; // wide enough to see the whole city and the 120 m corridor in one frame
 controls.enableDamping = true;
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0xaebbd0, 1.6));
@@ -235,8 +235,8 @@ const S = {
 
 // ---- fictional airspace + streets (illustrative) -------------------------
 world.zones = [ // named districts (labels for the human view)
-  { name: 'South Block District', x0: -60, x1: 60, z0: -8, z1: 60, ceilingM: 90 },
-  { name: 'North Tower District', x0: -60, x1: 60, z0: -60, z1: -8, ceilingM: 120 },
+  { name: 'South District', x0: -60, x1: 60, z0: -8, z1: 60, ceilingM: 90 },
+  { name: 'North District', x0: -60, x1: 60, z0: -60, z1: -8, ceilingM: 120 },
 ];
 // Restricted prisms are DERIVED: one over every Sensitive-Facility block (to its configured altitude) plus explicit temporary hazards.
 const HAZARDS = [
@@ -389,7 +389,8 @@ const FIXED = { '0,-16': 'tb1', '16,0': 'civic', '-16,0': 'care' }; // determini
 let parkN = 0, pondN = 0;
 function buildFiller(x, z) {
   const g = new THREE.Group(); g.position.set(x, SLAB, z); scene.add(g);
-  const mid = z < -8; // North Tower District: taller, denser; South Block District: lower
+  // dense (taller) lots are scattered through the whole city by a fixed pattern, not clustered in one district
+  const mid = ((Math.round(x / 16) + 3) * 5 + (Math.round(z / 16) + 3) * 3) % 7 < 3;
   let kind = FIXED[key(x, z)];
   if (!kind) {
     const t = srand();
@@ -2136,6 +2137,10 @@ document.querySelectorAll('dialog').forEach((d) => {
 const adv = $('advanced');
 function setAdvanced(open) { adv.classList.toggle('open', open); adv.hidden = !open; $('btn-advanced').setAttribute('aria-expanded', String(open)); if (open) $('close-advanced').focus({ preventScroll: true }); else if (adv.contains(document.activeElement)) $('btn-advanced').focus({ preventScroll: true }); }
 setAdvanced(false);
+$('layers-toggle').addEventListener('click', () => {
+  const open = $('layers-panel').hidden; $('layers-panel').hidden = !open;
+  $('layers-toggle').setAttribute('aria-expanded', String(open)); $('layers-toggle').setAttribute('aria-label', open ? 'Hide map layers' : 'Show map layers');
+});
 $('btn-advanced').addEventListener('click', () => setAdvanced(!adv.classList.contains('open')));
 $('close-advanced').addEventListener('click', () => setAdvanced(false));
 $('em-open-tests').addEventListener('click', () => { $('dlg-emergency').close(); setAdvanced(true); $('sec-params').scrollIntoView?.(); });
@@ -2196,7 +2201,7 @@ function scenario(r, c, why, pref) {
   log(`Scenario: order #${o.id} ${R.stationId} → ${C.stationId} — ${why}`, 'good');
   if (!S.auto.restaurant || !S.auto.platform || !S.auto.courier) toast('Auto is off for some agents: accept, mark ready, assign and fly the order manually.');
 }
-bind('sc-open', () => scenario('PS-3', 'DS-4', 'open lane in the low South Block District'));
+bind('sc-open', () => scenario('PS-3', 'DS-4', 'open lane in the low-rise lots in the South District'));
 bind('sc-tall', () => scenario('PS-1', 'DS-6', 'the 95 m Spire Tower lies on the straight path', 'shortest'));
 bind('sc-tall-climb', () => scenario('PS-1', 'DS-6', 'same route, but the drone prefers climbing over the tower', 'climb'));
 bind('sc-restricted', () => scenario('PS-2', 'DS-3', 'Restricted Zone A (a full-height prism) blocks the shortest route at every altitude'));
@@ -2298,11 +2303,16 @@ canvas.addEventListener('pointerup', (e) => {
 
 // ---------- main loop ------------------------------------------------
 const mapEl = $('map');
-function resizeMap() { // size from the map container only: the inspector overlay never changes it
+function resizeMap() { // the canvas fills the page; size comes from the map container only, so the inspector overlay never changes it
   const w = Math.max(1, mapEl.clientWidth), h = Math.max(1, mapEl.clientHeight);
   renderer.setSize(w, h, false);
   const a = w / h;
   Object.assign(camera, { left: -VIEW * a, right: VIEW * a, top: VIEW, bottom: -VIEW });
+  // centre the city in the area the floating panels leave free (a fixed offset: selection never moves it)
+  const rc = (id) => document.querySelector(id)?.getBoundingClientRect();
+  const l = rc('.left'), f = rc('.fleet'), t = rc('.statusbar');
+  const freeL = l ? l.right + 16 : 0, freeT = t ? t.bottom + 8 : 0, freeB = f ? f.top - 8 : h;
+  camera.setViewOffset(w, h, -(freeL + w) / 2 + w / 2, -((freeT + freeB) / 2 - h / 2), w, h);
   camera.updateProjectionMatrix();
 }
 new ResizeObserver(resizeMap).observe(mapEl);

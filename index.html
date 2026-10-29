@@ -12,7 +12,7 @@
 <body>
 <div class="app" id="app">
 <header class="topbar">
-  <h1>AIRSPACE / Drone Operations</h1>
+  <h1><span class="logo" aria-hidden="true"></span>AIRSPACE <span class="thin">Drone Operations</span></h1>
   <div class="simcontrols" role="group" aria-label="Simulation controls">
     <small>Simulation controls</small>
     <button id="btn-play" title="Run / pause simulation time">Run</button>
@@ -56,15 +56,16 @@
     </div>
     <div class="newevents" id="new-events" hidden></div>
     <div class="eventlist" id="events" role="tabpanel" tabindex="0"></div>
-    <div class="eventfooter">Independent scroll · latest first · simulation time</div>
-  </section>
+      </section>
 </aside>
 
 <main class="main">
   <section class="map" id="map" aria-label="Full-width 3D map workspace">
     <canvas id="view"></canvas>
     <div class="maptitle"><h2>3D Map</h2><small id="map-sub">Stage 1 · Land Use</small></div>
-    <div class="maptools">
+    <div class="maptools" id="maptools">
+      <button id="layers-toggle" class="roundbtn" aria-expanded="false" aria-controls="layers-panel" aria-label="Map layers">&gt;</button>
+      <div class="layerspanel" id="layers-panel" hidden>
       <span>Layers</span>
       <label><input type="checkbox" id="lay-land"> Land use</label>
       <label><input type="checkbox" id="lay-perm"> Permitted</label>
@@ -73,8 +74,24 @@
       <label><input type="checkbox" id="lay-sel"> Routes</label>
       <label><input type="checkbox" id="p-streets"> Street names</label>
       <details class="legendbox"><summary>Legend</summary><div id="legend"></div></details>
+    
+      </div>
     </div>
     <aside class="inspector" id="inspector" aria-labelledby="inspector-title" hidden>
+      <div class="inspectorart"><svg class="droneimg" viewBox="0 0 220 120" role="img" aria-label="Drone illustration">
+          <ellipse cx="110" cy="108" rx="62" ry="6" fill="#000" opacity=".08"/>
+          <path d="M70 78 q-14 16 -6 26 M150 78 q14 16 6 26" stroke="#f3f1ee" stroke-width="5" fill="none" stroke-linecap="round"/>
+          <path d="M96 58 L36 72 M124 58 L184 72 M100 50 L66 38 M120 50 L156 38" stroke="#f7f6f4" stroke-width="9" stroke-linecap="round"/>
+          <path d="M96 58 L36 72 M124 58 L184 72 M100 50 L66 38 M120 50 L156 38" stroke="#d9d6d2" stroke-width="9" stroke-linecap="round" opacity=".35" transform="translate(0 2)"/>
+          <g fill="#ff5a14"><rect x="26" y="62" width="20" height="14" rx="5"/><rect x="174" y="62" width="20" height="14" rx="5"/><rect x="57" y="30" width="18" height="12" rx="5"/><rect x="147" y="30" width="18" height="12" rx="5"/></g>
+          <g fill="#fff" opacity=".9"><rect x="30" y="66" width="3" height="10"/><rect x="38" y="66" width="3" height="10"/><rect x="178" y="66" width="3" height="10"/><rect x="186" y="66" width="3" height="10"/></g>
+          <g fill="#2b2b2b" opacity=".85"><ellipse cx="36" cy="56" rx="30" ry="4"/><ellipse cx="184" cy="56" rx="30" ry="4"/><ellipse cx="66" cy="24" rx="24" ry="3"/><ellipse cx="156" cy="24" rx="24" ry="3"/></g>
+          <path d="M78 58 Q110 28 142 58 L146 70 Q110 84 74 70 Z" fill="#ff5a14"/>
+          <path d="M84 56 Q110 38 136 56" stroke="#ff8a55" stroke-width="3" fill="none" stroke-linecap="round"/>
+          <rect x="98" y="72" width="24" height="8" rx="3" fill="#2b2b2b"/>
+          <circle cx="110" cy="88" r="10" fill="#2b2b2b"/><circle cx="110" cy="88" r="5" fill="#4a5a68"/><circle cx="108" cy="86" r="1.6" fill="#cfe3f0"/>
+        </svg>
+        </div>
       <div class="inspectorhead">
         <div><h2 id="inspector-title">DR-03</h2><small id="inspector-subtitle">Selected drone</small></div>
         <button id="close-inspector" aria-label="Close drone inspector">×</button>
@@ -119,7 +136,6 @@
       </table>
       <div class="empty" id="fleet-empty" hidden><b>No drones in this simulation.</b><p>Check the simulation setup under Advanced; no drone is auto-selected.</p></div>
     </div>
-    <div class="fleetnote">DR-01…04 are display aliases for the simulator's D-01…04. Battery is not modelled; on-time delivery has no deadline model.</div>
   </section>
 </main>
 </div>
