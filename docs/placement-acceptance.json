@@ -1,0 +1,321 @@
+{
+  "baseline": {
+    "delivered": 4,
+    "minSepM": 30.181569007873126
+  },
+  "pre": {
+    "mode": "crossing",
+    "time": 30.999900000006132
+  },
+  "moment": {
+    "time": 32.799900000006154,
+    "mode": "crossing",
+    "facts": [
+      {
+        "relation": "BETWEEN",
+        "referenceIds": [
+          "TW-W",
+          "TW-E"
+        ],
+        "label": "Between the two towers"
+      },
+      {
+        "relation": "UNDER",
+        "referenceIds": [
+          "SB-01"
+        ],
+        "label": "Under the skybridge"
+      },
+      {
+        "relation": "NEXT_TO",
+        "referenceIds": [
+          "D-02"
+        ],
+        "distanceM": 35,
+        "label": "Next to D-02 · 35.0 m apart"
+      }
+    ],
+    "drones": [
+      {
+        "id": "D-01",
+        "pos": {
+          "x": -27.5,
+          "y": 10,
+          "z": -34.40000000000003
+        },
+        "facts": [
+          {
+            "relation": "BETWEEN",
+            "referenceIds": [
+              "TW-W",
+              "TW-E"
+            ],
+            "label": "Between the two towers"
+          },
+          {
+            "relation": "UNDER",
+            "referenceIds": [
+              "SB-01"
+            ],
+            "label": "Under the skybridge"
+          },
+          {
+            "relation": "NEXT_TO",
+            "referenceIds": [
+              "D-02"
+            ],
+            "distanceM": 35,
+            "label": "Next to D-02 · 35.0 m apart"
+          }
+        ]
+      },
+      {
+        "id": "D-02",
+        "pos": {
+          "x": -20.5,
+          "y": 10,
+          "z": -34.40000000000003
+        },
+        "facts": [
+          {
+            "relation": "BETWEEN",
+            "referenceIds": [
+              "TW-W",
+              "TW-E"
+            ],
+            "label": "Between the two towers"
+          },
+          {
+            "relation": "UNDER",
+            "referenceIds": [
+              "SB-01"
+            ],
+            "label": "Under the skybridge"
+          },
+          {
+            "relation": "NEXT_TO",
+            "referenceIds": [
+              "D-01"
+            ],
+            "distanceM": 35,
+            "label": "Next to D-01 · 35.0 m apart"
+          }
+        ]
+      }
+    ]
+  },
+  "continued": {
+    "mode": "complete",
+    "delivered": 4,
+    "minSepM": 30.585217523025335,
+    "history": [
+      {
+        "code": "PLACEMENT_TOUR_START",
+        "title": "Placement tour started",
+        "description": "D-01 and D-02 will meet at the entrance, then fly through parallel lanes. Delivery orders continue afterward.",
+        "droneId": null,
+        "occurredAtSimSeconds": 0,
+        "source": "placement"
+      },
+      {
+        "code": "PLACEMENT_ENTER",
+        "title": "Between the two towers",
+        "description": "D-01 · BETWEEN · TW-W + TW-E",
+        "droneId": "D-01",
+        "occurredAtSimSeconds": 24.899900000006046,
+        "source": "placement"
+      },
+      {
+        "code": "PLACEMENT_ENTER",
+        "title": "Under the skybridge",
+        "description": "D-01 · UNDER · SB-01",
+        "droneId": "D-01",
+        "occurredAtSimSeconds": 25.19990000000605,
+        "source": "placement"
+      },
+      {
+        "code": "PLACEMENT_EXIT",
+        "title": "Left: Under the skybridge",
+        "description": "D-01 · relation no longer holds.",
+        "droneId": "D-01",
+        "occurredAtSimSeconds": 26.999900000006075,
+        "source": "placement"
+      },
+      {
+        "code": "PLACEMENT_EXIT",
+        "title": "Left: Between the two towers",
+        "description": "D-01 · relation no longer holds.",
+        "droneId": "D-01",
+        "occurredAtSimSeconds": 27.29990000000608,
+        "source": "placement"
+      },
+      {
+        "code": "PLACEMENT_ENTER",
+        "title": "Between the two towers",
+        "description": "D-02 · BETWEEN · TW-W + TW-E",
+        "droneId": "D-02",
+        "occurredAtSimSeconds": 27.39990000000608,
+        "source": "placement"
+      },
+      {
+        "code": "PLACEMENT_ENTER",
+        "title": "Under the skybridge",
+        "description": "D-02 · UNDER · SB-01",
+        "droneId": "D-02",
+        "occurredAtSimSeconds": 27.599900000006084,
+        "source": "placement"
+      },
+      {
+        "code": "PLACEMENT_EXIT",
+        "title": "Left: Under the skybridge",
+        "description": "D-02 · relation no longer holds.",
+        "droneId": "D-02",
+        "occurredAtSimSeconds": 29.099900000006105,
+        "source": "placement"
+      },
+      {
+        "code": "PLACEMENT_EXIT",
+        "title": "Left: Between the two towers",
+        "description": "D-02 · relation no longer holds.",
+        "droneId": "D-02",
+        "occurredAtSimSeconds": 29.39990000000611,
+        "source": "placement"
+      },
+      {
+        "code": "PLACEMENT_TOUR_RELEASE",
+        "title": "Both drones ready",
+        "description": "Two validated lanes, 35 m apart. Entering the building passage together.",
+        "droneId": null,
+        "occurredAtSimSeconds": 30.999900000006132,
+        "source": "placement"
+      },
+      {
+        "code": "PLACEMENT_ENTER",
+        "title": "Next to D-02 · 35.0 m apart",
+        "description": "D-01 · NEXT_TO · D-02",
+        "droneId": "D-01",
+        "occurredAtSimSeconds": 30.999900000006132,
+        "source": "placement"
+      },
+      {
+        "code": "PLACEMENT_ENTER",
+        "title": "Next to D-01 · 35.0 m apart",
+        "description": "D-02 · NEXT_TO · D-01",
+        "droneId": "D-02",
+        "occurredAtSimSeconds": 30.999900000006132,
+        "source": "placement"
+      },
+      {
+        "code": "PLACEMENT_ENTER",
+        "title": "Between the two towers",
+        "description": "D-01 · BETWEEN · TW-W + TW-E",
+        "droneId": "D-01",
+        "occurredAtSimSeconds": 32.49990000000615,
+        "source": "placement"
+      },
+      {
+        "code": "PLACEMENT_ENTER",
+        "title": "Between the two towers",
+        "description": "D-02 · BETWEEN · TW-W + TW-E",
+        "droneId": "D-02",
+        "occurredAtSimSeconds": 32.49990000000615,
+        "source": "placement"
+      },
+      {
+        "code": "PLACEMENT_ENTER",
+        "title": "Under the skybridge",
+        "description": "D-01 · UNDER · SB-01",
+        "droneId": "D-01",
+        "occurredAtSimSeconds": 32.69990000000615,
+        "source": "placement"
+      },
+      {
+        "code": "PLACEMENT_ENTER",
+        "title": "Under the skybridge",
+        "description": "D-02 · UNDER · SB-01",
+        "droneId": "D-02",
+        "occurredAtSimSeconds": 32.69990000000615,
+        "source": "placement"
+      },
+      {
+        "code": "PLACEMENT_EXIT",
+        "title": "Left: Under the skybridge",
+        "description": "D-01 · relation no longer holds.",
+        "droneId": "D-01",
+        "occurredAtSimSeconds": 34.199900000006174,
+        "source": "placement"
+      },
+      {
+        "code": "PLACEMENT_EXIT",
+        "title": "Left: Under the skybridge",
+        "description": "D-02 · relation no longer holds.",
+        "droneId": "D-02",
+        "occurredAtSimSeconds": 34.199900000006174,
+        "source": "placement"
+      },
+      {
+        "code": "PLACEMENT_EXIT",
+        "title": "Left: Between the two towers",
+        "description": "D-01 · relation no longer holds.",
+        "droneId": "D-01",
+        "occurredAtSimSeconds": 34.49990000000618,
+        "source": "placement"
+      },
+      {
+        "code": "PLACEMENT_EXIT",
+        "title": "Left: Between the two towers",
+        "description": "D-02 · relation no longer holds.",
+        "droneId": "D-02",
+        "occurredAtSimSeconds": 34.49990000000618,
+        "source": "placement"
+      },
+      {
+        "code": "PLACEMENT_TOUR_COMPLETE",
+        "title": "Passage complete",
+        "description": "The two drones crossed beneath the skybridge. Their original pickup and delivery tasks continue.",
+        "droneId": null,
+        "occurredAtSimSeconds": 34.69990000000618,
+        "source": "placement"
+      },
+      {
+        "code": "PLACEMENT_EXIT",
+        "title": "Left: Next to D-02 · 35.0 m apart",
+        "description": "D-01 · relation no longer holds.",
+        "droneId": "D-01",
+        "occurredAtSimSeconds": 35.9999000000062,
+        "source": "placement"
+      },
+      {
+        "code": "PLACEMENT_EXIT",
+        "title": "Left: Next to D-01 · 35.0 m apart",
+        "description": "D-02 · relation no longer holds.",
+        "droneId": "D-02",
+        "occurredAtSimSeconds": 35.9999000000062,
+        "source": "placement"
+      }
+    ]
+  },
+  "rejectedSeparation40": false,
+  "rejectedBlockedPassage": false,
+  "reset": {
+    "mode": "idle",
+    "facts": {},
+    "history": []
+  },
+  "pigeon": {
+    "spawned": true,
+    "actions": [
+      "SCENARIO",
+      "AUTO_EVADE",
+      "AUTO_HOLD",
+      "HUMAN_REQUIRED",
+      "AUTO_EVADE",
+      "AUTO_EVADE"
+    ]
+  },
+  "layout": {
+    "width": 1280,
+    "scrollWidth": 1280
+  },
+  "pageErrors": []
+}

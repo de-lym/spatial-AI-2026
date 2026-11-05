@@ -38,7 +38,7 @@ export const LAND = {
 };
 export const world = {
   bounds: 58,           // permitted airspace extends to ±bounds (scene units)
-  obstacles: [],        // {id,name,typo,x0,x1,z0,z1,h}  (h in scene units above datum)
+  obstacles: [],        // {id,name,typo,x0,x1,z0,z1,h}  (y0 optional bottom; h top, scene units above datum)
   restricted: [],       // RESTRICTED prisms {id,name,kind:'restricted'|'hazard',x0,x1,z0,z1,zloM,zhiM,active}
   zones: [],            // named districts {name,x0,x1,z0,z1,ceilingM} — labels only
   tiles: [],            // 7×7 land-use tiles (16 × 16 units: the parcel plus half of each surrounding street) {id,i,j,landUse,risk,x0,x1,z0,z1,loM,hiM}
@@ -157,8 +157,8 @@ export function segCheck(a, b, extra = 0) {
   if (Math.abs(a.x) > B || Math.abs(a.z) > B || Math.abs(b.x) > B || Math.abs(b.z) > B)
     return { reason: 'bounds', name: 'the edge of the modelled airspace' };
   for (const o of world.obstacles) {
-    if (segHitsBox(a, b, o.x0 - c, o.x1 + c, -1, o.h + c, o.z0 - c, o.z1 + c)) {
-      const raw = segHitsBox(a, b, o.x0, o.x1, -1, o.h, o.z0, o.z1);
+    if (segHitsBox(a, b, o.x0 - c, o.x1 + c, o.y0 == null || o.y0 === 0 ? -1 : o.y0 - c, o.h + c, o.z0 - c, o.z1 + c)) {
+      const raw = segHitsBox(a, b, o.x0, o.x1, o.y0 ?? -1, o.h, o.z0, o.z1);
       return { reason: 'building', id: o.id, name: o.name, hM: o.h * SCALE_M, marginOnly: !raw, obstacle: o };
     }
   }
@@ -187,7 +187,7 @@ function blockedGrid(L) {
     const x = cellCentre(i), z = cellCentre(j);
     let blk = Math.abs(x) > world.bounds - 1 || Math.abs(z) > world.bounds - 1 || !inPermitted(x, L, z);
     if (!blk) for (const o of world.obstacles) {
-      if (L <= o.h + c && x >= o.x0 - c - m && x <= o.x1 + c + m && z >= o.z0 - c - m && z <= o.z1 + c + m) { blk = true; break; }
+      if (L >= (o.y0 ?? -1) - c && L <= o.h + c && x >= o.x0 - c - m && x <= o.x1 + c + m && z >= o.z0 - c - m && z <= o.z1 + c + m) { blk = true; break; }
     }
     if (!blk) for (const r of world.restricted) {
       if (r.active && L >= u(r.zloM) - c && L <= u(r.zhiM) + c && x >= r.x0 - c - m && x <= r.x1 + c + m && z >= r.z0 - c - m && z <= r.z1 + c + m) { blk = true; break; }
@@ -503,7 +503,7 @@ const boxDist = (p, x0, x1, y0, y1, z0, z1) => Math.hypot(Math.max(x0 - p.x, 0, 
 export function nearestObstacle(p) {
   let best = { id: null, name: '—', d: Infinity, kind: 'none' };
   for (const o of world.obstacles) {
-    const d = boxDist(p, o.x0, o.x1, 0, o.h, o.z0, o.z1);
+    const d = boxDist(p, o.x0, o.x1, o.y0 ?? 0, o.h, o.z0, o.z1);
     if (d < best.d) best = { id: o.id, name: o.name, d, kind: 'building' };
   }
   for (const r of world.restricted) {

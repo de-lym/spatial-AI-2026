@@ -1,0 +1,470 @@
+--- a/main.js
++++ b/main.js
+@@ -8,6 +8,7 @@
+ } from './spatial.js';
+ import { createEventStore } from './ops-events.js';
+ import { installProximity } from './proximity-integration.js';
++import { buildPlacementArchitecture, installPlacements } from './placement-integration.js';
+ 
+ /* ====================================================================
+    AIRSPACE — a location-aware drone delivery sandbox (synthetic, classroom only)
+@@ -390,7 +391,7 @@
+ const FIXED = { '0,-16': 'tb1', '16,0': 'civic', '-16,0': 'care' }; // deterministic lots: the 95 m tower and the two Sensitive Facilities
+ let parkN = 0, pondN = 0;
+ function buildFiller(x, z) {
+-  const g = new THREE.Group(); g.position.set(x, SLAB, z); scene.add(g);
++  const g = new THREE.Group(); g.position.set(x, SLAB, z); g.userData.fillerParcel = key(x,z); scene.add(g);
+   // dense (taller) lots are scattered through the whole city by a fixed pattern, not clustered in one district
+   const mid = ((Math.round(x / 16) + 3) * 5 + (Math.round(z / 16) + 3) * 3) % 7 < 3;
+   let kind = FIXED[key(x, z)];
+@@ -491,6 +492,7 @@
+ addCustomer('C9', 48, -32, CLR.white, CLR.denim);
+ addCustomer('C10', -16, -48, CLR.wood, CLR.sage);
+ for (const [x, z] of parcels) if (!takenAt.has(key(x, z))) buildFiller(x, z);
++buildPlacementArchitecture({scene, world, setLU, slab: SLAB});
+ 
+ // ---- finish the land-use records (the inspectable rule of every block) -------------------
+ const LU_POLICY_NOTE = (t) => (t.landUse === 'sensitive' ? `Restricted 0–${Math.min(t.restrictedTopM ?? 300, cfg.maxAltM)} m over the block; permitted above, at high cost` : LAND[t.landUse].policy);
+@@ -721,7 +723,8 @@
+ /** Stage 2 + 3 at dispatch time: candidates are generated and validated BEFORE the drone moves; it flies the smoothed winner. */
+ function startTask(c, kind, order) {
+   const dest = kind === 'toRestaurant' ? order.restaurant.acc : order.customer.acc;
+-  const plan = planMission(c.pos, dest);
++  const plan = placement.decoratePlan(c, planMission(c.pos, dest), dest);
++  c.placementTour = plan.placementTour ?? null; c.placementWaiting = false;
+   c.task = { kind, order, route: { id: 'RT-' + String(S.nextRoute++).padStart(3, '0'), pts: plan.ok ? plan.best.pts : [], plan, idx: 0, rerouted: false, travelled: 0 }, start: c.pos.clone() };
+   c.hold = null; c.rerouteWhy = ''; c.dwell = 0; c.launchedAt = S.time; c.sepWait = 0;
+   if (order) c.lastOrder = order;
+@@ -812,7 +815,7 @@
+     const w = R.pts[R.idx], d = dist3(c.pos, w), vert = Math.hypot(w.x - c.pos.x, w.z - c.pos.z) < 0.01;
+     const v = DRONE_SPEED * (vert ? VERT_SPEED : 1), need = d / v;
+     if (Math.hypot(w.x - c.pos.x, w.z - c.pos.z) > 0.01) c.heading = Math.atan2(w.x - c.pos.x, w.z - c.pos.z);
+-    if (need <= t) { c.pos.set(w.x, w.y, w.z); t -= need; moved += d; R.idx++; }
++    if (need <= t) { c.pos.set(w.x, w.y, w.z); t -= need; moved += d; R.idx++; if(w.phase === 'placement_wait') { t = 0; break; } }
+     else { const k = (v * t) / d; c.pos.x += (w.x - c.pos.x) * k; c.pos.y += (w.y - c.pos.y) * k; c.pos.z += (w.z - c.pos.z) * k; moved += v * t; t = 0; }
+   }
+   R.travelled += moved;
+@@ -867,7 +870,7 @@
+ /** where drone c will be t seconds from now if it keeps its route at speed factor f */
+ function posAfter(c, t, f) {
+   const p = { x: c.pos.x, y: c.pos.y, z: c.pos.z };
+-  if (!c.task || c.hold || f <= 0) return p;
++  if (!c.task || c.hold || c.placementWaiting || f <= 0) return p;
+   const pts = c.task.route.pts;
+   let rem = t * f;
+   for (let i = c.task.route.idx; i < pts.length && rem > 1e-9; i++) {
+@@ -1275,10 +1278,13 @@
+ 
+   for (const c of S.couriers) if (c.task) preflight(c, dt);
+   proximity.prepare(dt);
++  placement.beforePlan();
+   sepPlan(dt);
++  placement.gate();
+   proximity.guard(dt);
+   for (const c of S.couriers) droneStep(c, dt);
+   sepTrack();
++  placement.afterMove();
+   if ((S.timers.sense -= dt) <= 0) { // nearest-obstacle readout (robot panel)
+     S.timers.sense = 0.2;
+     for (const c of S.couriers) c.nearest = nearestObstacle(c.pos);
+@@ -1321,6 +1327,7 @@
+     ground_block: { block_id: tile.id, name: tile.name, land_use: LAND[tile.landUse].label, risk_cost: tile.risk },
+     nearby_landmark: lm.name,
+     status: c.hold ? 'HOVER (NO_VALID_ROUTE)' : statusWord(c),
++    placements: placement.factsFor(c),
+     proximity: [...proximity.conditions.values()].filter(s => s.droneId === c.id),
+     separation: { state: sepLabel(c), waiting_for: c.sep?.by ?? [] },
+     description: hv.lines[0] ?? '',
+@@ -1577,7 +1584,7 @@
+     // highlighted blocked obstacle (a few seconds after a conflict is detected)
+     const b = c.blocked;
+     if (b && S.time < b.until && b.obstacle) {
+-      const o = b.obstacle, hi = (o.h ?? Math.min(o.zhiM, cfg.maxAltM + 15) / SCALE_M), lo = o.zloM !== undefined ? o.zloM / SCALE_M : 0;
++      const o = b.obstacle, hi = (o.h ?? Math.min(o.zhiM, cfg.maxAltM + 15) / SCALE_M), lo = o.zloM !== undefined ? o.zloM / SCALE_M : (o.y0 ?? 0);
+       c.blockMesh.visible = true; c.blockMesh.scale.set(o.x1 - o.x0 + 0.1, hi - lo, o.z1 - o.z0 + 0.1);
+       c.blockMesh.position.set((o.x0 + o.x1) / 2, SLAB + lo + (hi - lo) / 2, (o.z0 + o.z1) / 2);
+     } else c.blockMesh.visible = false;
+@@ -1777,10 +1784,11 @@
+       const hi = Math.min(v.zhiM, v.kind === 'transition' ? v.zhiM : cfg.maxAltM);
+       g.fillStyle = 'rgba(111,207,159,.22)'; g.fillRect(x0, Y(hi), w, Y(v.zloM) - Y(hi));
+     }
+-    let h = 0, rz = null;
+-    for (const o of world.obstacles) if (x >= o.x0 && x <= o.x1 && z >= o.z0 && z <= o.z1) h = Math.max(h, o.h * SCALE_M);
++    let rz = null;
++    for (const o of world.obstacles) if (x >= o.x0 && x <= o.x1 && z >= o.z0 && z <= o.z1) {
++      g.fillStyle = '#cfcac4'; g.fillRect(x0, Y(o.h * SCALE_M), w, Y((o.y0 ?? 0) * SCALE_M) - Y(o.h * SCALE_M));
++    }
+     for (const r of world.restricted) if (r.active && x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1) rz = r;
+-    if (h) { g.fillStyle = '#cfcac4'; g.fillRect(x0, Y(h), w, Y(0) - Y(h)); }
+     if (rz) { g.fillStyle = 'rgba(224,112,124,.34)'; g.fillRect(x0, Y(Math.min(rz.zhiM, zTop)), w, Y(rz.zloM) - Y(Math.min(rz.zhiM, zTop))); }
+   }
+   g.strokeStyle = '#8a8279'; g.beginPath(); g.moveTo(padL, Y(0)); g.lineTo(W - 6, Y(0)); g.stroke();
+@@ -2002,6 +2010,7 @@
+     const hv = humanView(c);
+     setHTML($('insp-human'), `<p><b>${esc(hv.headline)}</b></p>` + hv.lines.slice(0, 3).map((l) => `<p>${esc(l)}</p>`).join(''));
+     setHTML($('insp-dl'), dlRow('Flight state', flightState(c) + (c.hold ? ` · ${c.hold.reason}` : '')) + dlRow('Separation', sepLabel(c) + (c.sep?.by?.length ? ` · ${aliases(c.sep.by)}` : ''))
++      + dlRow('Spatial placement', placement.factsFor(c).map(f => f.label).join(' | ') || (c.placementWaiting ? 'Waiting at passage entrance for partner' : 'No selected relation'))
+       + dlRow('Building surface clearance', `${fmt(proximity.building(c).metres)} m · ${proximity.building(c).name} (threshold ${cfg.clearanceM} m)`)
+       + dlRow('Proximity', [...proximity.conditions.values()].filter(s => s.droneId === c.id).map(s => `${s.cause}: ${s.action} · ${s.message}`).join(' | ') || 'Clear')
+       + dlRow('Mission', missionLabel(c)) + dlRow('Current leg', attentionText(c)) + dlRow('Altitude', `${Math.round(c.pos.y * SCALE_M)} m`)
+@@ -2267,6 +2276,7 @@
+ 
+ function resetWorld(silent = false) {
+   proximity.reset();
++  placement.reset();
+   ops.reset(); ui.shownDrone = null; ui.opsNote = false; evKey = ''; evSeen = new Set();
+   [...S.orders].forEach(removeOrder);
+   [...S.couriers].forEach(removeCourier);
+@@ -2345,6 +2355,7 @@
+ addEventListener('resize', resizeMap);
+ 
+ const proximity = installProximity({S, cfg, world, scale: SCALE_M, ops, scene, segCheck, planRoute, destOf, toast, selectDrone, prioCmp});
++const placement = installPlacements({S, cfg, world, ops, planRoute, segCheck, resetWorld, setStage, selectDrone, toast, camera, controls, setAdvanced, updatePanels});
+ controls.update(); controls.saveState();
+ finishBlocks(); regenAirspace();
+ resetWorld(true);
+@@ -2364,4 +2375,4 @@
+ updatePanels(true);
+ frame();
+ // exposed for debugging / automated checks
+-window.__sim = { proximity, sepEvade, sepPlan, posAfter, prioCmp, scene, LAND, regenAirspace, segCheck, inPermitted, volumesAt, S, act, step, world, cfg, planRoute, planMission, getLocation, getAgentsAt, getAgentsInBox, setStage, previews, selectVolume, resetWorld, ui, ops, selectDrone, clearDroneSelection, renderEvents, camera, renderer, controls };
++window.__sim = { placement, proximity, sepEvade, sepPlan, posAfter, prioCmp, scene, LAND, regenAirspace, segCheck, inPermitted, volumesAt, S, act, step, world, cfg, planRoute, planMission, getLocation, getAgentsAt, getAgentsInBox, setStage, previews, selectVolume, resetWorld, ui, ops, selectDrone, clearDroneSelection, renderEvents, camera, renderer, controls };
+--- a/spatial.js
++++ b/spatial.js
+@@ -38,7 +38,7 @@
+ };
+ export const world = {
+   bounds: 58,           // permitted airspace extends to ±bounds (scene units)
+-  obstacles: [],        // {id,name,typo,x0,x1,z0,z1,h}  (h in scene units above datum)
++  obstacles: [],        // {id,name,typo,x0,x1,z0,z1,h}  (y0 optional bottom; h top, scene units above datum)
+   restricted: [],       // RESTRICTED prisms {id,name,kind:'restricted'|'hazard',x0,x1,z0,z1,zloM,zhiM,active}
+   zones: [],            // named districts {name,x0,x1,z0,z1,ceilingM} — labels only
+   tiles: [],            // 7×7 land-use tiles (16 × 16 units: the parcel plus half of each surrounding street) {id,i,j,landUse,risk,x0,x1,z0,z1,loM,hiM}
+@@ -157,8 +157,8 @@
+   if (Math.abs(a.x) > B || Math.abs(a.z) > B || Math.abs(b.x) > B || Math.abs(b.z) > B)
+     return { reason: 'bounds', name: 'the edge of the modelled airspace' };
+   for (const o of world.obstacles) {
+-    if (segHitsBox(a, b, o.x0 - c, o.x1 + c, -1, o.h + c, o.z0 - c, o.z1 + c)) {
+-      const raw = segHitsBox(a, b, o.x0, o.x1, -1, o.h, o.z0, o.z1);
++    if (segHitsBox(a, b, o.x0 - c, o.x1 + c, o.y0 == null || o.y0 === 0 ? -1 : o.y0 - c, o.h + c, o.z0 - c, o.z1 + c)) {
++      const raw = segHitsBox(a, b, o.x0, o.x1, o.y0 ?? -1, o.h, o.z0, o.z1);
+       return { reason: 'building', id: o.id, name: o.name, hM: o.h * SCALE_M, marginOnly: !raw, obstacle: o };
+     }
+   }
+@@ -187,7 +187,7 @@
+     const x = cellCentre(i), z = cellCentre(j);
+     let blk = Math.abs(x) > world.bounds - 1 || Math.abs(z) > world.bounds - 1 || !inPermitted(x, L, z);
+     if (!blk) for (const o of world.obstacles) {
+-      if (L <= o.h + c && x >= o.x0 - c - m && x <= o.x1 + c + m && z >= o.z0 - c - m && z <= o.z1 + c + m) { blk = true; break; }
++      if (L >= (o.y0 ?? -1) - c && L <= o.h + c && x >= o.x0 - c - m && x <= o.x1 + c + m && z >= o.z0 - c - m && z <= o.z1 + c + m) { blk = true; break; }
+     }
+     if (!blk) for (const r of world.restricted) {
+       if (r.active && L >= u(r.zloM) - c && L <= u(r.zhiM) + c && x >= r.x0 - c - m && x <= r.x1 + c + m && z >= r.z0 - c - m && z <= r.z1 + c + m) { blk = true; break; }
+@@ -503,7 +503,7 @@
+ export function nearestObstacle(p) {
+   let best = { id: null, name: '—', d: Infinity, kind: 'none' };
+   for (const o of world.obstacles) {
+-    const d = boxDist(p, o.x0, o.x1, 0, o.h, o.z0, o.z1);
++    const d = boxDist(p, o.x0, o.x1, o.y0 ?? 0, o.h, o.z0, o.z1);
+     if (d < best.d) best = { id: o.id, name: o.name, d, kind: 'building' };
+   }
+   for (const r of world.restricted) {
+--- a/index.html
++++ b/index.html
+@@ -20,6 +20,7 @@
+       <option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option>
+     </select>
+     <button id="btn-reset">Reset</button>
++    <button id="btn-placements">Placements</button>
+     <button id="btn-advanced" aria-expanded="false" aria-controls="advanced">Advanced</button>
+   </div>
+ </header>
+@@ -195,6 +196,14 @@
+       <summary>Land-use rules <small>(change one → airspace and costs regenerate)</small></summary>
+       <div id="lu-rules"></div>
+       <div class="dim small">Simulation policies, not legal rules. The floor is the lowest permitted altitude above a block of that use; risk (0–10) is the soft cost per metre flown over it. Permission is a hard constraint, risk is only a preference.</div>
++    </details>
++    <details class="sec" id="sec-placement" open>
++      <summary>Spatial placements · Skybridge tour</summary>
++      <p class="small">UNDER the skybridge · BETWEEN two buildings · NEXT TO another drone. Relations may overlap.</p>
++      <p id="placement-tour-state" role="status" class="small">Tour: idle</p>
++      <div class="scen"><button id="placement-start">Start placement tour</button><button id="placement-view">View skybridge</button></div>
++      <div id="placement-facts" aria-label="Live placement facts"></div>
++      <p class="dim small">A tour starts a fresh delivery session. Two drones meet at the entrance and use parallel lanes 35 m apart. Existing collision and airspace checks stay active. If current settings block the passage, the tour cannot start.</p>
+     </details>
+     <details class="sec" id="sec-proximity" open>
+       <summary>Proximity · automatic response / human review</summary>
+@@ -256,6 +265,12 @@
+ <div id="toast"></div>
+ <div class="screenreader" role="status" id="selection-announcement"></div>
+ 
++<div id="placement-live" class="placement-live" role="status" hidden></div>
++<dialog id="dlg-placement" aria-labelledby="dlg-placement-title">
++  <h2 id="dlg-placement-title">Start a new placement tour?</h2>
++  <p>This resets current orders, incidents and pigeons. Export your session first if needed. The original delivery simulation continues after the passage.</p>
++  <div class="scen"><button id="placement-cancel">Cancel</button><button id="placement-confirm">Reset and start tour</button></div>
++</dialog>
+ <script type="module" src="main.js"></script>
+ </body>
+ </html>
+--- a/style.css
++++ b/style.css
+@@ -214,3 +214,7 @@
+ .prox-active { display:grid; gap:8px; margin:8px 0; }
+ .prox-active button { width:100%; text-align:left; white-space:normal; overflow-wrap:anywhere; }
+ #sec-proximity button:focus-visible { outline:2px solid #333; outline-offset:2px; }
++
++.placement-live {position:fixed;z-index:12;top:140px;left:340px;right:384px;padding:12px 16px;background:rgba(255,255,255,.95);border:1px solid #d9d3cd;border-radius:12px;font-size:14px;line-height:22px;white-space:pre-line;pointer-events:none;overflow-wrap:anywhere;}
++.placement-live[hidden] {display:none;}
++@media(max-width:1279px){.placement-live{left:320px;right:360px;}}
+--- a/proximity.js
++++ b/proximity.js
+@@ -15,7 +15,7 @@
+ /** Exact piecewise route prediction, including waypoint turns and vertical speed. */
+ export function trajectory(c, seconds, factor=1, speed=4, verticalFactor=.7) {
+   const out = [{t:0,p:{...c.pos}}]; let p={...c.pos}, t=0;
+-  if (c.task && !c.hold && factor>0) for (const w of c.task.route.pts.slice(c.task.route.idx)) {
++  if (c.task && !c.hold && !c.placementWaiting && factor>0) for (const w of c.task.route.pts.slice(c.task.route.idx)) {
+     const d=distance(p,w); if (d<1e-9) continue;
+     const v=speed*factor*(Math.hypot(w.x-p.x,w.z-p.z)<.01?verticalFactor:1);
+     const need=d/v, used=Math.min(need,seconds-t);
+@@ -38,7 +38,7 @@
+   return min;
+ }
+ export function boxSurfaceDistance(p,o) {
+-  return Math.hypot(Math.max(o.x0-p.x,0,p.x-o.x1),Math.max(-p.y,0,p.y-o.h),Math.max(o.z0-p.z,0,p.z-o.z1));
++  return Math.hypot(Math.max(o.x0-p.x,0,p.x-o.x1),Math.max((o.y0??0)-p.y,0,p.y-o.h),Math.max(o.z0-p.z,0,p.z-o.z1));
+ }
+ /** If already inside a margin, only non-worsening, strictly separating motion is admissible. */
+ export function unsafeApproach(a,b,margin) {
+--- /dev/null
++++ b/placements.js
+@@ -0,0 +1,26 @@
++/** Placement facts are geometric relations to named references, not exclusive flight modes. */
++export const SKYBRIDGE = {
++  id:'SB-01',name:'Skybridge',
++  west:{id:'TW-W',name:'West Tower',x0:-35,x1:-30,z0:-36,z1:-28,y0:0,h:21},
++  east:{id:'TW-E',name:'East Tower',x0:-18,x1:-13,z0:-36,z1:-28,y0:0,h:21},
++  span:{id:'SB-01',name:'Skybridge span',x0:-30,x1:-18,z0:-35,z1:-29,y0:15,h:18},
++  lanes:[-27.5,-20.5],entryZ:-42,exitZ:-22,altitude:10,
++};
++export function placementFacts(drone,drones,{scale=5,separationM=30,bridge=SKYBRIDGE}={}) {
++  const p=drone.pos, {west,east,span}=bridge, facts=[];
++  if(p.y<=.3)return facts;
++  if(p.x>west.x1&&p.x<east.x0&&p.z>=Math.max(west.z0,east.z0)&&p.z<=Math.min(west.z1,east.z1)&&p.y<Math.min(west.h,east.h))
++    facts.push({relation:'BETWEEN',referenceIds:[west.id,east.id],label:'Between the two towers'});
++  if(p.x>=span.x0&&p.x<=span.x1&&p.z>=span.z0&&p.z<=span.z1&&p.y<span.y0)
++    facts.push({relation:'UNDER',referenceIds:[span.id],label:'Under the skybridge'});
++  for(const other of drones) {
++    if(other===drone||other.pos.y<=.3)continue;
++    const dx=(other.pos.x-p.x)*scale,dz=(other.pos.z-p.z)*scale,dy=(other.pos.y-p.y)*scale;
++    const d=Math.hypot(dx,dy,dz),heading=drone.heading??0;
++    const along=Math.abs(dx*Math.sin(heading)+dz*Math.cos(heading));
++    const diff=Math.atan2(Math.sin(heading-(other.heading??0)),Math.cos(heading-(other.heading??0)));
++    if(d>=separationM-1e-6&&d<=separationM+10&&Math.abs(dy)<=5&&along<=10&&Math.abs(diff)<=Math.PI/12)
++      facts.push({relation:'NEXT_TO',referenceIds:[other.id],distanceM:d,label:`Next to ${other.id} · ${d.toFixed(1)} m apart`});
++  }
++  return facts;
++}
+--- /dev/null
++++ b/placement-integration.js
+@@ -0,0 +1,114 @@
++import * as THREE from 'three';
++import {SKYBRIDGE,placementFacts} from './placements.js';
++
++/** Keep the opening real: each tower and the elevated span has its own solid AABB. */
++export function buildPlacementArchitecture({scene,world,setLU,slab=.4}) {
++  const reserved=new Set(['-32,-32','-16,-32']);
++  for(const child of [...scene.children]) if(reserved.has(child.userData.fillerParcel))scene.remove(child);
++  world.obstacles=world.obstacles.filter(o=>![-32,-16].some(x=>(o.x0+o.x1)/2>x-6&&(o.x0+o.x1)/2<x+6&&(o.z0+o.z1)/2>-38&&(o.z0+o.z1)/2<-26));
++  const group=new THREE.Group();group.name='Skybridge architecture';scene.add(group);
++  for(const [o,color] of [[SKYBRIDGE.west,0xe8e6e2],[SKYBRIDGE.east,0xe8e6e2],[SKYBRIDGE.span,0xbcc5d0]]) {
++    world.obstacles.push({...o,typo:o.id==='SB-01'?'skybridge':'tower'});
++    const geo=new THREE.BoxGeometry(o.x1-o.x0,o.h-o.y0,o.z1-o.z0);
++    const mesh=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color,roughness:.9}));
++    mesh.position.set((o.x0+o.x1)/2,slab+(o.y0+o.h)/2,(o.z0+o.z1)/2);mesh.castShadow=mesh.receiveShadow=true;group.add(mesh);
++    // Facade ledges lie within the same collision envelope, so decoration does not fill the opening.
++    for(let y=o.y0+1;y<o.h;y+=2) {
++      const strip=new THREE.Mesh(new THREE.BoxGeometry(o.x1-o.x0,.08,o.z1-o.z0),new THREE.MeshStandardMaterial({color:0xd0d0cc}));
++      strip.position.set(mesh.position.x,slab+y,mesh.position.z);group.add(strip);
++    }
++  }
++  setLU(-32,-32,'cbd','West Tower / Skybridge');setLU(-16,-32,'cbd','East Tower / Skybridge');
++  world.landmarks.push({name:'Skybridge SB-01',x:-24,z:-32});
++  // Floor markings explain the two parallel routes without acting as solid obstacles.
++  for(const x of SKYBRIDGE.lanes) {
++    const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x,slab+.04,SKYBRIDGE.entryZ),new THREE.Vector3(x,slab+.04,SKYBRIDGE.exitZ)]),new THREE.LineDashedMaterial({color:0x7f8b94,dashSize:.6,gapSize:.5}));line.computeLineDistances();group.add(line);
++  }
++  return group;
++}
++export function installPlacements({S,cfg,world,ops,planRoute,segCheck,resetWorld,setStage,selectDrone,toast,camera,controls,setAdvanced,updatePanels}) {
++  const state={mode:'idle',pending:new Map(),members:[],facts:new Map(),version:0,history:[]};
++  const emit=(code,title,description,id=null)=>{
++    const event={code,title,description,droneId:id,occurredAtSimSeconds:S.time,source:'placement'};
++    ops.update(event);state.history.push(event);if(state.history.length>300)state.history.shift();
++  };
++  const factsFor=c=>placementFacts(c,S.couriers,{separationM:cfg.sepM});
++  function focus(){controls.target.set(-24,9,-32);camera.position.copy(controls.target).add(new THREE.Vector3(6,24,80));camera.zoom=1.0;camera.updateProjectionMatrix();controls.update();}
++  function reset(){state.mode='idle';state.pending.clear();state.members=[];state.facts.clear();state.history=[];for(const c of S.couriers){c.placementWaiting=false;c.placementTour=null;}state.version++;render();}
++  function start(){
++    if(cfg.sepM>35){toast('The two lanes are 35 m apart. Set drone separation to 35 m or less before starting this tour.');return false;}
++    const a={x:SKYBRIDGE.lanes[0],y:10,z:SKYBRIDGE.entryZ},b={...a,z:SKYBRIDGE.exitZ};
++    if(SKYBRIDGE.lanes.some(x=>segCheck({...a,x},{...b,x}))) {toast('The passage is blocked by current clearance or airspace settings. Adjust the rules, then retry.');return false;}
++    resetWorld(true);state.mode='assembling';state.members=['D-01','D-02'];
++    state.members.forEach((id,i)=>state.pending.set(id,SKYBRIDGE.lanes[i]));
++    S.intake=false;setStage(4);S.running=true;selectDrone('D-01',null);setAdvanced(false);focus();
++    emit('PLACEMENT_TOUR_START','Placement tour started','D-01 and D-02 will meet at the entrance, then fly through parallel lanes. Delivery orders continue afterward.');
++    toast('Tour started. The two drones will meet before entering the passage.');render();updatePanels(true);return true;
++  }
++  function decoratePlan(c,original,dest) {
++    if(!state.pending.has(c.id))return original;
++    const x=state.pending.get(c.id),entry={x,y:10,z:SKYBRIDGE.entryZ},exit={x,y:10,z:SKYBRIDGE.exitZ};
++    const legs=[planRoute(c.pos,entry),planRoute(entry,exit,{only:10}),planRoute(exit,dest)];
++    if(legs.some(p=>!p.ok)) {
++      state.mode='blocked';state.pending.delete(c.id);
++      emit('PLACEMENT_TOUR_BLOCKED','Placement tour unavailable',`${c.id}: no validated complete route. Original delivery routing remains active.`,c.id);return original;
++    }
++    const pts=legs.flatMap(p=>p.pts.map(q=>({...q}))),entryIdx=legs[0].pts.length;
++    pts[entryIdx-1].phase='placement_wait';
++    const meta={id:c.id,entryIdx,released:false,routeId:null};
++    const best={...legs[0].mission.best,id:'A',label:'Placement tour via Skybridge SB-01',pts,len:legs.reduce((s,p)=>s+p.len,0),chosen:true};
++    best.lenM=best.len*5;state.pending.delete(c.id);
++    const plan={...legs[0].mission,ok:true,best,candidates:[best],to:{...dest},placementTour:meta};
++    return plan;
++  }
++  function beforePlan(){
++    const members=state.members.map(id=>S.couriers.find(c=>c.id===id)).filter(Boolean);
++    const ready=c=>c.placementTour&&c.task?.route.plan.placementTour===c.placementTour&&c.task.route.idx>=c.placementTour.entryIdx;
++    const interrupted=members.some(c=>c.placementTour&&c.task&&c.task.route.plan.placementTour!==c.placementTour&&!c.placementTour.released);
++    if(interrupted||state.mode==='blocked') {
++      if(state.mode!=='interrupted'){state.mode='interrupted';emit('PLACEMENT_TOUR_INTERRUPTED','Tour interrupted','Traffic or new obstacles changed a tour route. Normal delivery and proximity checks remain active.');}
++      for(const c of members){c.placementWaiting=false;if(c.placementTour)c.placementTour.released=true;}
++      state.pending.clear();
++    } else if(state.mode==='assembling'&&members.length===2&&members.every(ready)) {
++      state.mode='crossing';for(const c of members){c.placementTour.released=true;c.placementWaiting=false;}
++      emit('PLACEMENT_TOUR_RELEASE','Both drones ready','Two validated lanes, 35 m apart. Entering the building passage together.');
++    }
++    for(const c of members)c.placementWaiting=!!(state.mode==='assembling'&&ready(c)&&!c.placementTour.released);
++    if(state.mode==='assembling'&&S.time>120){state.mode='interrupted';for(const c of members){c.placementWaiting=false;if(c.placementTour)c.placementTour.released=true;}state.pending.clear();emit('PLACEMENT_TOUR_TIMEOUT','Tour assembly timed out','Normal delivery routing resumes; the current rules or traffic prevented the rendezvous.');}
++  }
++  function gate(){for(const c of S.couriers)if(c.placementWaiting)c.sepFactor=0;}
++  function afterMove(){
++    for(const c of S.couriers){
++      const current=factsFor(c),previous=state.facts.get(c.id)??[];
++      const key=f=>f.relation+':'+f.referenceIds.join(',');
++      for(const f of current)if(!previous.some(p=>key(p)===key(f)))emit('PLACEMENT_ENTER',f.label,`${c.id} · ${f.relation} · ${f.referenceIds.join(' + ')}`,c.id);
++      for(const f of previous)if(!current.some(p=>key(p)===key(f)))emit('PLACEMENT_EXIT',`Left: ${f.label}`,`${c.id} · relation no longer holds.`,c.id);
++      state.facts.set(c.id,current);
++    }
++    if(state.mode==='crossing'&&state.members.every(id=>{const c=S.couriers.find(c=>c.id===id);return c&&(c.pos.z-(SKYBRIDGE.span.z0+SKYBRIDGE.span.z1)/2)*Math.sign(SKYBRIDGE.exitZ-SKYBRIDGE.entryZ)>(SKYBRIDGE.span.z1-SKYBRIDGE.span.z0)/2+2;})) {
++      state.mode='complete';emit('PLACEMENT_TOUR_COMPLETE','Passage complete','The two drones crossed beneath the skybridge. Their original pickup and delivery tasks continue.');
++    }
++    render();
++  }
++  function render(){
++    const out=document.getElementById('placement-facts');if(!out)return;
++    document.getElementById('placement-tour-state').textContent=`Tour: ${state.mode}`;
++    const hud=document.getElementById('placement-live');
++    const selected=S.couriers.find(c=>c===S.selected)??S.couriers[0];
++    const active=selected?factsFor(selected):[];
++    hud.hidden=state.mode==='idle';
++    hud.textContent=`${selected?.id??'Fleet'} · ${state.mode==='assembling'?'Meeting at the passage entrance':state.mode==='complete'?'Passage complete — continuing deliveries':state.mode==='crossing'?'Crossing the passage':state.mode}`+(active.length?'\n'+active.map(f=>f.label).join(' · '):'');
++    out.replaceChildren();let count=0;
++    for(const c of S.couriers)for(const f of factsFor(c)) {
++      const button=document.createElement('button');button.className='event';button.type='button';button.textContent=`${c.id} · ${f.label}`;button.onclick=()=>{selectDrone(c.id,button);setAdvanced(false);};out.append(button);count++;
++    }
++    if(!count){const p=document.createElement('p');p.className='small';p.textContent='No matching placement right now. Start the tour to see all three relations.';out.append(p);}
++  }
++  const dialog=document.getElementById('dlg-placement');
++  document.getElementById('placement-start').onclick=()=>{dialog.returnFocus=document.getElementById('placement-start');dialog.showModal();};
++  document.getElementById('placement-cancel').onclick=()=>dialog.close();
++  document.getElementById('placement-confirm').onclick=()=>{dialog.close();start();};
++  document.getElementById('placement-view').onclick=()=>{setAdvanced(false);focus();};
++  document.getElementById('btn-placements').onclick=()=>{setAdvanced(true);document.getElementById('sec-placement').scrollIntoView({block:'start'});};
++  return {state,reset,start,focus,decoratePlan,beforePlan,gate,afterMove,factsFor,snapshot:()=>({mode:state.mode,facts:Object.fromEntries(state.facts),history:state.history})};
++}
+--- a/package.json
++++ b/package.json
+@@ -1 +1,11 @@
+-{"name":"airspace-proximity-classroom","private":true,"type":"module","scripts":{"test":"node --test tests/*.test.js"},"engines":{"node":">=20"}}
++{
++  "name": "airspace-placement-classroom",
++  "private": true,
++  "type": "module",
++  "scripts": {
++    "test": "node --test tests/*.test.js"
++  },
++  "engines": {
++    "node": ">=20"
++  }
++}
+--- /dev/null
++++ b/tests/placements.test.js
+@@ -0,0 +1,35 @@
++import {test} from 'node:test';
++import assert from 'node:assert/strict';
++import {SKYBRIDGE,placementFacts} from '../placements.js';
++import {segCheck,world,cfg,bump,planRoute,nearestObstacle} from '../spatial.js';
++import {boxSurfaceDistance} from '../proximity.js';
++const drone=(id,x,y,z)=>({id,pos:{x,y,z},heading:0});
++test('under and between require the actual overhead footprint and tower gap',()=>{
++ const a=drone('D-01',-27.5,10,-32);
++ assert.deepEqual(placementFacts(a,[a]).map(f=>f.relation),['BETWEEN','UNDER']);
++ assert.equal(placementFacts(drone('D-01',0,10,-32),[]).length,0);
++ assert.equal(placementFacts(drone('D-01',-27.5,22,-32),[]).length,0);
++ assert.equal(placementFacts(drone('D-01',-27.5,0,-32),[]).length,0);
++});
++test('next to is lateral, aligned and safely separated, not merely near',()=>{
++ const a=drone('D-01',-27.5,10,-32),b=drone('D-02',-20.5,10,-32);
++ assert.equal(placementFacts(a,[a,b]).filter(f=>f.relation==='NEXT_TO')[0].distanceM,35);
++ b.pos.x=a.pos.x+2;assert.equal(placementFacts(a,[a,b]).some(f=>f.relation==='NEXT_TO'),false);
++ b.pos.x=-20.5;b.heading=Math.PI;assert.equal(placementFacts(a,[a,b]).some(f=>f.relation==='NEXT_TO'),false);
++ b.heading=0;b.pos.y=12;assert.equal(placementFacts(a,[a,b]).some(f=>f.relation==='NEXT_TO'),false);
++});
++test('elevated solid supports underside, interior, roof, side and clearance checks',()=>{
++ world.bounds=58;world.obstacles=[...['west','east','span'].map(k=>({...SKYBRIDGE[k]}))];world.restricted=[];
++ world.volumes=[{x0:-58,x1:58,z0:-58,z1:58,zloM:20,zhiM:120}];cfg.maxAltM=120;cfg.clearanceM=6;bump();
++ const p={x:-24,y:10,z:-32};
++ assert.equal(segCheck({...p,z:-42},{...p,z:-22}),null);
++ assert.equal(segCheck({...p,y:14.5},{...p,y:14.5}).reason,'building');
++ assert.equal(segCheck({...p,y:16},{...p,y:16}).reason,'building');
++ assert.equal(segCheck({...p,y:20},{...p,y:20}),null);
++ assert.equal(segCheck({...p,x:-32},{...p,x:-32}).reason,'building');
++ assert.equal(boxSurfaceDistance(p,SKYBRIDGE.span),5);
++ assert.equal(nearestObstacle(p).d,5);
++ const route=planRoute({...p,z:-42},{...p,z:-22},{only:10});assert.ok(route.ok);
++ let from={...p,z:-42};for(const q of route.pts){assert.equal(segCheck(from,q),null);from=q;}
++ cfg.clearanceM=30;bump();assert.notEqual(segCheck({...p,z:-42},{...p,z:-22}),null);
++});
+--- /dev/null
++++ b/tests/placement-acceptance.cjs
+@@ -0,0 +1,29 @@
++const {chromium}=require('playwright');
++const fs=require('fs'),assert=require('assert/strict');
++fs.mkdirSync('work/placement-frames',{recursive:true});
++(async()=>{
++ const browser=await chromium.launch({headless:true,channel:'chrome'}),page=await browser.newPage({viewport:{width:1440,height:900}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
++ await page.goto(process.env.AIRSPACE_URL || 'http://127.0.0.1:8000');await page.waitForFunction(()=>window.__sim);
++ const baseline=await page.evaluate(()=>{const a=__sim;a.setStage(4);a.S.running=false;a.S.intake=false;for(let i=0;i<2400;i++)a.step(.1);return {delivered:a.S.delivered.length,minSepM:a.S.minSepM};});assert.equal(baseline.delivered,4);
++ // Starting the tour is destructive only after explicit confirmation; cancel preserves the session.
++ await page.locator('#btn-placements').click();await page.locator('#placement-start').click();assert.ok(await page.locator('#dlg-placement').isVisible());await page.locator('#placement-cancel').click();assert.equal(await page.evaluate(()=>__sim.S.delivered.length),4);
++ await page.locator('#placement-start').click();await page.locator('#placement-confirm').click();await page.evaluate(()=>{__sim.S.running=false;__sim.clearDroneSelection();});
++ await page.locator('[data-category="updates"]').click();
++ const pre=await page.evaluate(()=>{const a=__sim;while(a.placement.state.mode==='assembling'&&a.S.time<120)a.step(.1);return {mode:a.placement.state.mode,time:a.S.time};});
++ let moment=null;
++ for(let i=0;i<28;i++){
++  const data=await page.evaluate(()=>{const a=__sim;for(let k=0;k<3;k++)a.step(.1);const c=a.S.couriers[0];return {time:a.S.time,mode:a.placement.state.mode,facts:a.placement.factsFor(c),drones:a.S.couriers.slice(0,2).map(c=>({id:c.id,pos:{...c.pos},facts:a.placement.factsFor(c)}))};});
++  await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
++  await page.screenshot({path:`work/placement-frames/${String(i).padStart(3,'0')}.png`});
++  if(!moment&&data.mode==='crossing'&&data.facts.length===3){moment=data;await page.screenshot({path:'docs/placement-three-relations.png'});}
++ }
++ assert.ok(moment,'all three facts must hold simultaneously');
++ const continued=await page.evaluate(()=>{const a=__sim;for(let i=0;i<2000;i++)a.step(.1);return {mode:a.placement.state.mode,delivered:a.S.delivered.length,minSepM:a.S.minSepM,history:a.placement.snapshot().history};});assert.equal(continued.mode,'complete');assert.equal(continued.delivered,4);
++ const rejected=await page.evaluate(()=>{const a=__sim;a.cfg.sepM=40;return a.placement.start();});assert.equal(rejected,false);
++ const clearance=await page.evaluate(()=>{const a=__sim;a.cfg.sepM=30;a.cfg.clearanceM=30;return a.placement.start();});assert.equal(clearance,false);
++ const reset=await page.evaluate(()=>{const a=__sim;a.cfg.clearanceM=6;a.resetWorld(true);a.S.running=false;return a.placement.snapshot();});assert.equal(reset.mode,'idle');assert.equal(reset.history.length,0);
++ // Preserve pigeon integration in the modified city.
++ const pigeon=await page.evaluate(()=>{const a=__sim;a.setStage(4);a.S.running=false;a.S.intake=false;for(let i=0;i<180;i++)a.step(.1);const spawned=a.proximity.encounter();for(let i=0;i<20;i++)a.step(.1);return {spawned,actions:a.proximity.snapshot().audit.filter(e=>e.code==='PROX_PIGEON').map(e=>e.action)};});assert.ok(pigeon.spawned);assert.ok(pigeon.actions.some(a=>a.startsWith('AUTO')));
++ await page.setViewportSize({width:1280,height:800});await page.locator('#btn-placements').click();await page.screenshot({path:'docs/placement-controls-1280.png'});const layout=await page.evaluate(()=>({width:innerWidth,scrollWidth:document.documentElement.scrollWidth}));assert.equal(layout.width,layout.scrollWidth);
++ assert.deepEqual(errors,[]);const report={baseline,pre,moment,continued,rejectedSeparation40:rejected,rejectedBlockedPassage:clearance,reset,pigeon,layout,pageErrors:errors};fs.writeFileSync('docs/placement-acceptance.json',JSON.stringify(report,null,2));console.log(JSON.stringify({baseline,moment,continued:{mode:continued.mode,delivered:continued.delivered,minSepM:continued.minSepM},pigeon,layout,errors}));await browser.close();
++})().catch(e=>{console.error(e);process.exit(1)});

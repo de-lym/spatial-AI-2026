@@ -7,6 +7,10 @@ import {
   namedVolumes, volumesAt, blockAt, roofUnder, ceilingMAt, inPermitted, LAND, tileAt, exposureOf, criterionText,
 } from './spatial.js';
 import { createEventStore } from './ops-events.js';
+import { installProximity } from './proximity-integration.js';
+import { buildPlacementArchitecture, installPlacements } from './placement-integration.js';
+import { installInspection } from './inspection-integration.js';
+import { waypointSpeed } from './inspection.js';
 
 /* ====================================================================
    AIRSPACE — a location-aware drone delivery sandbox (synthetic, classroom only)
@@ -389,7 +393,7 @@ const PARKS = ['Linden Park', 'Maple Green', 'Cedar Court', 'Birch Green', 'Aspe
 const FIXED = { '0,-16': 'tb1', '16,0': 'civic', '-16,0': 'care' }; // deterministic lots: the 95 m tower and the two Sensitive Facilities
 let parkN = 0, pondN = 0;
 function buildFiller(x, z) {
-  const g = new THREE.Group(); g.position.set(x, SLAB, z); scene.add(g);
+  const g = new THREE.Group(); g.position.set(x, SLAB, z); g.userData.fillerParcel = key(x,z); scene.add(g);
   // dense (taller) lots are scattered through the whole city by a fixed pattern, not clustered in one district
   const mid = ((Math.round(x / 16) + 3) * 5 + (Math.round(z / 16) + 3) * 3) % 7 < 3;
   let kind = FIXED[key(x, z)];
@@ -490,6 +494,7 @@ addCustomer('C8', 48, 48, CLR.wood, CLR.teal);
 addCustomer('C9', 48, -32, CLR.white, CLR.denim);
 addCustomer('C10', -16, -48, CLR.wood, CLR.sage);
 for (const [x, z] of parcels) if (!takenAt.has(key(x, z))) buildFiller(x, z);
+buildPlacementArchitecture({scene, world, setLU, slab: SLAB});
 
 // ---- finish the land-use records (the inspectable rule of every block) -------------------
 const LU_POLICY_NOTE = (t) => (t.landUse === 'sensitive' ? `Restricted 0–${Math.min(t.restrictedTopM ?? 300, cfg.maxAltM)} m over the block; permitted above, at high cost` : LAND[t.landUse].policy);
@@ -714,13 +719,15 @@ const pts3 = (c) => (c.task ? c.task.route.pts.slice(c.task.route.idx) : []);
 const remainingU = (c) => routeLength(c.pos, pts3(c));
 function remainingTime(c) { // route length ÷ speed, with the slower vertical legs counted
   let t = 0, p = c.pos;
-  for (const q of pts3(c)) { const vert = Math.hypot(q.x - p.x, q.z - p.z) < 0.01; t += dist3(p, q) / (DRONE_SPEED * (vert ? VERT_SPEED : 1)); p = q; }
+  for (const q of pts3(c)) { const vert = Math.hypot(q.x - p.x, q.z - p.z) < 0.01; t += dist3(p, q) / waypointSpeed(p, q, DRONE_SPEED, VERT_SPEED); p = q; }
   return t;
 }
 /** Stage 2 + 3 at dispatch time: candidates are generated and validated BEFORE the drone moves; it flies the smoothed winner. */
 function startTask(c, kind, order) {
+  if (kind === 'toCustomer' && !inspection.isCleared(c, order)) kind = 'inspection';
   const dest = kind === 'toRestaurant' ? order.restaurant.acc : order.customer.acc;
-  const plan = planMission(c.pos, dest);
+  const plan = kind === 'inspection' ? inspection.build(c, order) : placement.decoratePlan(c, planMission(c.pos, dest), dest);
+  c.placementTour = plan.placementTour ?? null; c.placementWaiting = false;
   c.task = { kind, order, route: { id: 'RT-' + String(S.nextRoute++).padStart(3, '0'), pts: plan.ok ? plan.best.pts : [], plan, idx: 0, rerouted: false, travelled: 0 }, start: c.pos.clone() };
   c.hold = null; c.rerouteWhy = ''; c.dwell = 0; c.launchedAt = S.time; c.sepWait = 0;
   if (order) c.lastOrder = order;
@@ -763,7 +770,8 @@ function reasonWhy(bad, plan) {
 /** try to find a permitted route from the current position; returns true on success */
 function replan(c, bad) {
   const dest = destOf(c.task).acc;
-  const plan = planRoute(c.pos, dest);
+  const inspectionMission = c.task.kind === 'inspection' ? inspection.build(c, c.task.order) : null;
+  const plan = inspectionMission ? (inspectionMission.ok ? { ok:true, ...inspectionMission.best, pts:inspectionMission.best.pts, mission:inspectionMission } : inspectionMission) : planRoute(c.pos, dest);
   if (plan.ok) {
     const R = c.task.route;
     R.pts = plan.pts; R.idx = 0; R.rerouted = true; R.plan = plan.mission;
@@ -782,7 +790,7 @@ function replan(c, bad) {
   } else c.hold.reason = plan.reason;
   return false;
 }
-function flyStep(c, dt) {
+function preflight(c, dt) {
   const task = c.task, R = task.route;
   if (c.hold) {
     c.hold.timer -= dt;
@@ -798,6 +806,10 @@ function flyStep(c, dt) {
       if (!replan(c, bad)) return false;
     }
   }
+}
+function flyStep(c, dt) {
+  if (c.hold || !inspection.motionAllowed(c)) return false;
+  const task = c.task, R = task.route;
   // drone-to-drone separation: a drone that must yield moves at a fraction of its speed, or not at all (WAITING_FOR_CLEARANCE)
   const sf = c.sepFactor ?? 1;
   if (sf <= 0) { c.speedU *= Math.max(0, 1 - dt * 6); return false; }
@@ -805,9 +817,9 @@ function flyStep(c, dt) {
   let t = dt * sf, moved = 0;
   while (t > 1e-9 && R.idx < R.pts.length) {
     const w = R.pts[R.idx], d = dist3(c.pos, w), vert = Math.hypot(w.x - c.pos.x, w.z - c.pos.z) < 0.01;
-    const v = DRONE_SPEED * (vert ? VERT_SPEED : 1), need = d / v;
+    const v = waypointSpeed(c.pos, w, DRONE_SPEED, VERT_SPEED), need = d / v;
     if (Math.hypot(w.x - c.pos.x, w.z - c.pos.z) > 0.01) c.heading = Math.atan2(w.x - c.pos.x, w.z - c.pos.z);
-    if (need <= t) { c.pos.set(w.x, w.y, w.z); t -= need; moved += d; R.idx++; }
+    if (need <= t) { c.pos.set(w.x, w.y, w.z); t -= need; moved += d; R.idx++; if(w.phase === 'placement_wait') { t = 0; break; } }
     else { const k = (v * t) / d; c.pos.x += (w.x - c.pos.x) * k; c.pos.y += (w.y - c.pos.y) * k; c.pos.z += (w.z - c.pos.z) * k; moved += v * t; t = 0; }
   }
   R.travelled += moved;
@@ -829,9 +841,15 @@ function droneStep(c, dt) {
     const arrived = flyStep(c, dt);
     if (arrived) {
       const o = c.task.order;
+      if (c.task.kind === 'inspection') {
+        if (inspection.review(c)) { c.task = null; startTask(c, 'toCustomer', o); }
+        updateStatus(c); return;
+      }
+      if (c.task.kind === 'toCustomer' && !inspection.canDeliver(c)) { updateStatus(c); return; }
       if (c.task.kind === 'toRestaurant') { log(`${c.name} landed at ${o.restaurant.stationId} (${o.restaurant.name})`); opsUpdate('LANDED', 'Landed at pickup', `${dispId(c.id)} · ${o.restaurant.stationId} (${o.restaurant.name})`, c.id, o.id); c.dwell = 0.8; c.dwellKind = 'DOCK'; }
       else {
         o.deliveredAt = S.time; setStatus(o, 'delivered');
+        inspection.onDelivered(c, o);
         c.carry.splice(c.carry.indexOf(o), 1);
         S.delivered.push(o);
         o.goneAt = S.time + 5;
@@ -862,11 +880,11 @@ const prioCmp = (a, b) => ((b.boost > S.time) - (a.boost > S.time)) || ((a.launc
 /** where drone c will be t seconds from now if it keeps its route at speed factor f */
 function posAfter(c, t, f) {
   const p = { x: c.pos.x, y: c.pos.y, z: c.pos.z };
-  if (!c.task || c.hold || f <= 0) return p;
+  if (!c.task || c.hold || c.placementWaiting || c.inspectionLandingBlocked || f <= 0) return p;
   const pts = c.task.route.pts;
   let rem = t * f;
   for (let i = c.task.route.idx; i < pts.length && rem > 1e-9; i++) {
-    const w = pts[i], d = dist3(p, w), vert = Math.hypot(w.x - p.x, w.z - p.z) < 0.01, v = DRONE_SPEED * (vert ? VERT_SPEED : 1), need = d / v;
+    const w = pts[i], d = dist3(p, w), vert = Math.hypot(w.x - p.x, w.z - p.z) < 0.01, v = waypointSpeed(p, w, DRONE_SPEED, VERT_SPEED), need = d / v;
     if (need <= rem) { p.x = w.x; p.y = w.y; p.z = w.z; rem -= need; }
     else { const k = (v * rem) / d; p.x += (w.x - p.x) * k; p.y += (w.y - p.y) * k; p.z += (w.z - p.z) * k; rem = 0; }
   }
@@ -927,7 +945,7 @@ function sepPlan(dt) {
       }
       let by = best.f < 1 ? higher.filter((e) => minApproach(T(c, 1), T(e, dec.get(e.id))) < su).map((e) => e.id) : higher.filter((e) => minApproach(T(c, 1), T(e, dec.get(e.id))) < su && minApproach(T(c, best.f), T(e, dec.get(e.id))) < su).map((e) => e.id);
       // landing on an occupied pad: wait in the air until the drone on it has left
-      if (c.task && best.f > 0 && c.pos.y > 0.3) {
+      if (c.task && c.task.kind !== 'inspection' && best.f > 0 && c.pos.y > 0.3) {
         const dest = destOf(c.task).acc, occ = S.couriers.find((e) => e !== c && e.pos.y < 0.3 && Math.hypot(e.pos.x - dest.x, e.pos.z - dest.z) < 2.5);
         if (occ && Math.hypot(c.pos.x - dest.x, c.pos.z - dest.z) < 10) { best = { f: 0 }; by = [occ.id]; }
       }
@@ -1023,7 +1041,7 @@ function sepTrack() {
   }
 }
 const sepLabel = (c) => ({ clear: 'Clear', yielding: 'Yielding', waiting: 'Waiting', rerouting: 'Rerouting' }[c.sep?.state ?? 'clear']);
-const statusWord = (c) => (c.hold ? 'HOVER' : c.sep?.state === 'waiting' ? 'WAITING_FOR_CLEARANCE' : c.status);
+const statusWord = (c) => (c.hold ? 'HOVER' : c.task?.kind === 'inspection' ? (c.inspection?.status === 'waiting' ? 'CHECKS_PENDING' : 'INSPECTING') : c.sep?.state === 'waiting' ? 'WAITING_FOR_CLEARANCE' : c.status);
 
 // ---------- order model ----------------------------------------------
 const unassigned = () => S.orders.filter((o) => ['pending', 'preparing', 'ready'].includes(o.status));
@@ -1268,9 +1286,18 @@ function step(dt) {
   // restaurants: preparation clocks run for orders being prepared (Rule 4)
   for (const o of S.orders) if (o.status === 'preparing' && o.prepRemaining > 0) o.prepRemaining = Math.max(0, o.prepRemaining - dt);
 
+  inspection.prepare();
+  for (const c of S.couriers) if (c.task) preflight(c, dt);
+  proximity.prepare(dt);
+  placement.beforePlan();
   sepPlan(dt);
+  placement.gate();
+  inspection.gate();
+  proximity.guard(dt);
   for (const c of S.couriers) droneStep(c, dt);
   sepTrack();
+  placement.afterMove();
+  inspection.afterMove();
   if ((S.timers.sense -= dt) <= 0) { // nearest-obstacle readout (robot panel)
     S.timers.sense = 0.2;
     for (const c of S.couriers) c.nearest = nearestObstacle(c.pos);
@@ -1313,6 +1340,9 @@ function getLocation(droneId) {
     ground_block: { block_id: tile.id, name: tile.name, land_use: LAND[tile.landUse].label, risk_cost: tile.risk },
     nearby_landmark: lm.name,
     status: c.hold ? 'HOVER (NO_VALID_ROUTE)' : statusWord(c),
+    inspection: c.inspection ? {...c.inspection} : null,
+    placements: placement.factsFor(c),
+    proximity: [...proximity.conditions.values()].filter(s => s.droneId === c.id),
     separation: { state: sepLabel(c), waiting_for: c.sep?.by ?? [] },
     description: hv.lines[0] ?? '',
     heading_deg: Math.round(c.headingDeg),
@@ -1568,7 +1598,7 @@ function syncVisuals(dt) {
     // highlighted blocked obstacle (a few seconds after a conflict is detected)
     const b = c.blocked;
     if (b && S.time < b.until && b.obstacle) {
-      const o = b.obstacle, hi = (o.h ?? Math.min(o.zhiM, cfg.maxAltM + 15) / SCALE_M), lo = o.zloM !== undefined ? o.zloM / SCALE_M : 0;
+      const o = b.obstacle, hi = (o.h ?? Math.min(o.zhiM, cfg.maxAltM + 15) / SCALE_M), lo = o.zloM !== undefined ? o.zloM / SCALE_M : (o.y0 ?? 0);
       c.blockMesh.visible = true; c.blockMesh.scale.set(o.x1 - o.x0 + 0.1, hi - lo, o.z1 - o.z0 + 0.1);
       c.blockMesh.position.set((o.x0 + o.x1) / 2, SLAB + lo + (hi - lo) / 2, (o.z0 + o.z1) / 2);
     } else c.blockMesh.visible = false;
@@ -1768,10 +1798,11 @@ function drawElevation(c) {
       const hi = Math.min(v.zhiM, v.kind === 'transition' ? v.zhiM : cfg.maxAltM);
       g.fillStyle = 'rgba(111,207,159,.22)'; g.fillRect(x0, Y(hi), w, Y(v.zloM) - Y(hi));
     }
-    let h = 0, rz = null;
-    for (const o of world.obstacles) if (x >= o.x0 && x <= o.x1 && z >= o.z0 && z <= o.z1) h = Math.max(h, o.h * SCALE_M);
+    let rz = null;
+    for (const o of world.obstacles) if (x >= o.x0 && x <= o.x1 && z >= o.z0 && z <= o.z1) {
+      g.fillStyle = '#cfcac4'; g.fillRect(x0, Y(o.h * SCALE_M), w, Y((o.y0 ?? 0) * SCALE_M) - Y(o.h * SCALE_M));
+    }
     for (const r of world.restricted) if (r.active && x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1) rz = r;
-    if (h) { g.fillStyle = '#cfcac4'; g.fillRect(x0, Y(h), w, Y(0) - Y(h)); }
     if (rz) { g.fillStyle = 'rgba(224,112,124,.34)'; g.fillRect(x0, Y(Math.min(rz.zhiM, zTop)), w, Y(rz.zloM) - Y(Math.min(rz.zhiM, zTop))); }
   }
   g.strokeStyle = '#8a8279'; g.beginPath(); g.moveTo(padL, Y(0)); g.lineTo(W - 6, Y(0)); g.stroke();
@@ -1882,7 +1913,7 @@ const setText = (el, t) => { if (el.textContent !== t) el.textContent = t; };
 const selectedDrone = () => (S.selected?.type === 'courier' ? S.selected : null);
 const atHub = (c) => !c.task && c.pos.y < 0.3 && !!S.homes[c.id] && Math.hypot(c.pos.x - S.homes[c.id].x, c.pos.z - S.homes[c.id].z) < 1.5;
 const missionLabel = (c) => { const o = c.task?.order ?? c.orders[0] ?? c.carry[0] ?? c.lastOrder; return o ? `${o.restaurant.stationId} → ${o.customer.stationId}` : 'No task'; };
-const flightState = (c) => (c.hold ? 'NO_VALID_ROUTE' : c.sep?.state === 'waiting' ? 'WAITING_FOR_CLEARANCE' : c.status);
+const flightState = (c) => (c.hold ? 'NO_VALID_ROUTE' : c.task?.kind === 'inspection' ? (c.inspection?.status === 'waiting' ? 'CHECKS_PENDING' : 'INSPECTING') : c.sep?.state === 'waiting' ? 'WAITING_FOR_CLEARANCE' : c.status);
 const aliases = (ids) => ids.map(dispId).join(', ');
 function etaText(c) { // seconds left on the current leg; never Infinity / NaN
   if (!c.task) return '—';
@@ -1891,6 +1922,7 @@ function etaText(c) { // seconds left on the current leg; never Infinity / NaN
   return Number.isFinite(t) ? `≈ ${Math.ceil(t)} s` : '—';
 }
 function attentionText(c) {
+  if (c.task?.kind === 'inspection') return `${c.inspection?.status ?? 'Inspection'} · ${Math.round((c.inspection?.progress ?? 0)*100)}% observation`;
   if (c.hold) return 'Holding · route blocked';
   if (c.sep?.state === 'waiting') return `Waiting for ${aliases(c.sep.by) || 'another drone'}`;
   if (c.sep?.state === 'yielding') return `Giving way to ${aliases(c.sep.by) || 'another drone'}`;
@@ -1991,8 +2023,13 @@ function renderInspector() {
   document.querySelectorAll('[data-pane]').forEach((p) => { p.hidden = p.dataset.pane !== tab; });
   if (tab === 'flight') {
     const hv = humanView(c);
-    setHTML($('insp-human'), `<p><b>${esc(hv.headline)}</b></p>` + hv.lines.slice(0, 3).map((l) => `<p>${esc(l)}</p>`).join(''));
+    if (c.task?.kind === 'inspection') setHTML($('insp-human'), `<p><b>${esc(c.inspection?.status === 'waiting' ? 'Observation complete — checks pending' : 'Pre-delivery inspection')}</b></p><p>${esc(inspection.label(c))}</p>` + (c.inspection?.checks ?? []).map(ch => `<p>${ch.pass ? '✓' : '…'} ${esc(ch.label)}${ch.detail ? ': '+esc(ch.detail) : ''}</p>`).join(''));
+    else setHTML($('insp-human'), `<p><b>${esc(hv.headline)}</b></p>` + hv.lines.slice(0, 3).map((l) => `<p>${esc(l)}</p>`).join(''));
     setHTML($('insp-dl'), dlRow('Flight state', flightState(c) + (c.hold ? ` · ${c.hold.reason}` : '')) + dlRow('Separation', sepLabel(c) + (c.sep?.by?.length ? ` · ${aliases(c.sep.by)}` : ''))
+      + dlRow('Delivery inspection', inspection.label(c))
+      + dlRow('Spatial placement', placement.factsFor(c).map(f => f.label).join(' | ') || (c.placementWaiting ? 'Waiting at passage entrance for partner' : 'No selected relation'))
+      + dlRow('Building surface clearance', `${fmt(proximity.building(c).metres)} m · ${proximity.building(c).name} (threshold ${cfg.clearanceM} m)`)
+      + dlRow('Proximity', [...proximity.conditions.values()].filter(s => s.droneId === c.id).map(s => `${s.cause}: ${s.action} · ${s.message}`).join(' | ') || 'Clear')
       + dlRow('Mission', missionLabel(c)) + dlRow('Current leg', attentionText(c)) + dlRow('Altitude', `${Math.round(c.pos.y * SCALE_M)} m`)
       + dlRow('ETA', etaText(c)) + dlRow('Battery', 'Unavailable · no model'));
   } else if (tab === 'location') {
@@ -2255,6 +2292,9 @@ $('q-here').addEventListener('click', () => {
 modeSwitch();
 
 function resetWorld(silent = false) {
+  proximity.reset();
+  placement.reset();
+  inspection.reset();
   ops.reset(); ui.shownDrone = null; ui.opsNote = false; evKey = ''; evSeen = new Set();
   [...S.orders].forEach(removeOrder);
   [...S.couriers].forEach(removeCourier);
@@ -2332,6 +2372,13 @@ function resizeMap() { // the canvas fills the page; size comes from the map con
 new ResizeObserver(resizeMap).observe(mapEl);
 addEventListener('resize', resizeMap);
 
+const proximity = installProximity({S, cfg, world, scale: SCALE_M, ops, scene, segCheck, planRoute, destOf, toast, selectDrone, prioCmp, extraState: () => ({inspection: inspection.snapshot(), placements: placement.snapshot()}), onJointDeadlock: (group) => {
+  const mover = group.filter(c => c.task?.kind !== 'inspection').find(c => sepEvade(c));
+  if (mover) { mover.parkUntil = S.time + 8; mover.parkBy = group.filter(c => c !== mover).map(c => c.id); opsUpdate('JOINT_GUARD_RECOVERY', 'Traffic recovery planned', `${mover.id} will move to a checked waiting point; motion is validated next step.`, mover.id); return true; }
+  const priority = group.find(c => c.task?.kind === 'inspection') ?? group[0]; priority.boost = S.time + 8; return true;
+}});
+const placement = installPlacements({S, cfg, world, ops, planRoute, segCheck, resetWorld, setStage, selectDrone, toast, camera, controls, setAdvanced, updatePanels});
+const inspection = installInspection({S, cfg, world, ops, scene, planRoute, segCheck, scale: SCALE_M, toast, resetWorld, setStage, selectDrone, setAdvanced, camera, controls, updatePanels});
 controls.update(); controls.saveState();
 finishBlocks(); regenAirspace();
 resetWorld(true);
@@ -2351,4 +2398,4 @@ function frame() {
 updatePanels(true);
 frame();
 // exposed for debugging / automated checks
-window.__sim = { sepEvade, sepPlan, posAfter, prioCmp, scene, LAND, regenAirspace, segCheck, inPermitted, volumesAt, S, act, step, world, cfg, planRoute, planMission, getLocation, getAgentsAt, getAgentsInBox, setStage, previews, selectVolume, resetWorld, ui, ops, selectDrone, clearDroneSelection, renderEvents, camera, renderer, controls };
+window.__sim = { inspection, placement, proximity, sepEvade, sepPlan, posAfter, prioCmp, scene, LAND, regenAirspace, segCheck, inPermitted, volumesAt, S, act, step, world, cfg, planRoute, planMission, getLocation, getAgentsAt, getAgentsInBox, setStage, previews, selectVolume, resetWorld, ui, ops, selectDrone, clearDroneSelection, renderEvents, camera, renderer, controls };

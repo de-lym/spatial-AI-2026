@@ -1,0 +1,123 @@
+{
+  "repository": "https://github.com/de-lym/spatial-AI-2026",
+  "branch": "claude/semantic-model-delivery-system",
+  "commit": "f7bdcf0ad371ed5e9c2a9248f539ceefa7610b04",
+  "date": "2026-10-29",
+  "sourceFiles": [
+    {
+      "path": "README.md",
+      "originalSHA256": "80e3b7f08c7b6a69f475086de93e21e6c5837486ce456d38489a3138ee4c66f1",
+      "packageSHA256": "2174ae1bfc7244639788b961407d5e38aacd2b7e05de400138111f45edcea783",
+      "status": "modified"
+    },
+    {
+      "path": "docs/airspace-simulation-v3.md",
+      "originalSHA256": "13368b75793e58328fd140ae1c6f2bc0e58768adde94a7dd957fb575877c806f",
+      "packageSHA256": "13368b75793e58328fd140ae1c6f2bc0e58768adde94a7dd957fb575877c806f",
+      "status": "unchanged"
+    },
+    {
+      "path": "docs/airspace-simulation.md",
+      "originalSHA256": "3efde823586ef95abb1db1edf95f9c234319798216f06306571a026b7c35dd0c",
+      "packageSHA256": "3efde823586ef95abb1db1edf95f9c234319798216f06306571a026b7c35dd0c",
+      "status": "unchanged"
+    },
+    {
+      "path": "docs/drone-location-simulation.md",
+      "originalSHA256": "3d831363749ee4d6f9c7b47d16371422d393f87b95234ad7caf14cf6129ef4d1",
+      "packageSHA256": "3d831363749ee4d6f9c7b47d16371422d393f87b95234ad7caf14cf6129ef4d1",
+      "status": "unchanged"
+    },
+    {
+      "path": "docs/screenshot-airspace.png",
+      "originalSHA256": "83cd45008c746e926755a61e7b3584708a8decd3c6ead0860821d758757a10bc",
+      "packageSHA256": "83cd45008c746e926755a61e7b3584708a8decd3c6ead0860821d758757a10bc",
+      "status": "unchanged"
+    },
+    {
+      "path": "docs/screenshot-drone-location.png",
+      "originalSHA256": "93bd573947d54481b52979baf0c694a83c2583f9dc0552e29c0d72996add0e9a",
+      "packageSHA256": "93bd573947d54481b52979baf0c694a83c2583f9dc0552e29c0d72996add0e9a",
+      "status": "unchanged"
+    },
+    {
+      "path": "docs/screenshot-v3-landuse.png",
+      "originalSHA256": "7768b2e18cd2ae94c4c25b6540db3a524d528ac5ccd9abbf04d2ca74c3604b79",
+      "packageSHA256": "7768b2e18cd2ae94c4c25b6540db3a524d528ac5ccd9abbf04d2ca74c3604b79",
+      "status": "unchanged"
+    },
+    {
+      "path": "docs/screenshot-v3-live.png",
+      "originalSHA256": "589a9db714c02030c389f7b11b45e6a18ebbfa06be24bde4e1eb21f555246c09",
+      "packageSHA256": "589a9db714c02030c389f7b11b45e6a18ebbfa06be24bde4e1eb21f555246c09",
+      "status": "unchanged"
+    },
+    {
+      "path": "index.html",
+      "originalSHA256": "d6ed6684a4383a75c32fcb177fcf3317b80b96d8b49c43311e85574085c65b3d",
+      "packageSHA256": "7e556b523ccf92c87ab2055537bd5967ad9adb9da0eb7262297b6f02e1fcee25",
+      "status": "modified"
+    },
+    {
+      "path": "main.js",
+      "originalSHA256": "138eaefe8f1ea8ea8cb15308262f6e1f4a5cea1cd28e30fcf3da30854273be78",
+      "packageSHA256": "84befe51a019ef0106b7f4e80cc6cd9f97861b8176910bdcb3c0e7ead332107d",
+      "status": "modified"
+    },
+    {
+      "path": "ops-events.js",
+      "originalSHA256": "8cc59f108aed814b78a58168852dfea714c78c1025197e18934805ced6abe085",
+      "packageSHA256": "8cc59f108aed814b78a58168852dfea714c78c1025197e18934805ced6abe085",
+      "status": "unchanged"
+    },
+    {
+      "path": "spatial.js",
+      "originalSHA256": "3a78946e3e57c3d4dfc53bc594302e07892c74bd9e64af15eb5a1f27cbbf59a5",
+      "packageSHA256": "3a78946e3e57c3d4dfc53bc594302e07892c74bd9e64af15eb5a1f27cbbf59a5",
+      "status": "unchanged"
+    },
+    {
+      "path": "style.css",
+      "originalSHA256": "a6615672f2c78e38c77ec4e2fed45654a86c59026c32fe0627ecda9a838f7e95",
+      "packageSHA256": "542b3285e5ed6875fa3e3b6ad71e6fd5cb951c1b2b444a276e99e3fc7b169418",
+      "status": "modified"
+    },
+    {
+      "path": "vendor/OrbitControls.js",
+      "originalSHA256": "3d79d07ecb686b4e5d93232eedab255331c1beef711e13164eaa1f68655a5f2b",
+      "packageSHA256": "3d79d07ecb686b4e5d93232eedab255331c1beef711e13164eaa1f68655a5f2b",
+      "status": "unchanged"
+    },
+    {
+      "path": "vendor/RoundedBoxGeometry.js",
+      "originalSHA256": "c5feab96123858ed8823c889b238dc8734adab7e760e3cfd21e7f3f2f3e348e3",
+      "packageSHA256": "c5feab96123858ed8823c889b238dc8734adab7e760e3cfd21e7f3f2f3e348e3",
+      "status": "unchanged"
+    },
+    {
+      "path": "vendor/THREE_LICENSE",
+      "originalSHA256": "8b378ebe60e2fe500158cb0ac71cb5e8b7d92953c2abcc63a0eb90499653b5bc",
+      "packageSHA256": "8b378ebe60e2fe500158cb0ac71cb5e8b7d92953c2abcc63a0eb90499653b5bc",
+      "status": "unchanged"
+    },
+    {
+      "path": "vendor/three.core.js",
+      "originalSHA256": "9edde002b066a9a05676a6127f67735b62baf399bdea529f2f7e31657da769e6",
+      "packageSHA256": "9edde002b066a9a05676a6127f67735b62baf399bdea529f2f7e31657da769e6",
+      "status": "unchanged"
+    },
+    {
+      "path": "vendor/three.module.js",
+      "originalSHA256": "9052042d676cb0fdc1ddfefe193053f34b7ac0513a616fdac4535d49987812ea",
+      "packageSHA256": "9052042d676cb0fdc1ddfefe193053f34b7ac0513a616fdac4535d49987812ea",
+      "status": "unchanged"
+    }
+  ],
+  "changedSourceFiles": [
+    "README.md",
+    "index.html",
+    "main.js",
+    "style.css"
+  ],
+  "note": "Source was downloaded read-only; no commit, push, or PR. All implementation is in this separate package."
+}

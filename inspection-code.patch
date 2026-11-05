@@ -1,0 +1,601 @@
+--- a/main.js
++++ b/main.js
+@@ -9,6 +9,8 @@
+ import { createEventStore } from './ops-events.js';
+ import { installProximity } from './proximity-integration.js';
+ import { buildPlacementArchitecture, installPlacements } from './placement-integration.js';
++import { installInspection } from './inspection-integration.js';
++import { waypointSpeed } from './inspection.js';
+ 
+ /* ====================================================================
+    AIRSPACE — a location-aware drone delivery sandbox (synthetic, classroom only)
+@@ -717,13 +719,14 @@
+ const remainingU = (c) => routeLength(c.pos, pts3(c));
+ function remainingTime(c) { // route length ÷ speed, with the slower vertical legs counted
+   let t = 0, p = c.pos;
+-  for (const q of pts3(c)) { const vert = Math.hypot(q.x - p.x, q.z - p.z) < 0.01; t += dist3(p, q) / (DRONE_SPEED * (vert ? VERT_SPEED : 1)); p = q; }
++  for (const q of pts3(c)) { const vert = Math.hypot(q.x - p.x, q.z - p.z) < 0.01; t += dist3(p, q) / waypointSpeed(p, q, DRONE_SPEED, VERT_SPEED); p = q; }
+   return t;
+ }
+ /** Stage 2 + 3 at dispatch time: candidates are generated and validated BEFORE the drone moves; it flies the smoothed winner. */
+ function startTask(c, kind, order) {
++  if (kind === 'toCustomer' && !inspection.isCleared(c, order)) kind = 'inspection';
+   const dest = kind === 'toRestaurant' ? order.restaurant.acc : order.customer.acc;
+-  const plan = placement.decoratePlan(c, planMission(c.pos, dest), dest);
++  const plan = kind === 'inspection' ? inspection.build(c, order) : placement.decoratePlan(c, planMission(c.pos, dest), dest);
+   c.placementTour = plan.placementTour ?? null; c.placementWaiting = false;
+   c.task = { kind, order, route: { id: 'RT-' + String(S.nextRoute++).padStart(3, '0'), pts: plan.ok ? plan.best.pts : [], plan, idx: 0, rerouted: false, travelled: 0 }, start: c.pos.clone() };
+   c.hold = null; c.rerouteWhy = ''; c.dwell = 0; c.launchedAt = S.time; c.sepWait = 0;
+@@ -767,7 +770,8 @@
+ /** try to find a permitted route from the current position; returns true on success */
+ function replan(c, bad) {
+   const dest = destOf(c.task).acc;
+-  const plan = planRoute(c.pos, dest);
++  const inspectionMission = c.task.kind === 'inspection' ? inspection.build(c, c.task.order) : null;
++  const plan = inspectionMission ? (inspectionMission.ok ? { ok:true, ...inspectionMission.best, pts:inspectionMission.best.pts, mission:inspectionMission } : inspectionMission) : planRoute(c.pos, dest);
+   if (plan.ok) {
+     const R = c.task.route;
+     R.pts = plan.pts; R.idx = 0; R.rerouted = true; R.plan = plan.mission;
+@@ -804,7 +808,7 @@
+   }
+ }
+ function flyStep(c, dt) {
+-  if (c.hold) return false;
++  if (c.hold || !inspection.motionAllowed(c)) return false;
+   const task = c.task, R = task.route;
+   // drone-to-drone separation: a drone that must yield moves at a fraction of its speed, or not at all (WAITING_FOR_CLEARANCE)
+   const sf = c.sepFactor ?? 1;
+@@ -813,7 +817,7 @@
+   let t = dt * sf, moved = 0;
+   while (t > 1e-9 && R.idx < R.pts.length) {
+     const w = R.pts[R.idx], d = dist3(c.pos, w), vert = Math.hypot(w.x - c.pos.x, w.z - c.pos.z) < 0.01;
+-    const v = DRONE_SPEED * (vert ? VERT_SPEED : 1), need = d / v;
++    const v = waypointSpeed(c.pos, w, DRONE_SPEED, VERT_SPEED), need = d / v;
+     if (Math.hypot(w.x - c.pos.x, w.z - c.pos.z) > 0.01) c.heading = Math.atan2(w.x - c.pos.x, w.z - c.pos.z);
+     if (need <= t) { c.pos.set(w.x, w.y, w.z); t -= need; moved += d; R.idx++; if(w.phase === 'placement_wait') { t = 0; break; } }
+     else { const k = (v * t) / d; c.pos.x += (w.x - c.pos.x) * k; c.pos.y += (w.y - c.pos.y) * k; c.pos.z += (w.z - c.pos.z) * k; moved += v * t; t = 0; }
+@@ -837,9 +841,15 @@
+     const arrived = flyStep(c, dt);
+     if (arrived) {
+       const o = c.task.order;
++      if (c.task.kind === 'inspection') {
++        if (inspection.review(c)) { c.task = null; startTask(c, 'toCustomer', o); }
++        updateStatus(c); return;
++      }
++      if (c.task.kind === 'toCustomer' && !inspection.canDeliver(c)) { updateStatus(c); return; }
+       if (c.task.kind === 'toRestaurant') { log(`${c.name} landed at ${o.restaurant.stationId} (${o.restaurant.name})`); opsUpdate('LANDED', 'Landed at pickup', `${dispId(c.id)} · ${o.restaurant.stationId} (${o.restaurant.name})`, c.id, o.id); c.dwell = 0.8; c.dwellKind = 'DOCK'; }
+       else {
+         o.deliveredAt = S.time; setStatus(o, 'delivered');
++        inspection.onDelivered(c, o);
+         c.carry.splice(c.carry.indexOf(o), 1);
+         S.delivered.push(o);
+         o.goneAt = S.time + 5;
+@@ -870,11 +880,11 @@
+ /** where drone c will be t seconds from now if it keeps its route at speed factor f */
+ function posAfter(c, t, f) {
+   const p = { x: c.pos.x, y: c.pos.y, z: c.pos.z };
+-  if (!c.task || c.hold || c.placementWaiting || f <= 0) return p;
++  if (!c.task || c.hold || c.placementWaiting || c.inspectionLandingBlocked || f <= 0) return p;
+   const pts = c.task.route.pts;
+   let rem = t * f;
+   for (let i = c.task.route.idx; i < pts.length && rem > 1e-9; i++) {
+-    const w = pts[i], d = dist3(p, w), vert = Math.hypot(w.x - p.x, w.z - p.z) < 0.01, v = DRONE_SPEED * (vert ? VERT_SPEED : 1), need = d / v;
++    const w = pts[i], d = dist3(p, w), vert = Math.hypot(w.x - p.x, w.z - p.z) < 0.01, v = waypointSpeed(p, w, DRONE_SPEED, VERT_SPEED), need = d / v;
+     if (need <= rem) { p.x = w.x; p.y = w.y; p.z = w.z; rem -= need; }
+     else { const k = (v * rem) / d; p.x += (w.x - p.x) * k; p.y += (w.y - p.y) * k; p.z += (w.z - p.z) * k; rem = 0; }
+   }
+@@ -935,7 +945,7 @@
+       }
+       let by = best.f < 1 ? higher.filter((e) => minApproach(T(c, 1), T(e, dec.get(e.id))) < su).map((e) => e.id) : higher.filter((e) => minApproach(T(c, 1), T(e, dec.get(e.id))) < su && minApproach(T(c, best.f), T(e, dec.get(e.id))) < su).map((e) => e.id);
+       // landing on an occupied pad: wait in the air until the drone on it has left
+-      if (c.task && best.f > 0 && c.pos.y > 0.3) {
++      if (c.task && c.task.kind !== 'inspection' && best.f > 0 && c.pos.y > 0.3) {
+         const dest = destOf(c.task).acc, occ = S.couriers.find((e) => e !== c && e.pos.y < 0.3 && Math.hypot(e.pos.x - dest.x, e.pos.z - dest.z) < 2.5);
+         if (occ && Math.hypot(c.pos.x - dest.x, c.pos.z - dest.z) < 10) { best = { f: 0 }; by = [occ.id]; }
+       }
+@@ -1031,7 +1041,7 @@
+   }
+ }
+ const sepLabel = (c) => ({ clear: 'Clear', yielding: 'Yielding', waiting: 'Waiting', rerouting: 'Rerouting' }[c.sep?.state ?? 'clear']);
+-const statusWord = (c) => (c.hold ? 'HOVER' : c.sep?.state === 'waiting' ? 'WAITING_FOR_CLEARANCE' : c.status);
++const statusWord = (c) => (c.hold ? 'HOVER' : c.task?.kind === 'inspection' ? (c.inspection?.status === 'waiting' ? 'CHECKS_PENDING' : 'INSPECTING') : c.sep?.state === 'waiting' ? 'WAITING_FOR_CLEARANCE' : c.status);
+ 
+ // ---------- order model ----------------------------------------------
+ const unassigned = () => S.orders.filter((o) => ['pending', 'preparing', 'ready'].includes(o.status));
+@@ -1276,15 +1286,18 @@
+   // restaurants: preparation clocks run for orders being prepared (Rule 4)
+   for (const o of S.orders) if (o.status === 'preparing' && o.prepRemaining > 0) o.prepRemaining = Math.max(0, o.prepRemaining - dt);
+ 
++  inspection.prepare();
+   for (const c of S.couriers) if (c.task) preflight(c, dt);
+   proximity.prepare(dt);
+   placement.beforePlan();
+   sepPlan(dt);
+   placement.gate();
++  inspection.gate();
+   proximity.guard(dt);
+   for (const c of S.couriers) droneStep(c, dt);
+   sepTrack();
+   placement.afterMove();
++  inspection.afterMove();
+   if ((S.timers.sense -= dt) <= 0) { // nearest-obstacle readout (robot panel)
+     S.timers.sense = 0.2;
+     for (const c of S.couriers) c.nearest = nearestObstacle(c.pos);
+@@ -1327,6 +1340,7 @@
+     ground_block: { block_id: tile.id, name: tile.name, land_use: LAND[tile.landUse].label, risk_cost: tile.risk },
+     nearby_landmark: lm.name,
+     status: c.hold ? 'HOVER (NO_VALID_ROUTE)' : statusWord(c),
++    inspection: c.inspection ? {...c.inspection} : null,
+     placements: placement.factsFor(c),
+     proximity: [...proximity.conditions.values()].filter(s => s.droneId === c.id),
+     separation: { state: sepLabel(c), waiting_for: c.sep?.by ?? [] },
+@@ -1899,7 +1913,7 @@
+ const selectedDrone = () => (S.selected?.type === 'courier' ? S.selected : null);
+ const atHub = (c) => !c.task && c.pos.y < 0.3 && !!S.homes[c.id] && Math.hypot(c.pos.x - S.homes[c.id].x, c.pos.z - S.homes[c.id].z) < 1.5;
+ const missionLabel = (c) => { const o = c.task?.order ?? c.orders[0] ?? c.carry[0] ?? c.lastOrder; return o ? `${o.restaurant.stationId} → ${o.customer.stationId}` : 'No task'; };
+-const flightState = (c) => (c.hold ? 'NO_VALID_ROUTE' : c.sep?.state === 'waiting' ? 'WAITING_FOR_CLEARANCE' : c.status);
++const flightState = (c) => (c.hold ? 'NO_VALID_ROUTE' : c.task?.kind === 'inspection' ? (c.inspection?.status === 'waiting' ? 'CHECKS_PENDING' : 'INSPECTING') : c.sep?.state === 'waiting' ? 'WAITING_FOR_CLEARANCE' : c.status);
+ const aliases = (ids) => ids.map(dispId).join(', ');
+ function etaText(c) { // seconds left on the current leg; never Infinity / NaN
+   if (!c.task) return '—';
+@@ -1908,6 +1922,7 @@
+   return Number.isFinite(t) ? `≈ ${Math.ceil(t)} s` : '—';
+ }
+ function attentionText(c) {
++  if (c.task?.kind === 'inspection') return `${c.inspection?.status ?? 'Inspection'} · ${Math.round((c.inspection?.progress ?? 0)*100)}% observation`;
+   if (c.hold) return 'Holding · route blocked';
+   if (c.sep?.state === 'waiting') return `Waiting for ${aliases(c.sep.by) || 'another drone'}`;
+   if (c.sep?.state === 'yielding') return `Giving way to ${aliases(c.sep.by) || 'another drone'}`;
+@@ -2008,8 +2023,10 @@
+   document.querySelectorAll('[data-pane]').forEach((p) => { p.hidden = p.dataset.pane !== tab; });
+   if (tab === 'flight') {
+     const hv = humanView(c);
+-    setHTML($('insp-human'), `<p><b>${esc(hv.headline)}</b></p>` + hv.lines.slice(0, 3).map((l) => `<p>${esc(l)}</p>`).join(''));
++    if (c.task?.kind === 'inspection') setHTML($('insp-human'), `<p><b>${esc(c.inspection?.status === 'waiting' ? 'Observation complete — checks pending' : 'Pre-delivery inspection')}</b></p><p>${esc(inspection.label(c))}</p>` + (c.inspection?.checks ?? []).map(ch => `<p>${ch.pass ? '✓' : '…'} ${esc(ch.label)}${ch.detail ? ': '+esc(ch.detail) : ''}</p>`).join(''));
++    else setHTML($('insp-human'), `<p><b>${esc(hv.headline)}</b></p>` + hv.lines.slice(0, 3).map((l) => `<p>${esc(l)}</p>`).join(''));
+     setHTML($('insp-dl'), dlRow('Flight state', flightState(c) + (c.hold ? ` · ${c.hold.reason}` : '')) + dlRow('Separation', sepLabel(c) + (c.sep?.by?.length ? ` · ${aliases(c.sep.by)}` : ''))
++      + dlRow('Delivery inspection', inspection.label(c))
+       + dlRow('Spatial placement', placement.factsFor(c).map(f => f.label).join(' | ') || (c.placementWaiting ? 'Waiting at passage entrance for partner' : 'No selected relation'))
+       + dlRow('Building surface clearance', `${fmt(proximity.building(c).metres)} m · ${proximity.building(c).name} (threshold ${cfg.clearanceM} m)`)
+       + dlRow('Proximity', [...proximity.conditions.values()].filter(s => s.droneId === c.id).map(s => `${s.cause}: ${s.action} · ${s.message}`).join(' | ') || 'Clear')
+@@ -2277,6 +2294,7 @@
+ function resetWorld(silent = false) {
+   proximity.reset();
+   placement.reset();
++  inspection.reset();
+   ops.reset(); ui.shownDrone = null; ui.opsNote = false; evKey = ''; evSeen = new Set();
+   [...S.orders].forEach(removeOrder);
+   [...S.couriers].forEach(removeCourier);
+@@ -2354,8 +2372,13 @@
+ new ResizeObserver(resizeMap).observe(mapEl);
+ addEventListener('resize', resizeMap);
+ 
+-const proximity = installProximity({S, cfg, world, scale: SCALE_M, ops, scene, segCheck, planRoute, destOf, toast, selectDrone, prioCmp});
++const proximity = installProximity({S, cfg, world, scale: SCALE_M, ops, scene, segCheck, planRoute, destOf, toast, selectDrone, prioCmp, extraState: () => ({inspection: inspection.snapshot(), placements: placement.snapshot()}), onJointDeadlock: (group) => {
++  const mover = group.filter(c => c.task?.kind !== 'inspection').find(c => sepEvade(c));
++  if (mover) { mover.parkUntil = S.time + 8; mover.parkBy = group.filter(c => c !== mover).map(c => c.id); opsUpdate('JOINT_GUARD_RECOVERY', 'Traffic recovery planned', `${mover.id} will move to a checked waiting point; motion is validated next step.`, mover.id); return true; }
++  const priority = group.find(c => c.task?.kind === 'inspection') ?? group[0]; priority.boost = S.time + 8; return true;
++}});
+ const placement = installPlacements({S, cfg, world, ops, planRoute, segCheck, resetWorld, setStage, selectDrone, toast, camera, controls, setAdvanced, updatePanels});
++const inspection = installInspection({S, cfg, world, ops, scene, planRoute, segCheck, scale: SCALE_M, toast, resetWorld, setStage, selectDrone, setAdvanced, camera, controls, updatePanels});
+ controls.update(); controls.saveState();
+ finishBlocks(); regenAirspace();
+ resetWorld(true);
+@@ -2375,4 +2398,4 @@
+ updatePanels(true);
+ frame();
+ // exposed for debugging / automated checks
+-window.__sim = { placement, proximity, sepEvade, sepPlan, posAfter, prioCmp, scene, LAND, regenAirspace, segCheck, inPermitted, volumesAt, S, act, step, world, cfg, planRoute, planMission, getLocation, getAgentsAt, getAgentsInBox, setStage, previews, selectVolume, resetWorld, ui, ops, selectDrone, clearDroneSelection, renderEvents, camera, renderer, controls };
++window.__sim = { inspection, placement, proximity, sepEvade, sepPlan, posAfter, prioCmp, scene, LAND, regenAirspace, segCheck, inPermitted, volumesAt, S, act, step, world, cfg, planRoute, planMission, getLocation, getAgentsAt, getAgentsInBox, setStage, previews, selectVolume, resetWorld, ui, ops, selectDrone, clearDroneSelection, renderEvents, camera, renderer, controls };
+--- a/index.html
++++ b/index.html
+@@ -20,6 +20,7 @@
+       <option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option>
+     </select>
+     <button id="btn-reset">Reset</button>
++    <button id="btn-inspection">Inspection</button>
+     <button id="btn-placements">Placements</button>
+     <button id="btn-advanced" aria-expanded="false" aria-controls="advanced">Advanced</button>
+   </div>
+@@ -196,6 +197,16 @@
+       <summary>Land-use rules <small>(change one → airspace and costs regenerate)</small></summary>
+       <div id="lu-rules"></div>
+       <div class="dim small">Simulation policies, not legal rules. The floor is the lowest permitted altitude above a block of that use; risk (0–10) is the soft cost per metre flown over it. Permission is a hard constraint, risk is only a preference.</div>
++    </details>
++    <details class="sec" id="sec-inspection" open>
++      <summary>Pre-delivery inspection · Orbit &amp; check</summary>
++      <p class="small" id="inspection-summary">No inspection yet.</p>
++      <div class="scen"><button id="inspection-start">Start inspection demo</button><button id="inspection-view">View inspection</button><button id="inspection-reserve">Test: reserve delivery pad</button></div>
++      <div id="inspection-list" aria-label="Delivery inspections"></div>
++      <div class="prm"><label>Orbit radius (m) <span id="inspection-radius-v"></span><input type="range" id="inspection-radius" min="15" max="40" step="5"></label></div>
++      <div class="prm"><label>Preferred orbit altitude (m) <span id="inspection-altitude-v"></span><input type="range" id="inspection-altitude" min="60" max="110" step="10"></label></div>
++      <div class="prm"><label>Orbit speed (m/s) <span id="inspection-speed-v"></span><input type="range" id="inspection-speed" min="2" max="8" step="1"></label></div>
++      <p class="dim small">Settings apply to the next circuit. Altitude is selected within the current ceiling to find a valid complete circle. Progress follows actual flight. 100% observation is not landing approval: cargo, approach route and pad availability must also pass. All observations are synthetic model checks, not real camera recognition.</p>
+     </details>
+     <details class="sec" id="sec-placement" open>
+       <summary>Spatial placements · Skybridge tour</summary>
+@@ -265,7 +276,14 @@
+ <div id="toast"></div>
+ <div class="screenreader" role="status" id="selection-announcement"></div>
+ 
++<div id="inspection-live" class="inspection-live" hidden>
++  <strong id="inspection-live-title"></strong><progress id="inspection-progress" max="100" value="0" aria-label="Observation circuit progress"></progress><span id="inspection-live-text"></span>
++</div>
+ <div id="placement-live" class="placement-live" role="status" hidden></div>
++<dialog id="dlg-inspection" aria-labelledby="dlg-inspection-title">
++  <h2 id="dlg-inspection-title">Start a new inspection demo?</h2><p>This resets orders, incidents, pigeons and placement history. Export the current session first if needed.</p>
++  <div class="scen"><button id="inspection-cancel">Cancel</button><button id="inspection-confirm">Reset and start demo</button></div>
++</dialog>
+ <dialog id="dlg-placement" aria-labelledby="dlg-placement-title">
+   <h2 id="dlg-placement-title">Start a new placement tour?</h2>
+   <p>This resets current orders, incidents and pigeons. Export your session first if needed. The original delivery simulation continues after the passage.</p>
+--- a/style.css
++++ b/style.css
+@@ -218,3 +218,9 @@
+ .placement-live {position:fixed;z-index:12;top:140px;left:340px;right:384px;padding:12px 16px;background:rgba(255,255,255,.95);border:1px solid #d9d3cd;border-radius:12px;font-size:14px;line-height:22px;white-space:pre-line;pointer-events:none;overflow-wrap:anywhere;}
+ .placement-live[hidden] {display:none;}
+ @media(max-width:1279px){.placement-live{left:320px;right:360px;}}
++
++.inspection-live{position:fixed;z-index:13;top:140px;left:340px;right:384px;padding:12px 16px;background:rgba(255,255,255,.96);border:1px solid #d9d3cd;border-radius:12px;font-size:14px;line-height:22px;pointer-events:none;overflow-wrap:anywhere;display:grid;gap:6px;}
++.inspection-live[hidden]{display:none;}
++.inspection-live progress{width:100%;height:8px;accent-color:#1f4fd1;}
++#inspection-list{max-height:220px;overflow:auto;}
++@media(max-width:1279px){.inspection-live{left:320px;right:360px;}}
+--- a/proximity.js
++++ b/proximity.js
+@@ -1,3 +1,4 @@
++import {waypointSpeed} from './inspection.js';
+ /** Pure proximity geometry. Scene axes: x east / y up / z south; distances in scene units. */
+ export const proximityConfig = {
+   birdClearanceM: 18, birdLookS: 2, birdUncertaintyM: 4,
+@@ -15,9 +16,9 @@
+ /** Exact piecewise route prediction, including waypoint turns and vertical speed. */
+ export function trajectory(c, seconds, factor=1, speed=4, verticalFactor=.7) {
+   const out = [{t:0,p:{...c.pos}}]; let p={...c.pos}, t=0;
+-  if (c.task && !c.hold && !c.placementWaiting && factor>0) for (const w of c.task.route.pts.slice(c.task.route.idx)) {
++  if (c.task && !c.hold && !c.placementWaiting && !c.inspectionLandingBlocked && factor>0) for (const w of c.task.route.pts.slice(c.task.route.idx)) {
+     const d=distance(p,w); if (d<1e-9) continue;
+-    const v=speed*factor*(Math.hypot(w.x-p.x,w.z-p.z)<.01?verticalFactor:1);
++    const v=waypointSpeed(p,w,speed,verticalFactor)*factor;
+     const need=d/v, used=Math.min(need,seconds-t);
+     const q=mix(p,w,used/need); t+=used; out.push({t,p:q}); p=q;
+     if(t>=seconds-1e-9) break;
+--- a/proximity-integration.js
++++ b/proximity-integration.js
+@@ -2,7 +2,7 @@
+ import {proximityConfig as config,trajectory,pathCPA,birdPath,createBird,distance,unsafeApproach,boxSurfaceDistance} from './proximity.js';
+ 
+ /** Adapter uses the existing route planner, delivery state and operations store; no second simulation clock. */
+-export function installProximity({S,cfg,world,scale,ops,scene,segCheck,planRoute,destOf,toast,selectDrone,prioCmp}) {
++export function installProximity({S,cfg,world,scale,ops,scene,segCheck,planRoute,destOf,toast,selectDrone,prioCmp,extraState=()=>({}),onJointDeadlock=()=>false}) {
+   let birds=[], sequence=0, archive=[], dropped=0;
+   const conditions=new Map(), markers=new Map();
+   const key=(c,cause)=>`${c.id}:${cause}`;
+@@ -101,6 +101,7 @@
+         const loser=(a.sepFactor??1)<(b.sepFactor??1)?a:(b.sepFactor??1)<(a.sepFactor??1)?b:prioCmp(a,b)<=0?b:a;
+         const stop=(loser.sepFactor??1)>0?loser:loser===a?b:a;
+         if((stop.sepFactor??1)>0) {stop.sepFactor=0;changed=true;}
++        stop.sepBy=[...new Set([...(stop.sepBy??[]),stop===a?b.id:a.id])];
+         condition(stop,'DRONE',`Yield to ${stop===a?b.id:a.id}; joint motion guard.`,{targets:[stop===a?b.id:a.id]});
+       }
+       if(!changed)break;
+@@ -112,7 +113,14 @@
+       if(residual.length) condition(c,'PIGEON','No validated safe movement: bird may enter the hold position. Unresolved proximity; human review required.',{immediate:true,targets:residual.map(b=>b.id)});
+       if(segCheck(c.pos,c.pos)) condition(c,'BUILDING_OR_AIRSPACE','Current position violates clearance or permitted airspace. Cannot promise a safe hold.',{immediate:true});
+       for(const other of active) if(other!==c&&c.pos.y>=.3&&other.pos.y>=.3&&distance(c.pos,other.pos)<cfg.sepM/scale) condition(c,'DRONE','Separation already breached; do not teleport or force an unsafe manoeuvre.',{immediate:true,targets:[other.id]});
+-      if((c.sepFactor??1)===0&&c.task) c.sep={state:'waiting',by:c.sep?.by??[]};
++      if((c.sepFactor??1)===0&&c.task) c.sep={state:'waiting',by:[...new Set([...(c.sep?.by??[]),...(c.sepBy??[])])]};
++      c.jointWaitS=(c.sepFactor??1)===0&&c.task?(c.jointWaitS??0)+dt:0;
++    }
++    // A final guard stop can create a mutual wait not visible to the earlier planner.
++    // Plan a recovery only; every affected drone stays stopped until the next full validation step.
++    for(const c of active) if(c.jointWaitS>=5&&c.sep?.by?.length){
++      const group=[c,...c.sep.by.map(id=>active.find(d=>d.id===id)).filter(Boolean)];
++      if(group.every(d=>(d.sepFactor??1)===0)&&onJointDeadlock(group)){group.forEach(d=>{d.jointWaitS=0;d.sepFactor=0;});break;}
+     }
+     for(const [k,s] of conditions) if(S.time-s.lastSeen>=config.recoveryS) {
+       const c=S.couriers.find(c=>c.id===s.droneId);
+@@ -150,7 +158,7 @@
+     const nearest=world.obstacles.map(o=>({id:o.id,name:o.name,metres:boxSurfaceDistance(c.pos,o)*scale})).sort((a,b)=>a.metres-b.metres)[0];
+     return nearest??{id:null,name:'No buildings',metres:null};
+   }
+-  function snapshot() {return {schemaVersion:1,simulationOnly:true,simSeconds:S.time,config:{...config,separationM:cfg.sepM,buildingClearanceM:cfg.clearanceM},birds:birds.map(b=>({id:b.id,pos:{...b.pos},velocity:{...b.velocity}})),conditions:[...conditions.values()],audit:archive,droppedAuditEvents:dropped,operations:ops.state.events};}
++  function snapshot() {return {schemaVersion:2,simulationOnly:true,context:extraState(),simSeconds:S.time,config:{...config,separationM:cfg.sepM,buildingClearanceM:cfg.clearanceM},birds:birds.map(b=>({id:b.id,pos:{...b.pos},velocity:{...b.velocity}})),conditions:[...conditions.values()],audit:archive,droppedAuditEvents:dropped,operations:ops.state.events};}
+   function render() {
+     const el=document.getElementById('prox-summary');if(!el)return;
+     const states=[...conditions.values()];el.textContent=`${birds.length} pigeon(s) · ${states.length} active proximity condition(s) · ${states.filter(s=>s.action==='HUMAN_REQUIRED').length} human review(s)`;
+--- /dev/null
++++ b/inspection.js
+@@ -0,0 +1,52 @@
++/** Delivery inspection is a classroom observation simulation, not a real sensor or safety certificate. */
++export const inspectionConfig={radiusM:25,preferredAltitudeM:80,speedMps:5,sectors:48,retryS:1,escalateS:8};
++const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z);
++export function waypointSpeed(a,b,base=4,verticalFactor=.7){
++  const speed=Number.isFinite(b.speedU)&&b.speedU>0?Math.min(base,b.speedU):base;
++  return speed*(Math.hypot(b.x-a.x,b.z-a.z)<.01?verticalFactor:1);
++}
++export function buildInspectionMission(from,dest,{cfg,scale=5,planRoute,segCheck,config=inspectionConfig,bounds=Infinity}){
++  const r=config.radiusM/scale,n=config.sectors;
++  const limit=bounds-r-.1,centerXZ={x:Math.max(-limit,Math.min(limit,dest.x)),z:Math.max(-limit,Math.min(limit,dest.z))};
++  const startAngle=Math.atan2(from.z-centerXZ.z,from.x-centerXZ.x);
++  if(!(r>0&&n>=8&&config.speedMps>0))return {ok:false,reason:'Invalid inspection configuration.'};
++  const levels=[...new Set([config.preferredAltitudeM,config.preferredAltitudeM+20,cfg.maxAltM-5].filter(m=>m>0&&m<=cfg.maxAltM))];
++  for(const altitudeM of levels){
++    const center={x:centerXZ.x,y:altitudeM/scale,z:centerXZ.z};
++    const circle=Array.from({length:n+1},(_,i)=>({x:center.x+r*Math.cos(startAngle+i*2*Math.PI/n),y:center.y,z:center.z+r*Math.sin(startAngle+i*2*Math.PI/n)}));
++    if(circle.slice(1).some((p,i)=>segCheck(circle[i],p)))continue;
++    const approach=planRoute(from,circle[0],{base:altitudeM}),landing=planRoute(circle[n],dest);
++    if(!approach.ok||!landing.ok)continue;
++    const pts=approach.pts.map(p=>({...p,phase:'inspection_approach'}));
++    const startIdx=pts.length;
++    const speeds=circle.slice(1).map(p=>({...p,phase:'inspection_orbit',speedU:config.speedMps/scale}));
++    pts.push(...speeds);
++    const lengths=[0];for(let i=1;i<circle.length;i++)lengths.push(lengths.at(-1)+dist(circle[i-1],circle[i]));
++    const orbit={center,radiusU:r,altitudeM,circle,startIdx,sectors:n,lengths,totalLength:lengths.at(-1),speedMps:config.speedMps};
++    const best={...approach.mission.best,id:'A',chosen:true,label:`Inspection orbit · ${altitudeM} m`,pts,len:approach.len+orbit.totalLength};
++    best.lenM=best.len*scale;
++    return {...approach.mission,ok:true,best,candidates:[best],orbit,to:{...circle[n]}};
++  }
++  return {ok:false,reason:'No complete inspection orbit and onward landing route fits the current obstacles, airspace and altitude limit.'};
++}
++/** Progress measures actual path coverage, not wall time. A hold never advances it. */
++export function orbitProgress(route,pos){
++  const o=route.plan?.orbit;if(!o)return 0;
++  const completed=Math.max(0,Math.min(o.sectors,route.idx-o.startIdx));
++  if(completed>=o.sectors)return 1;
++  if(route.idx<o.startIdx)return 0;
++  const segment=o.lengths[completed+1]-o.lengths[completed];
++  const partial=Math.max(0,Math.min(segment,dist(o.circle[completed],pos)));
++  return Math.max(0,Math.min(1,(o.lengths[completed]+partial)/o.totalLength));
++}
++export function deliveryChecks(c,drones,{reserved=false,routeOK=false,cargoMatches=false}={}){
++  const pad=c.task.order.customer.acc;
++  const occupant=drones.find(d=>d!==c&&d.pos.y<.3&&Math.hypot(d.pos.x-pad.x,d.pos.z-pad.z)<2.5);
++  const checks=[
++    {id:'orbit',label:'Observation circuit complete',pass:(c.inspection?.progress??0)>=1-1e-6},
++    {id:'cargo',label:'Assigned parcel aboard',pass:cargoMatches},
++    {id:'route',label:'Static approach route valid',pass:routeOK},
++    {id:'pad',label:'Delivery pad available',pass:!reserved&&!occupant,detail:reserved?'Pad reserved':occupant?`Occupied by ${occupant.id}`:''},
++  ];
++  return {passed:checks.every(c=>c.pass),checks};
++}
+--- /dev/null
++++ b/inspection-integration.js
+@@ -0,0 +1,149 @@
++import * as THREE from 'three';
++import {inspectionConfig as config,buildInspectionMission,orbitProgress,deliveryChecks} from './inspection.js';
++
++export function installInspection({S,cfg,world,ops,scene,planRoute,segCheck,scale,toast,resetWorld,setStage,selectDrone,setAdvanced,camera,controls,updatePanels}){
++  const state={records:new Map(),reservations:new Set(),history:[],serial:0,demo:false};
++  const visuals=new Map();
++  const record=(c,code,title,description,critical=false)=>{
++    const ev={code,category:critical?'critical':'updates',source:'inspection',droneId:c.id,orderId:c.inspection?.orderId??c.task?.order.id??null,occurredAtSimSeconds:S.time,title,description};
++    if(critical)ops.open(ev);else ops.update(ev);
++    state.history.push(ev);if(state.history.length>400)state.history.shift();
++  };
++  function info(c,order){
++    let s=state.records.get(order.id);
++    if(!s){s={orderId:order.id,droneId:c.id,padId:order.customer.stationId,status:'approaching',progress:0,checks:[],attempts:0,token:null,since:S.time,lastQuarter:0,message:'Approaching the observation circuit.'};state.records.set(order.id,s);}
++    c.inspection=s;return s;
++  }
++  const isCleared=(c,order)=>c.inspection?.orderId===order.id&&c.inspection.status==='cleared';
++  function build(c,order){
++    const s=info(c,order),plan=buildInspectionMission(c.pos,order.customer.acc,{cfg,scale,planRoute,segCheck,config,bounds:Math.min(world.bounds,Math.max(...world.volumes.map(v=>v.x1)),-Math.min(...world.volumes.map(v=>v.x0)),Math.max(...world.volumes.map(v=>v.z1)),-Math.min(...world.volumes.map(v=>v.z0)))});
++    if(plan.ok){
++      s.attempts++;s.token=`I-${order.id}-${++state.serial}`;s.status='approaching';s.progress=0;s.lastQuarter=0;s.checks=[];s.reviewAt=0;s.message='Approaching the observation circuit.';s.since=S.time;
++      plan.orbit.token=s.token;
++      record(c,'INSPECTION_PLANNED','Inspection route ready',`${c.id} · ${s.padId} · ${config.radiusM} m radius, ${plan.orbit.altitudeM} m altitude. Simulated observation, not real vision.`);
++      ops.resolve('INSPECTION_BLOCKED',c.id,S.time);makeVisual(c,plan.orbit,order.customer.acc);
++    }else{
++      if(s.status!=='blocked')record(c,'INSPECTION_UNAVAILABLE','Inspection cannot start',`${c.id} · ${plan.reason}`);
++      s.status='blocked';s.message=plan.reason;hideVisual(c.id);
++    }
++    return plan;
++  }
++  function prepare(){
++    for(const c of S.couriers){
++      c.inspectionLandingBlocked=false;
++      if(c.task?.kind==='inspection'&&c.inspection&&c.task.route.plan?.orbit?.token!==c.inspection.token&&!c.hold){
++        c.inspection.status='interrupted';c.inspection.message='Avoidance changed the observation route; the inspection must restart.';
++        record(c,'INSPECTION_INTERRUPTED','Inspection interrupted',`${c.id} · Rebuilding a complete circuit after a route change.`);
++        c.hold={reason:c.inspection.message,timer:0};
++      }
++      if(c.inspection?.status==='blocked'&&S.time-c.inspection.since>=config.escalateS)escalate(c,c.inspection.message);
++      if(c.task?.kind==='toCustomer'&&c.inspection&&['cleared','landing_wait'].includes(c.inspection.status)){
++        const availability=padAvailable(c);
++        if(!availability){
++          if(c.inspection.status!=='landing_wait'){c.inspection.status='landing_wait';c.inspection.waitSince=S.time;record(c,'INSPECTION_APPROACH_PAUSED','Approach paused','Delivery pad became unavailable after the check. Parcel remains aboard.');}
++          c.inspectionLandingBlocked=true;c.inspection.message='Approach paused: delivery pad unavailable.';
++          if(S.time-c.inspection.waitSince>=config.escalateS)escalate(c,c.inspection.message);
++        }else if(c.inspection.status==='landing_wait'){
++          c.inspection.status='cleared';c.inspection.message='Pad available again; approach may resume.';ops.resolve('INSPECTION_BLOCKED',c.id,S.time);record(c,'INSPECTION_APPROACH_RESUMED','Approach resumed',c.inspection.message);
++        }
++      }
++    }
++  }
++  function padAvailable(c){const pad=c.task.order.customer.acc;return !state.reservations.has(c.task.order.customer.stationId)&&!S.couriers.some(d=>d!==c&&d.pos.y<.3&&Math.hypot(d.pos.x-pad.x,d.pos.z-pad.z)<2.5);}
++  function escalate(c,message){
++    if(!ops.state.events.some(e=>e.code==='INSPECTION_BLOCKED'&&e.droneId===c.id&&e.category==='critical'&&e.resolvedAtSimSeconds==null))record(c,'INSPECTION_BLOCKED','Inspection needs human review',`${c.id} · ${message} No delivery has been confirmed.`,true);
++  }
++  function motionAllowed(c){
++    if(c.inspectionLandingBlocked)return false;
++    if(c.task?.kind==='inspection'&&c.task.route.plan?.orbit?.token!==c.inspection?.token)return false;
++    return true;
++  }
++  function gate(){for(const c of S.couriers)if(!motionAllowed(c))c.sepFactor=0;}
++  function review(c){
++    const s=c.inspection;if(!s)return false;
++    if(c.task.route.idx>=c.task.route.pts.length&&c.task.route.plan?.orbit?.token===s.token){s.progress=1;if(s.lastQuarter<4){s.lastQuarter=4;record(c,'INSPECTION_PROGRESS','Observation 100%',`${c.id} · Complete flight circuit; evaluating separate landing checks.`);}}
++    if(S.time<(s.reviewAt??0))return false;s.reviewAt=S.time+config.retryS;
++    const route=planRoute(c.pos,c.task.order.customer.acc);
++    const result=deliveryChecks(c,S.couriers,{reserved:state.reservations.has(s.padId),routeOK:route.ok,cargoMatches:c.carry.includes(c.task.order)});
++    s.checks=result.checks;
++    if(result.passed){
++      s.status='cleared';s.message='Circuit complete. Model checks passed; approach authorized in this simulation.';s.clearedAt=S.time;
++      record(c,'INSPECTION_PASSED','Model checks passed',`${c.id} · Observation complete; cargo, static approach and delivery pad checks passed. Proceeding to approach.`);
++      ops.resolve('INSPECTION_BLOCKED',c.id,S.time);hideVisual(c.id);render();return true;
++    }
++    const message=result.checks.filter(ch=>!ch.pass).map(ch=>ch.detail||ch.label).join('; ');
++    if(s.status!=='waiting'){s.waitSince=S.time;record(c,'INSPECTION_WAIT','Observation complete — checks pending',`${c.id} · ${message}. Parcel stays aboard.`);}
++    s.status='waiting';s.message=message;
++    if(S.time-(s.waitSince??S.time)>=config.escalateS)escalate(c,message);
++    render();return false;
++  }
++  function afterMove(){
++    for(const c of S.couriers){
++      if(c.task?.kind!=='inspection'||!c.inspection)continue;
++      const s=c.inspection,R=c.task.route;
++      if(R.plan?.orbit?.token!==s.token)continue;
++      const progress=orbitProgress(R,c.pos);s.progress=progress;
++      if(progress>0&&progress<1&&s.status==='approaching'&&!c.hold){s.status='scanning';s.message='Orbiting and collecting simulated observation coverage.';record(c,'INSPECTION_SCAN_START','Scanning delivery site',`${c.id} · ${s.padId} · Progress follows actual flight along the ring.`);}
++      const quarter=Math.floor(progress*4+1e-7);
++      if(quarter>s.lastQuarter){s.lastQuarter=quarter;record(c,'INSPECTION_PROGRESS',`Observation ${Math.round(progress*100)}%`,`${c.id} · Circuit coverage only. Landing approval is a separate model check.`);}
++      if(s.status==='scanning')s.message=(c.hold||(c.sepFactor??1)===0)?'Observation paused for clearance; coverage is not advancing.':'Orbiting and collecting simulated observation coverage.';
++      updateVisual(c,R.plan.orbit);
++    }
++    render();
++  }
++  function onDelivered(c,order){
++    if(!c.inspection||c.inspection.orderId!==order.id)return;
++    c.inspection.status='delivered';c.inspection.message='Parcel delivered after completed observation and model checks.';record(c,'INSPECTION_DROPOFF','Inspected delivery complete',`${c.id} · Order #${order.id} delivered at ${order.customer.stationId}.`);hideVisual(c.id);render();
++  }
++  function canDeliver(c){return c.inspection?.orderId===c.task?.order.id&&c.inspection.status==='cleared'&&padAvailable(c);}
++  function hideVisual(id){const v=visuals.get(id);if(v){scene.remove(v.group);v.group.traverse(x=>{x.geometry?.dispose();x.material?.dispose();});visuals.delete(id);}}
++  function makeVisual(c,o,pad){
++    hideVisual(c.id);const group=new THREE.Group();scene.add(group);
++    const points=o.circle.map(p=>new THREE.Vector3(p.x,p.y+.4,p.z));
++    const base=new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),new THREE.LineBasicMaterial({color:0x1f4fd1,transparent:true,opacity:.25}));group.add(base);
++    const arc=new THREE.Line(new THREE.BufferGeometry(),new THREE.LineBasicMaterial({color:0x1f4fd1,transparent:true,opacity:.95}));group.add(arc);
++    const beam=new THREE.Line(new THREE.BufferGeometry(),new THREE.LineDashedMaterial({color:0x1f4fd1,dashSize:.45,gapSize:.3,transparent:true,opacity:.6}));group.add(beam);
++    const marker=new THREE.Mesh(new THREE.RingGeometry(1.5,1.7,32),new THREE.MeshBasicMaterial({color:0x1f4fd1,side:THREE.DoubleSide,transparent:true,opacity:.7}));marker.rotation.x=-Math.PI/2;marker.position.set(pad.x,.48,pad.z);group.add(marker);
++    visuals.set(c.id,{group,arc,beam,pad});
++  }
++  function updateVisual(c,o){
++    const v=visuals.get(c.id);if(!v)return;
++    const n=Math.min(o.sectors,Math.max(0,c.task.route.idx-o.startIdx));
++    const points=o.circle.slice(0,n+1).map(p=>new THREE.Vector3(p.x,p.y+.4,p.z));
++    if(c.inspection.progress>0&&c.inspection.progress<1)points.push(new THREE.Vector3(c.pos.x,c.pos.y+.4,c.pos.z));
++    v.arc.geometry.dispose();v.arc.geometry=new THREE.BufferGeometry().setFromPoints(points.length>1?points:[new THREE.Vector3(),new THREE.Vector3()]);
++    const p=c.pos;v.beam.visible=c.inspection.status==='scanning';v.beam.geometry.dispose();v.beam.geometry=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(p.x,p.y+.4,p.z),new THREE.Vector3(v.pad.x,.5,v.pad.z)]);v.beam.computeLineDistances();
++  }
++  function focus(){
++    const c=selected()??S.couriers.find(c=>c.inspection&&c.task?.kind==='inspection');
++    if(!c||!c.inspection){toast('Wait until a drone has picked up a parcel and planned its inspection.');return;}
++    const order=c.task?.order??S.orders.find(o=>o.id===c.inspection.orderId);if(!order)return;
++    controls.target.set(order.customer.acc.x,Math.min(10,c.task?.route.plan?.orbit?.center.y??10),order.customer.acc.z);camera.position.copy(controls.target).add(new THREE.Vector3(22,28,60));camera.zoom=1.05;camera.updateProjectionMatrix();controls.update();selectDrone(c.id,null);setAdvanced(false);
++  }
++  const selected=()=>S.couriers.find(c=>c===S.selected&&c.inspection&&['inspection','toCustomer'].includes(c.task?.kind));
++  function reserve(padId,blocked=true){
++    if(blocked)state.reservations.add(padId);else state.reservations.delete(padId);
++    for(const c of S.couriers)if(c.inspection?.padId===padId)record(c,blocked?'INSPECTION_PAD_RESERVED':'INSPECTION_PAD_RELEASED',blocked?'Test pad reserved':'Test pad released',`${padId} · Session-only teaching reservation.`);
++    render();
++  }
++  function reset(){for(const id of [...visuals.keys()])hideVisual(id);state.records.clear();state.reservations.clear();state.history=[];state.serial=0;state.demo=false;for(const c of S.couriers){c.inspection=null;c.inspectionLandingBlocked=false;}render();}
++  function startDemo(){resetWorld(true);state.demo=true;S.intake=false;setStage(4);S.running=true;selectDrone('D-01',null);setAdvanced(false);toast('Inspection demo started. Each parcel gets a full observation circuit before delivery.');updatePanels(true);}
++  function label(c){const s=c?.inspection;if(!s)return 'Not started';return `${s.status.toUpperCase()} · ${Math.round(s.progress*100)}% observation · ${s.message}`;}
++  function render(){
++    const el=document.getElementById('inspection-list');if(!el)return;el.replaceChildren();
++    const records=[...state.records.values()];
++    if(!records.length){const p=document.createElement('p');p.className='small';p.textContent='No inspection yet. Pick up a parcel or start the demo.';el.append(p);}
++    for(const s of records.slice(-12)){const b=document.createElement('button');b.className='event';b.type='button';b.textContent=`${s.droneId} · ${s.padId} · ${s.status.toUpperCase()} · ${Math.round(s.progress*100)}%`;b.title=s.message;b.onclick=()=>{selectDrone(s.droneId,b);focus();};el.append(b);}
++    const c=S.couriers.find(c=>c===S.selected&&c.inspection)??S.couriers.find(c=>c.inspection&&c.task?.kind==='inspection')??S.couriers.find(c=>c.inspection&&c.task?.kind==='toCustomer');
++    const hud=document.getElementById('inspection-live');hud.hidden=!c;
++    if(c){const s=c.inspection;hud.style.top=document.getElementById('placement-live').hidden?'140px':'216px';document.getElementById('inspection-live-title').textContent=`${c.id} · ${s.padId} · ${s.status.toUpperCase()}`;document.getElementById('inspection-live-text').textContent=`${Math.round(s.progress*100)}% observation coverage · ${s.message}`;document.getElementById('inspection-progress').value=Math.round(s.progress*100);}
++    const reserveButton=document.getElementById('inspection-reserve');reserveButton.disabled=!c||!['inspection','toCustomer'].includes(c.task?.kind);reserveButton.textContent=c&&state.reservations.has(c.inspection.padId)?'Test: release delivery pad':'Test: reserve delivery pad';
++    document.getElementById('inspection-summary').textContent=`${records.length} inspection(s) · ${state.reservations.size} test pad reservation(s). Observation is simulated, not camera recognition.`;
++  }
++  const dialog=document.getElementById('dlg-inspection');document.getElementById('inspection-start').onclick=()=>{dialog.returnFocus=document.getElementById('inspection-start');dialog.showModal();};document.getElementById('inspection-cancel').onclick=()=>dialog.close();document.getElementById('inspection-confirm').onclick=()=>{dialog.close();startDemo();};
++  document.getElementById('inspection-view').onclick=focus;
++  document.getElementById('inspection-reserve').onclick=()=>{const c=selected()??S.couriers.find(c=>c.inspection&&c.task?.kind==='inspection');if(!c){toast('Select a drone with an active inspection.');return;}const pad=c.inspection.padId;reserve(pad,!state.reservations.has(pad));toast(state.reservations.has(pad)?`${pad} reserved for this test; delivery will wait.`:`${pad} released; checks will retry.`);};
++  document.getElementById('btn-inspection').onclick=()=>{setAdvanced(true);document.getElementById('sec-inspection').scrollIntoView({block:'start'});};
++  for(const [id,key] of [['inspection-radius','radiusM'],['inspection-altitude','preferredAltitudeM'],['inspection-speed','speedMps']]){const input=document.getElementById(id),value=document.getElementById(id+'-v');input.value=config[key];value.textContent=config[key];input.oninput=()=>{config[key]=Number(input.value);value.textContent=config[key];};}
++  return {state,config,build,isCleared,prepare,gate,afterMove,review,onDelivered,canDeliver,motionAllowed,label,reserve,focus,startDemo,reset,snapshot:()=>({config:{...config},records:[...state.records.values()].map(s=>({...s})),reservations:[...state.reservations],history:state.history})};
++}
+--- a/package.json
++++ b/package.json
+@@ -1,5 +1,5 @@
+ {
+-  "name": "airspace-placement-classroom",
++  "name": "airspace-inspection-classroom",
+   "private": true,
+   "type": "module",
+   "scripts": {
+--- /dev/null
++++ b/tests/inspection.test.js
+@@ -0,0 +1,45 @@
++import {test} from 'node:test';
++import assert from 'node:assert/strict';
++import {buildInspectionMission,orbitProgress,deliveryChecks,waypointSpeed,inspectionConfig} from '../inspection.js';
++import {trajectory} from '../proximity.js';
++import {cfg,world,bump,segCheck,planRoute} from '../spatial.js';
++function setup(){world.bounds=58;world.obstacles=[];world.restricted=[];world.volumes=[{x0:-58,x1:58,z0:-58,z1:58,zloM:0,zhiM:120}];cfg.maxAltM=120;cfg.clearanceM=6;bump();}
++test('a full orbit closes, fits obstacles and includes no early landing segment',()=>{
++ setup();const from={x:-20,y:10,z:0},dest={x:0,y:0,z:0};
++ const p=buildInspectionMission(from,dest,{cfg,planRoute,segCheck});assert.ok(p.ok);
++ assert.ok(Math.hypot(p.orbit.circle[0].x-p.orbit.circle.at(-1).x,p.orbit.circle[0].z-p.orbit.circle.at(-1).z)<1e-9);
++ assert.equal(p.orbit.circle.length,49);assert.equal(p.best.pts.at(-1).y,p.orbit.altitudeM/5);
++ let prev=from;for(const q of p.best.pts){assert.equal(segCheck(prev,q),null);prev=q;}
++});
++test('coverage follows real position and waypoint index rather than elapsed time',()=>{
++ setup();const p=buildInspectionMission({x:-20,y:10,z:0},{x:0,y:0,z:0},{cfg,planRoute,segCheck});
++ const route={pts:p.best.pts,idx:p.orbit.startIdx,plan:p};assert.equal(orbitProgress(route,p.orbit.circle[0]),0);
++ route.idx+=12;assert.ok(Math.abs(orbitProgress(route,p.orbit.circle[12])-.25)<1e-8);
++ const held=orbitProgress(route,p.orbit.circle[12]);assert.equal(orbitProgress(route,p.orbit.circle[12]),held);
++ route.idx=p.best.pts.length;assert.equal(orbitProgress(route,p.orbit.circle.at(-1)),1);
++});
++test('100 percent coverage does not approve a reserved or occupied pad or invalid cargo/route',()=>{
++ const order={customer:{acc:{x:0,y:0,z:0}}},c={pos:{x:5,y:16,z:0},task:{order},inspection:{progress:1}},other={id:'D-02',pos:{x:0,y:0,z:0}};
++ assert.equal(deliveryChecks(c,[c],{reserved:true,routeOK:true,cargoMatches:true}).passed,false);
++ assert.equal(deliveryChecks(c,[c,other],{routeOK:true,cargoMatches:true}).passed,false);
++ assert.equal(deliveryChecks(c,[c],{routeOK:false,cargoMatches:true}).passed,false);
++ assert.equal(deliveryChecks(c,[c],{routeOK:true,cargoMatches:false}).passed,false);
++ assert.equal(deliveryChecks(c,[c],{routeOK:true,cargoMatches:true}).passed,true);
++ c.inspection.progress=.9;assert.equal(deliveryChecks(c,[c],{routeOK:true,cargoMatches:true}).passed,false);
++});
++test('no valid circle or onward path is reported as blocked',()=>{
++ setup();world.restricted=[{id:'NO',name:'Closed',active:true,x0:-58,x1:58,z0:-58,z1:58,zloM:0,zhiM:120}];bump();
++ assert.equal(buildInspectionMission({x:-20,y:10,z:0},{x:0,y:0,z:0},{cfg,planRoute,segCheck}).ok,false);
++});
++test('slow orbit speed is identical in exact trajectory prediction and movement speed helper',()=>{
++ const a={x:0,y:10,z:0},b={x:10,y:10,z:0,speedU:1};assert.equal(waypointSpeed(a,b),1);
++ const c={pos:a,task:{route:{idx:0,pts:[b]}}};assert.equal(trajectory(c,2).at(-1).p.x,2);
++ c.inspectionLandingBlocked=true;assert.equal(trajectory(c,2).at(-1).p.x,0);
++});
++test('an edge delivery site gets an inward-centered orbit wholly inside the permitted envelope',()=>{
++ setup();world.volumes=[{x0:-56,x1:56,z0:-56,z1:56,zloM:0,zhiM:120}];bump();
++ const dest={x:48,y:0,z:53.1},p=buildInspectionMission({x:0,y:0,z:0},dest,{cfg,planRoute,segCheck,bounds:56});
++ assert.ok(p.ok);assert.ok(p.orbit.center.z<dest.z);
++ assert.ok(Math.hypot(p.orbit.center.x-dest.x,p.orbit.center.z-dest.z)<p.orbit.radiusU);
++ for(const q of p.orbit.circle){assert.ok(Math.abs(q.x)<56&&Math.abs(q.z)<56);assert.equal(segCheck(q,q),null);}
++});
+--- /dev/null
++++ b/tests/inspection-acceptance.cjs
+@@ -0,0 +1,28 @@
++const {chromium}=require('playwright');const fs=require('fs'),assert=require('assert/strict');fs.mkdirSync('work/inspection-frames',{recursive:true});
++(async()=>{
++ const browser=await chromium.launch({headless:true,channel:'chrome'}),page=await browser.newPage({viewport:{width:1440,height:900}}),errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(process.env.AIRSPACE_URL || 'http://127.0.0.1:8000');await page.waitForFunction(()=>window.__sim);
++ // Cancel must preserve the existing session.
++ await page.locator('#btn-inspection').click();await page.locator('#inspection-start').click();assert.ok(await page.locator('#dlg-inspection').isVisible());await page.locator('#inspection-cancel').click();assert.equal(await page.evaluate(()=>__sim.S.time),0);
++ await page.locator('#inspection-start').click();await page.locator('#inspection-confirm').click();
++ const start=await page.evaluate(()=>{const a=__sim;a.S.running=false;let found;for(let i=0;i<2000;i++){a.step(.1);found=a.S.couriers.find(c=>c.inspection?.status==='scanning');if(found)break;}if(!found)throw Error('No scan');a.selectDrone(found.id,null);window.qaDrone=found.id;a.inspection.focus();return {droneId:found.id,orderId:found.inspection.orderId,padId:found.inspection.padId,time:a.S.time};});
++ assert.ok(start.droneId);await page.locator('[data-category="updates"]').click();
++ const paused=await page.evaluate(()=>{const a=__sim,c=a.S.couriers.find(c=>c.id===window.qaDrone),before=c.inspection.progress;c.hold={reason:'QA pause for clearance',timer:1000};for(let i=0;i<10;i++)a.step(.1);const after=c.inspection.progress;c.hold=null;return {before,after};});assert.equal(paused.before,paused.after);
++ let waiting=null,passed=null,delivered=null,scanning=null;
++ for(let i=0;i<50;i++){
++  const data=await page.evaluate(i=>{const a=__sim,c=a.S.couriers.find(c=>c.id===window.qaDrone);if(i===14)a.inspection.reserve(c.inspection.padId,true);if(i===32)a.inspection.reserve(c.inspection.padId,false);for(let k=0;k<13;k++)a.step(.1);return {time:a.S.time,info:JSON.parse(JSON.stringify(c.inspection)),orderStatus:(c.task?.order??c.lastOrder)?.status,pos:{...c.pos},delivered:a.S.delivered.map(o=>o.id)};},i);
++  await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));if(process.env.INSPECTION_NO_RECORD!=='1')await page.screenshot({path:`work/inspection-frames/${String(i).padStart(3,'0')}.png`});
++  if(!scanning&&data.info.status==='scanning'&&data.info.progress>.25){scanning=data;await page.screenshot({path:'docs/inspection-scanning.png'});}
++  if(!waiting&&data.info.status==='waiting'&&data.info.progress===1){waiting=data;await page.screenshot({path:'docs/inspection-100-checks-pending.png'});assert.equal(data.orderStatus,'picked_up');assert.ok(!data.info.checks.find(c=>c.id==='pad').pass);assert.ok(!data.delivered.includes(start.orderId));}
++  if(!passed&&data.info.status==='cleared'){passed=data;await page.screenshot({path:'docs/inspection-passed-approach.png'});}
++  if(!delivered&&data.info.status==='delivered'){delivered=data;await page.screenshot({path:'docs/inspection-delivered.png'});}
++ }
++ assert.ok(waiting,'100% must remain pending while pad is reserved');assert.ok(passed);assert.ok(delivered);
++ const fleet=await page.evaluate(()=>{const a=__sim;for(let i=0;i<3000;i++)a.step(.1);return {delivered:a.S.delivered.map(o=>({id:o.id,at:o.deliveredAt})),inspection:a.inspection.snapshot(),minSep:a.S.minSepM};});assert.equal(fleet.delivered.length,4);for(const o of fleet.delivered){const s=fleet.inspection.records.find(s=>s.orderId===o.id);assert.equal(s.progress,1);assert.ok(s.clearedAt<o.at);assert.equal(s.status,'delivered');}
++ // Check exported context is not merely a visual overlay.
++ await page.locator('#btn-inspection').click();await page.locator('#sec-proximity').scrollIntoViewIfNeeded();const downloadPromise=page.waitForEvent('download');await page.locator('#prox-export').click();const download=await downloadPromise;await download.saveAs('docs/inspection-session.json');
++ // Impossible new airspace blocks a scan and keeps the parcel aboard.
++ const blocked=await page.evaluate(()=>{const a=__sim;a.resetWorld(true);a.setStage(4);a.S.running=false;a.S.intake=false;let c;for(let i=0;i<2000;i++){a.step(.1);c=a.S.couriers.find(c=>c.inspection?.status==='scanning');if(c)break;}const order=c.task.order;a.world.restricted.push({id:'QA-INSPECTION-CLOSED',name:'QA closed airspace',active:true,x0:-58,x1:58,z0:-58,z1:58,zloM:0,zhiM:200});a.world.version++;for(let i=0;i<120;i++)a.step(.1);return {droneId:c.id,info:{...c.inspection},orderStatus:order.status,carry:c.carry.includes(order),critical:a.ops.list('critical').map(e=>e.code)};});assert.equal(blocked.info.status,'blocked');assert.equal(blocked.orderStatus,'picked_up');assert.ok(blocked.carry);assert.ok(blocked.critical.includes('INSPECTION_BLOCKED'));
++ await page.setViewportSize({width:1280,height:800});await page.locator('#btn-inspection').click();await page.screenshot({path:'docs/inspection-controls-1280.png'});const layout=await page.evaluate(()=>({viewport:innerWidth,scrollWidth:document.documentElement.scrollWidth}));assert.equal(layout.viewport,layout.scrollWidth);
++ const reset=await page.evaluate(()=>{__sim.resetWorld(true);__sim.S.running=false;return __sim.inspection.snapshot();});assert.equal(reset.records.length,0);assert.equal(reset.reservations.length,0);assert.equal(reset.history.length,0);assert.deepEqual(errors,[]);
++ const report={start,paused,scanning,waiting,passed,delivered,fleet,blocked,layout,reset,pageErrors:errors};fs.writeFileSync('docs/inspection-acceptance.json',JSON.stringify(report,null,2));console.log(JSON.stringify({start,paused,waiting:waiting.info.status,passed:passed.info.status,delivered:delivered.info.status,fleetDelivered:fleet.delivered.length,blocked:blocked.info.status,layout,errors}));await browser.close();
++})().catch(e=>{console.error(e);process.exit(1)});

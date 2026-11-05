@@ -1,0 +1,1474 @@
+{
+  "schemaVersion": 1,
+  "simulationOnly": true,
+  "simSeconds": 40.0000000000003,
+  "config": {
+    "birdClearanceM": 18,
+    "birdLookS": 2,
+    "birdUncertaintyM": 4,
+    "recoveryS": 2,
+    "escalateS": 8,
+    "escapeM": 35,
+    "separationM": 30,
+    "buildingClearanceM": 6
+  },
+  "birds": [],
+  "conditions": [
+    {
+      "droneId": "D-01",
+      "cause": "BUILDING_OR_AIRSPACE",
+      "since": 30.100000000000158,
+      "lastSeen": 40.0000000000003,
+      "message": "Current position violates clearance or permitted airspace. Cannot promise a safe hold.",
+      "action": "HUMAN_REQUIRED",
+      "targets": [],
+      "reportedAction": "HUMAN_REQUIRED",
+      "acknowledged": true
+    },
+    {
+      "droneId": "D-02",
+      "cause": "BUILDING_OR_AIRSPACE",
+      "since": 30.100000000000158,
+      "lastSeen": 40.0000000000003,
+      "message": "Current position violates clearance or permitted airspace. Cannot promise a safe hold.",
+      "action": "HUMAN_REQUIRED",
+      "targets": [],
+      "reportedAction": "HUMAN_REQUIRED",
+      "acknowledged": true
+    },
+    {
+      "droneId": "D-03",
+      "cause": "BUILDING_OR_AIRSPACE",
+      "since": 30.100000000000158,
+      "lastSeen": 40.0000000000003,
+      "message": "Current position violates clearance or permitted airspace. Cannot promise a safe hold.",
+      "action": "HUMAN_REQUIRED",
+      "targets": [],
+      "reportedAction": "HUMAN_REQUIRED",
+      "acknowledged": true
+    },
+    {
+      "droneId": "D-04",
+      "cause": "BUILDING_OR_AIRSPACE",
+      "since": 30.100000000000158,
+      "lastSeen": 40.0000000000003,
+      "message": "Current position violates clearance or permitted airspace. Cannot promise a safe hold.",
+      "action": "HUMAN_REQUIRED",
+      "targets": [],
+      "reportedAction": "HUMAN_REQUIRED",
+      "acknowledged": true
+    }
+  ],
+  "audit": [
+    {
+      "auditId": 1,
+      "code": "PROX_DRONE",
+      "droneId": "D-01",
+      "orderId": 1,
+      "occurredAtSimSeconds": 6.999999999999991,
+      "title": "AUTO_HOLD · drone",
+      "description": "D-01 · Existing priority: occupied pad, deadlock boost, earlier departure, then ID; yielding to D-04.",
+      "source": "proximity",
+      "action": "AUTO_HOLD",
+      "targets": [
+        "D-04"
+      ],
+      "positionM": {
+        "east": -13.5,
+        "north": -26.5,
+        "up": 0
+      },
+      "thresholds": {
+        "birdClearanceM": 18,
+        "birdLookS": 2,
+        "birdUncertaintyM": 4,
+        "recoveryS": 2,
+        "escalateS": 8,
+        "escapeM": 35,
+        "separationM": 30,
+        "buildingClearanceM": 6
+      }
+    },
+    {
+      "auditId": 2,
+      "code": "PROX_DRONE",
+      "droneId": "D-01",
+      "orderId": 1,
+      "occurredAtSimSeconds": 7.899999999999988,
+      "title": "AUTO_SLOW · drone",
+      "description": "D-01 · Existing priority: occupied pad, deadlock boost, earlier departure, then ID; yielding to D-04.",
+      "source": "proximity",
+      "action": "AUTO_SLOW",
+      "targets": [
+        "D-04"
+      ],
+      "positionM": {
+        "east": -13.5,
+        "north": -26.5,
+        "up": 0
+      },
+      "thresholds": {
+        "birdClearanceM": 18,
+        "birdLookS": 2,
+        "birdUncertaintyM": 4,
+        "recoveryS": 2,
+        "escalateS": 8,
+        "escapeM": 35,
+        "separationM": 30,
+        "buildingClearanceM": 6
+      }
+    },
+    {
+      "auditId": 3,
+      "code": "PROX_DRONE",
+      "droneId": "D-02",
+      "orderId": 2,
+      "occurredAtSimSeconds": 9.699999999999982,
+      "title": "AUTO_HOLD · drone",
+      "description": "D-02 · Existing priority: occupied pad, deadlock boost, earlier departure, then ID; yielding to D-04, D-01.",
+      "source": "proximity",
+      "action": "AUTO_HOLD",
+      "targets": [
+        "D-04",
+        "D-01"
+      ],
+      "positionM": {
+        "east": -4.500000000000001,
+        "north": -26.5,
+        "up": 0
+      },
+      "thresholds": {
+        "birdClearanceM": 18,
+        "birdLookS": 2,
+        "birdUncertaintyM": 4,
+        "recoveryS": 2,
+        "escalateS": 8,
+        "escapeM": 35,
+        "separationM": 30,
+        "buildingClearanceM": 6
+      }
+    },
+    {
+      "auditId": 4,
+      "code": "PROX_DRONE",
+      "droneId": "D-01",
+      "orderId": 1,
+      "occurredAtSimSeconds": 13.799999999999967,
+      "title": "AUTO_RESUME · drone",
+      "description": "D-01 · Condition clear for recovery interval; normal planning resumes.",
+      "source": "proximity",
+      "action": "AUTO_RESUME",
+      "positionM": {
+        "east": -19.223317117502724,
+        "north": -20.776682882497273,
+        "up": 49.78122336261038
+      },
+      "thresholds": {
+        "birdClearanceM": 18,
+        "birdLookS": 2,
+        "birdUncertaintyM": 4,
+        "recoveryS": 2,
+        "escalateS": 8,
+        "escapeM": 35,
+        "separationM": 30,
+        "buildingClearanceM": 6
+      }
+    },
+    {
+      "auditId": 5,
+      "code": "PROX_DRONE",
+      "droneId": "D-01",
+      "orderId": 1,
+      "occurredAtSimSeconds": 13.999999999999966,
+      "title": "AUTO_SLOW · drone",
+      "description": "D-01 · Existing priority: occupied pad, deadlock boost, earlier departure, then ID; yielding to D-04.",
+      "source": "proximity",
+      "action": "AUTO_SLOW",
+      "targets": [
+        "D-04"
+      ],
+      "positionM": {
+        "east": -22.044726963477984,
+        "north": -17.955273036522012,
+        "up": 50
+      },
+      "thresholds": {
+        "birdClearanceM": 18,
+        "birdLookS": 2,
+        "birdUncertaintyM": 4,
+        "recoveryS": 2,
+        "escalateS": 8,
+        "escapeM": 35,
+        "separationM": 30,
+        "buildingClearanceM": 6
+      }
+    },
+    {
+      "auditId": 6,
+      "code": "PROX_DRONE",
+      "droneId": "D-02",
+      "orderId": 2,
+      "occurredAtSimSeconds": 13.999999999999966,
+      "title": "AUTO_SLOW · drone",
+      "description": "D-02 · Existing priority: occupied pad, deadlock boost, earlier departure, then ID; yielding to D-01.",
+      "source": "proximity",
+      "action": "AUTO_SLOW",
+      "targets": [
+        "D-01"
+      ],
+      "positionM": {
+        "east": -4.500000000000001,
+        "north": -26.5,
+        "up": 23.799999999999994
+      },
+      "thresholds": {
+        "birdClearanceM": 18,
+        "birdLookS": 2,
+        "birdUncertaintyM": 4,
+        "recoveryS": 2,
+        "escalateS": 8,
+        "escapeM": 35,
+        "separationM": 30,
+        "buildingClearanceM": 6
+      }
+    },
+    {
+      "auditId": 7,
+      "code": "PROX_DRONE",
+      "droneId": "D-02",
+      "orderId": 2,
+      "occurredAtSimSeconds": 16.19999999999996,
+      "title": "AUTO_RESUME · drone",
+      "description": "D-02 · Condition clear for recovery interval; normal planning resumes.",
+      "source": "proximity",
+      "action": "AUTO_RESUME",
+      "positionM": {
+        "east": 11.539049253293683,
+        "north": -23.478150140683795,
+        "up": 50
+      },
+      "thresholds": {
+        "birdClearanceM": 18,
+        "birdLookS": 2,
+        "birdUncertaintyM": 4,
+        "recoveryS": 2,
+        "escalateS": 8,
+        "escapeM": 35,
+        "separationM": 30,
+        "buildingClearanceM": 6
+      }
+    },
+    {
+      "auditId": 8,
+      "code": "PROX_PIGEON",
+      "droneId": "D-01",
+      "orderId": 1,
+      "occurredAtSimSeconds": 17.999999999999986,
+      "title": "SCENARIO · pigeon",
+      "description": "D-01 · Synthetic pigeon spawned near predicted flight path.",
+      "source": "proximity",
+      "action": "SCENARIO",
+      "targets": [
+        "P-01"
+      ],
+      "positionM": {
+        "east": -34.34511291270203,
+        "north": 11.725564563510053,
+        "up": 50
+      },
+      "thresholds": {
+        "birdClearanceM": 18,
+        "birdLookS": 2,
+        "birdUncertaintyM": 4,
+        "recoveryS": 2,
+        "escalateS": 8,
+        "escapeM": 35,
+        "separationM": 30,
+        "buildingClearanceM": 6
+      }
+    },
+    {
+      "auditId": 9,
+      "code": "PROX_PIGEON",
+      "droneId": "D-01",
+      "orderId": 1,
+      "occurredAtSimSeconds": 18.099999999999987,
+      "title": "AUTO_EVADE · pigeon",
+      "description": "D-01 · Validated escape segment and onward route; motion remains subject to the final joint guard.",
+      "source": "proximity",
+      "action": "AUTO_EVADE",
+      "positionM": {
+        "east": -34.34511291270203,
+        "north": 11.725564563510053,
+        "up": 50
+      },
+      "thresholds": {
+        "birdClearanceM": 18,
+        "birdLookS": 2,
+        "birdUncertaintyM": 4,
+        "recoveryS": 2,
+        "escalateS": 8,
+        "escapeM": 35,
+        "separationM": 30,
+        "buildingClearanceM": 6
+      }
+    },
+    {
+      "auditId": 10,
+      "code": "PROX_PIGEON",
+      "droneId": "D-01",
+      "orderId": 1,
+      "occurredAtSimSeconds": 18.099999999999987,
+      "title": "AUTO_HOLD · pigeon",
+      "description": "D-01 · P-01 predicted inside 18 m + 4 m uncertainty. Braking; no validated escape currently available.",
+      "source": "proximity",
+      "action": "AUTO_HOLD",
+      "targets": [
+        "P-01"
+      ],
+      "positionM": {
+        "east": -34.34511291270203,
+        "north": 11.725564563510053,
+        "up": 50
+      },
+      "thresholds": {
+        "birdClearanceM": 18,
+        "birdLookS": 2,
+        "birdUncertaintyM": 4,
+        "recoveryS": 2,
+        "escalateS": 8,
+        "escapeM": 35,
+        "separationM": 30,
+        "buildingClearanceM": 6
+      }
+    },
+    {
+      "auditId": 11,
+      "code": "PROX_PIGEON",
+      "droneId": "D-01",
+      "orderId": 1,
+      "occurredAtSimSeconds": 18.099999999999987,
+      "title": "HUMAN_REQUIRED · pigeon",
+      "description": "D-01 · No validated safe movement: bird may enter the hold position. Unresolved proximity; human review required. · review airspace / clear external hazard; no forced landing or unsafe override.",
+      "source": "proximity",
+      "action": "HUMAN_REQUIRED",
+      "targets": [
+        "P-01"
+      ],
+      "positionM": {
+        "east": -34.34511291270203,
+        "north": 11.725564563510053,
+        "up": 50
+      },
+      "thresholds": {
+        "birdClearanceM": 18,
+        "birdLookS": 2,
+        "birdUncertaintyM": 4,
+        "recoveryS": 2,
+        "escalateS": 8,
+        "escapeM": 35,
+        "separationM": 30,
+        "buildingClearanceM": 6
+      }
+    },
+    {
+      "auditId": 12,
+      "code": "PROX_PIGEON",
+      "droneId": "D-01",
+      "orderId": 1,
+      "occurredAtSimSeconds": 18.9,
+      "title": "AUTO_EVADE · pigeon",
+      "description": "D-01 · Validated escape segment and onward route; motion remains subject to the final joint guard.",
+      "source": "proximity",
+      "action": "AUTO_EVADE",
+      "positionM": {
+        "east": -34.34511291270203,
+        "north": 11.725564563510053,
+        "up": 50
+      },
+      "thresholds": {
+        "birdClearanceM": 18,
+        "birdLookS": 2,
+        "birdUncertaintyM": 4,
+        "recoveryS": 2,
+        "escalateS": 8,
+        "escapeM": 35,
+        "separationM": 30,
+        "buildingClearanceM": 6
+      }
+    },
+    {
+      "auditId": 13,
+      "code": "PROX_PIGEON",
+      "droneId": "D-01",
+      "orderId": 1,
+      "occurredAtSimSeconds": 19.70000000000001,
+      "title": "AUTO_EVADE · pigeon",
+      "description": "D-01 · Validated escape segment and onward route; motion remains subject to the final joint guard.",
+      "source": "proximity",
+      "action": "AUTO_EVADE",
+      "positionM": {
+        "east": -34.34511291270203,
+        "north": 11.725564563510053,
+        "up": 50
+      },
+      "thresholds": {
+        "birdClearanceM": 18,
+        "birdLookS": 2,
+        "birdUncertaintyM": 4,
+        "recoveryS": 2,
+        "escalateS": 8,
+        "escapeM": 35,
+        "separationM": 30,
+        "buildingClearanceM": 6
+      }
+    },
+    {
+      "auditId": 14,
+      "code": "PROX_DRONE",
+      "droneId": "D-01",
+      "orderId": 1,
+      "occurredAtSimSeconds": 20.000000000000014,
+      "title": "AUTO_RESUME · drone",
+      "description": "D-01 · Condition clear for recovery interval; normal planning resumes.",
+      "source": "proximity",
+      "action": "AUTO_RESUME",
+      "positionM": {
+        "east": -34.34511291270203,
+        "north": 11.725564563510053,
+        "up": 50
+      },
+      "thresholds": {
+        "birdClearanceM": 18,
+        "birdLookS": 2,
+        "birdUncertaintyM": 4,
+        "recoveryS": 2,
+        "escalateS": 8,
+        "escapeM": 35,
+        "separationM": 30,
+        "buildingClearanceM": 6
+      }
+    },
+    {
+      "auditId": 15,
+      "code": "PROX_PIGEON",
+      "droneId": "D-01",
+      "orderId": 1,
+      "occurredAtSimSeconds": 22.000000000000043,
+      "title": "AUTO_RESUME · pigeon",
+      "description": "D-01 · Condition clear for recovery interval; normal planning resumes.",
+      "source": "proximity",
+      "action": "AUTO_RESUME",
+      "positionM": {
+        "east": -34.34511291270203,
+        "north": 11.725564563510053,
+        "up": 50
+      },
+      "thresholds": {
+        "birdClearanceM": 18,
+        "birdLookS": 2,
+        "birdUncertaintyM": 4,
+        "recoveryS": 2,
+        "escalateS": 8,
+        "escapeM": 35,
+        "separationM": 30,
+        "buildingClearanceM": 6
+      }
+    },
+    {
+      "auditId": 16,
+      "code": "PROX_BUILDING_OR_AIRSPACE",
+      "droneId": "D-01",
+      "orderId": 1,
+      "occurredAtSimSeconds": 30.100000000000158,
+      "title": "AUTO_HOLD · building_or_airspace",
+      "description": "D-01 · QA impossible airspace blocks every permitted route",
+      "source": "proximity",
+      "action": "AUTO_HOLD",
+      "targets": [],
+      "positionM": {
+        "east": -80,
+        "north": 54.5,
+        "up": 24.66585830192883
+      },
+      "thresholds": {
+        "birdClearanceM": 18,
+        "birdLookS": 2,
+        "birdUncertaintyM": 4,
+        "recoveryS": 2,
+        "escalateS": 8,
+        "escapeM": 35,
+        "separationM": 30,
+        "buildingClearanceM": 6
+      }
+    },
+    {
+      "auditId": 17,
+      "code": "PROX_BUILDING_OR_AIRSPACE",
+      "droneId": "D-02",
+      "orderId": 2,
+      "occurredAtSimSeconds": 30.100000000000158,
+      "title": "AUTO_HOLD · building_or_airspace",
+      "description": "D-02 · QA impossible airspace blocks every permitted route",
+      "source": "proximity",
+      "action": "AUTO_HOLD",
+      "targets": [],
+      "positionM": {
+        "east": 86.19730880427993,
+        "north": 57.598654402139964,
+        "up": 48.42071173843243
+      },
+      "thresholds": {
+        "birdClearanceM": 18,
+        "birdLookS": 2,
+        "birdUncertaintyM": 4,
+        "recoveryS": 2,
+        "escalateS": 8,
+        "escapeM": 35,
+        "separationM": 30,
+        "buildingClearanceM": 6
+      }
+    },
+    {
+      "auditId": 18,
+      "code": "PROX_BUILDING_OR_AIRSPACE",
+      "droneId": "D-03",
+      "orderId": 3,
+      "occurredAtSimSeconds": 30.100000000000158,
+      "title": "AUTO_HOLD · building_or_airspace",
+      "description": "D-03 · QA impossible airspace blocks every permitted route",
+      "source": "proximity",
+      "action": "AUTO_HOLD",
+      "targets": [],
+      "positionM": {
+        "east": 0,
+        "north": -105.5,
+        "up": 30.8
+      },
+      "thresholds": {
+        "birdClearanceM": 18,
+        "birdLookS": 2,
+        "birdUncertaintyM": 4,
+        "recoveryS": 2,
+        "escalateS": 8,
+        "escapeM": 35,
+        "separationM": 30,
+        "buildingClearanceM": 6
+      }
+    },
+    {
+      "auditId": 19,
+      "code": "PROX_BUILDING_OR_AIRSPACE",
+      "droneId": "D-04",
+      "orderId": 4,
+      "occurredAtSimSeconds": 30.100000000000158,
+      "title": "AUTO_HOLD · building_or_airspace",
+      "description": "D-04 · QA impossible airspace blocks every permitted route",
+      "source": "proximity",
+      "action": "AUTO_HOLD",
+      "targets": [],
+      "positionM": {
+        "east": -151.7167358599641,
+        "north": -19.601032803515835,
+        "up": 50
+      },
+      "thresholds": {
+        "birdClearanceM": 18,
+        "birdLookS": 2,
+        "birdUncertaintyM": 4,
+        "recoveryS": 2,
+        "escalateS": 8,
+        "escapeM": 35,
+        "separationM": 30,
+        "buildingClearanceM": 6
+      }
+    },
+    {
+      "auditId": 20,
+      "code": "PROX_BUILDING_OR_AIRSPACE",
+      "droneId": "D-01",
+      "orderId": 1,
+      "occurredAtSimSeconds": 30.100000000000158,
+      "title": "HUMAN_REQUIRED · building_or_airspace",
+      "description": "D-01 · Current position violates clearance or permitted airspace. Cannot promise a safe hold. · review airspace / clear external hazard; no forced landing or unsafe override.",
+      "source": "proximity",
+      "action": "HUMAN_REQUIRED",
+      "targets": [],
+      "positionM": {
+        "east": -80,
+        "north": 54.5,
+        "up": 24.66585830192883
+      },
+      "thresholds": {
+        "birdClearanceM": 18,
+        "birdLookS": 2,
+        "birdUncertaintyM": 4,
+        "recoveryS": 2,
+        "escalateS": 8,
+        "escapeM": 35,
+        "separationM": 30,
+        "buildingClearanceM": 6
+      }
+    },
+    {
+      "auditId": 21,
+      "code": "PROX_BUILDING_OR_AIRSPACE",
+      "droneId": "D-02",
+      "orderId": 2,
+      "occurredAtSimSeconds": 30.100000000000158,
+      "title": "HUMAN_REQUIRED · building_or_airspace",
+      "description": "D-02 · Current position violates clearance or permitted airspace. Cannot promise a safe hold. · review airspace / clear external hazard; no forced landing or unsafe override.",
+      "source": "proximity",
+      "action": "HUMAN_REQUIRED",
+      "targets": [],
+      "positionM": {
+        "east": 86.19730880427993,
+        "north": 57.598654402139964,
+        "up": 48.42071173843243
+      },
+      "thresholds": {
+        "birdClearanceM": 18,
+        "birdLookS": 2,
+        "birdUncertaintyM": 4,
+        "recoveryS": 2,
+        "escalateS": 8,
+        "escapeM": 35,
+        "separationM": 30,
+        "buildingClearanceM": 6
+      }
+    },
+    {
+      "auditId": 22,
+      "code": "PROX_BUILDING_OR_AIRSPACE",
+      "droneId": "D-03",
+      "orderId": 3,
+      "occurredAtSimSeconds": 30.100000000000158,
+      "title": "HUMAN_REQUIRED · building_or_airspace",
+      "description": "D-03 · Current position violates clearance or permitted airspace. Cannot promise a safe hold. · review airspace / clear external hazard; no forced landing or unsafe override.",
+      "source": "proximity",
+      "action": "HUMAN_REQUIRED",
+      "targets": [],
+      "positionM": {
+        "east": 0,
+        "north": -105.5,
+        "up": 30.8
+      },
+      "thresholds": {
+        "birdClearanceM": 18,
+        "birdLookS": 2,
+        "birdUncertaintyM": 4,
+        "recoveryS": 2,
+        "escalateS": 8,
+        "escapeM": 35,
+        "separationM": 30,
+        "buildingClearanceM": 6
+      }
+    },
+    {
+      "auditId": 23,
+      "code": "PROX_BUILDING_OR_AIRSPACE",
+      "droneId": "D-04",
+      "orderId": 4,
+      "occurredAtSimSeconds": 30.100000000000158,
+      "title": "HUMAN_REQUIRED · building_or_airspace",
+      "description": "D-04 · Current position violates clearance or permitted airspace. Cannot promise a safe hold. · review airspace / clear external hazard; no forced landing or unsafe override.",
+      "source": "proximity",
+      "action": "HUMAN_REQUIRED",
+      "targets": [],
+      "positionM": {
+        "east": -151.7167358599641,
+        "north": -19.601032803515835,
+        "up": 50
+      },
+      "thresholds": {
+        "birdClearanceM": 18,
+        "birdLookS": 2,
+        "birdUncertaintyM": 4,
+        "recoveryS": 2,
+        "escalateS": 8,
+        "escapeM": 35,
+        "separationM": 30,
+        "buildingClearanceM": 6
+      }
+    },
+    {
+      "auditId": 24,
+      "code": "PROX_BUILDING_OR_AIRSPACE",
+      "droneId": "D-01",
+      "orderId": 1,
+      "occurredAtSimSeconds": 40.0000000000003,
+      "title": "HUMAN_ACK · building_or_airspace",
+      "description": "D-01 · Operator reviewed the incident; condition remains open until the hazard clears.",
+      "source": "proximity",
+      "action": "HUMAN_ACK",
+      "positionM": {
+        "east": -80,
+        "north": 54.5,
+        "up": 24.66585830192883
+      },
+      "thresholds": {
+        "birdClearanceM": 18,
+        "birdLookS": 2,
+        "birdUncertaintyM": 4,
+        "recoveryS": 2,
+        "escalateS": 8,
+        "escapeM": 35,
+        "separationM": 30,
+        "buildingClearanceM": 6
+      }
+    },
+    {
+      "auditId": 25,
+      "code": "PROX_BUILDING_OR_AIRSPACE",
+      "droneId": "D-02",
+      "orderId": 2,
+      "occurredAtSimSeconds": 40.0000000000003,
+      "title": "HUMAN_ACK · building_or_airspace",
+      "description": "D-02 · Operator reviewed the incident; condition remains open until the hazard clears.",
+      "source": "proximity",
+      "action": "HUMAN_ACK",
+      "positionM": {
+        "east": 86.19730880427993,
+        "north": 57.598654402139964,
+        "up": 48.42071173843243
+      },
+      "thresholds": {
+        "birdClearanceM": 18,
+        "birdLookS": 2,
+        "birdUncertaintyM": 4,
+        "recoveryS": 2,
+        "escalateS": 8,
+        "escapeM": 35,
+        "separationM": 30,
+        "buildingClearanceM": 6
+      }
+    },
+    {
+      "auditId": 26,
+      "code": "PROX_BUILDING_OR_AIRSPACE",
+      "droneId": "D-03",
+      "orderId": 3,
+      "occurredAtSimSeconds": 40.0000000000003,
+      "title": "HUMAN_ACK · building_or_airspace",
+      "description": "D-03 · Operator reviewed the incident; condition remains open until the hazard clears.",
+      "source": "proximity",
+      "action": "HUMAN_ACK",
+      "positionM": {
+        "east": 0,
+        "north": -105.5,
+        "up": 30.8
+      },
+      "thresholds": {
+        "birdClearanceM": 18,
+        "birdLookS": 2,
+        "birdUncertaintyM": 4,
+        "recoveryS": 2,
+        "escalateS": 8,
+        "escapeM": 35,
+        "separationM": 30,
+        "buildingClearanceM": 6
+      }
+    },
+    {
+      "auditId": 27,
+      "code": "PROX_BUILDING_OR_AIRSPACE",
+      "droneId": "D-04",
+      "orderId": 4,
+      "occurredAtSimSeconds": 40.0000000000003,
+      "title": "HUMAN_ACK · building_or_airspace",
+      "description": "D-04 · Operator reviewed the incident; condition remains open until the hazard clears.",
+      "source": "proximity",
+      "action": "HUMAN_ACK",
+      "positionM": {
+        "east": -151.7167358599641,
+        "north": -19.601032803515835,
+        "up": 50
+      },
+      "thresholds": {
+        "birdClearanceM": 18,
+        "birdLookS": 2,
+        "birdUncertaintyM": 4,
+        "recoveryS": 2,
+        "escalateS": 8,
+        "escapeM": 35,
+        "separationM": 30,
+        "buildingClearanceM": 6
+      }
+    }
+  ],
+  "droppedAuditEvents": 0,
+  "operations": [
+    {
+      "id": "E3-1",
+      "sessionId": 3,
+      "sequence": 1,
+      "resolvedAtSimSeconds": null,
+      "droneId": null,
+      "orderId": 1,
+      "code": "ORDER_CREATED",
+      "occurredAtSimSeconds": 0,
+      "title": "Order created",
+      "description": "Order #1 · DS-5 from PS-1",
+      "category": "updates"
+    },
+    {
+      "id": "E3-2",
+      "sessionId": 3,
+      "sequence": 2,
+      "resolvedAtSimSeconds": null,
+      "droneId": null,
+      "orderId": 2,
+      "code": "ORDER_CREATED",
+      "occurredAtSimSeconds": 0,
+      "title": "Order created",
+      "description": "Order #2 · DS-9 from PS-2",
+      "category": "updates"
+    },
+    {
+      "id": "E3-3",
+      "sessionId": 3,
+      "sequence": 3,
+      "resolvedAtSimSeconds": null,
+      "droneId": null,
+      "orderId": 3,
+      "code": "ORDER_CREATED",
+      "occurredAtSimSeconds": 0,
+      "title": "Order created",
+      "description": "Order #3 · DS-8 from PS-3",
+      "category": "updates"
+    },
+    {
+      "id": "E3-4",
+      "sessionId": 3,
+      "sequence": 4,
+      "resolvedAtSimSeconds": null,
+      "droneId": null,
+      "orderId": 4,
+      "code": "ORDER_CREATED",
+      "occurredAtSimSeconds": 0,
+      "title": "Order created",
+      "description": "Order #4 · DS-7 from PS-1",
+      "category": "updates"
+    },
+    {
+      "id": "E3-5",
+      "sessionId": 3,
+      "sequence": 5,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-04",
+      "orderId": 4,
+      "code": "ASSIGNED",
+      "occurredAtSimSeconds": 6.799999999999992,
+      "title": "Order assigned",
+      "description": "DR-04 · order #4",
+      "category": "updates"
+    },
+    {
+      "id": "E3-6",
+      "sessionId": 3,
+      "sequence": 6,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-01",
+      "orderId": 1,
+      "code": "ASSIGNED",
+      "occurredAtSimSeconds": 6.8999999999999915,
+      "title": "Order assigned",
+      "description": "DR-01 · order #1",
+      "category": "updates"
+    },
+    {
+      "id": "E3-7",
+      "sessionId": 3,
+      "sequence": 7,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-01",
+      "orderId": 1,
+      "code": "PROX_DRONE",
+      "occurredAtSimSeconds": 6.999999999999991,
+      "title": "AUTO_HOLD · drone",
+      "description": "D-01 · Existing priority: occupied pad, deadlock boost, earlier departure, then ID; yielding to D-04.",
+      "source": "proximity",
+      "action": "AUTO_HOLD",
+      "targets": [
+        "D-04"
+      ],
+      "category": "updates"
+    },
+    {
+      "id": "E3-8",
+      "sessionId": 3,
+      "sequence": 8,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-01",
+      "orderId": 1,
+      "code": "PROX_DRONE",
+      "occurredAtSimSeconds": 7.899999999999988,
+      "title": "AUTO_SLOW · drone",
+      "description": "D-01 · Existing priority: occupied pad, deadlock boost, earlier departure, then ID; yielding to D-04.",
+      "source": "proximity",
+      "action": "AUTO_SLOW",
+      "targets": [
+        "D-04"
+      ],
+      "category": "updates"
+    },
+    {
+      "id": "E3-9",
+      "sessionId": 3,
+      "sequence": 9,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-02",
+      "orderId": 2,
+      "code": "ASSIGNED",
+      "occurredAtSimSeconds": 9.599999999999982,
+      "title": "Order assigned",
+      "description": "DR-02 · order #2",
+      "category": "updates"
+    },
+    {
+      "id": "E3-10",
+      "sessionId": 3,
+      "sequence": 10,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-02",
+      "orderId": 2,
+      "code": "PROX_DRONE",
+      "occurredAtSimSeconds": 9.699999999999982,
+      "title": "AUTO_HOLD · drone",
+      "description": "D-02 · Existing priority: occupied pad, deadlock boost, earlier departure, then ID; yielding to D-04, D-01.",
+      "source": "proximity",
+      "action": "AUTO_HOLD",
+      "targets": [
+        "D-04",
+        "D-01"
+      ],
+      "category": "updates"
+    },
+    {
+      "id": "E3-11",
+      "sessionId": 3,
+      "sequence": 11,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-01",
+      "orderId": 1,
+      "code": "PROX_DRONE",
+      "occurredAtSimSeconds": 13.799999999999967,
+      "title": "AUTO_RESUME · drone",
+      "description": "D-01 · Condition clear for recovery interval; normal planning resumes.",
+      "source": "proximity",
+      "action": "AUTO_RESUME",
+      "category": "updates"
+    },
+    {
+      "id": "E3-12",
+      "sessionId": 3,
+      "sequence": 12,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-01",
+      "orderId": 1,
+      "code": "PROX_DRONE",
+      "occurredAtSimSeconds": 13.999999999999966,
+      "title": "AUTO_SLOW · drone",
+      "description": "D-01 · Existing priority: occupied pad, deadlock boost, earlier departure, then ID; yielding to D-04.",
+      "source": "proximity",
+      "action": "AUTO_SLOW",
+      "targets": [
+        "D-04"
+      ],
+      "category": "updates"
+    },
+    {
+      "id": "E3-13",
+      "sessionId": 3,
+      "sequence": 13,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-02",
+      "orderId": 2,
+      "code": "PROX_DRONE",
+      "occurredAtSimSeconds": 13.999999999999966,
+      "title": "AUTO_SLOW · drone",
+      "description": "D-02 · Existing priority: occupied pad, deadlock boost, earlier departure, then ID; yielding to D-01.",
+      "source": "proximity",
+      "action": "AUTO_SLOW",
+      "targets": [
+        "D-01"
+      ],
+      "category": "updates"
+    },
+    {
+      "id": "E3-14",
+      "sessionId": 3,
+      "sequence": 14,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-03",
+      "orderId": 3,
+      "code": "ASSIGNED",
+      "occurredAtSimSeconds": 16.09999999999996,
+      "title": "Order assigned",
+      "description": "DR-03 · order #3",
+      "category": "updates"
+    },
+    {
+      "id": "E3-15",
+      "sessionId": 3,
+      "sequence": 15,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-02",
+      "orderId": 2,
+      "code": "PROX_DRONE",
+      "occurredAtSimSeconds": 16.19999999999996,
+      "title": "AUTO_RESUME · drone",
+      "description": "D-02 · Condition clear for recovery interval; normal planning resumes.",
+      "source": "proximity",
+      "action": "AUTO_RESUME",
+      "category": "updates"
+    },
+    {
+      "id": "E3-16",
+      "sessionId": 3,
+      "sequence": 16,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-01",
+      "orderId": 1,
+      "code": "PROX_PIGEON",
+      "occurredAtSimSeconds": 17.999999999999986,
+      "title": "SCENARIO · pigeon",
+      "description": "D-01 · Synthetic pigeon spawned near predicted flight path.",
+      "source": "proximity",
+      "action": "SCENARIO",
+      "targets": [
+        "P-01"
+      ],
+      "category": "updates"
+    },
+    {
+      "id": "E3-17",
+      "sessionId": 3,
+      "sequence": 17,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-01",
+      "orderId": 1,
+      "code": "PROX_PIGEON",
+      "occurredAtSimSeconds": 18.099999999999987,
+      "title": "AUTO_EVADE · pigeon",
+      "description": "D-01 · Validated escape segment and onward route; motion remains subject to the final joint guard.",
+      "source": "proximity",
+      "action": "AUTO_EVADE",
+      "category": "updates"
+    },
+    {
+      "id": "E3-18",
+      "sessionId": 3,
+      "sequence": 18,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-01",
+      "orderId": 1,
+      "code": "PROX_PIGEON",
+      "occurredAtSimSeconds": 18.099999999999987,
+      "title": "AUTO_HOLD · pigeon",
+      "description": "D-01 · P-01 predicted inside 18 m + 4 m uncertainty. Braking; no validated escape currently available.",
+      "source": "proximity",
+      "action": "AUTO_HOLD",
+      "targets": [
+        "P-01"
+      ],
+      "category": "updates"
+    },
+    {
+      "id": "E3-19",
+      "sessionId": 3,
+      "sequence": 19,
+      "resolvedAtSimSeconds": 22.000000000000043,
+      "droneId": "D-01",
+      "orderId": 1,
+      "code": "PROX_PIGEON",
+      "occurredAtSimSeconds": 18.099999999999987,
+      "title": "HUMAN_REQUIRED · pigeon",
+      "description": "D-01 · No validated safe movement: bird may enter the hold position. Unresolved proximity; human review required. · review airspace / clear external hazard; no forced landing or unsafe override.",
+      "source": "proximity",
+      "action": "HUMAN_REQUIRED",
+      "targets": [
+        "P-01"
+      ],
+      "category": "critical"
+    },
+    {
+      "id": "E3-20",
+      "sessionId": 3,
+      "sequence": 20,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-01",
+      "orderId": 1,
+      "code": "PROX_PIGEON",
+      "occurredAtSimSeconds": 18.9,
+      "title": "AUTO_EVADE · pigeon",
+      "description": "D-01 · Validated escape segment and onward route; motion remains subject to the final joint guard.",
+      "source": "proximity",
+      "action": "AUTO_EVADE",
+      "category": "updates"
+    },
+    {
+      "id": "E3-21",
+      "sessionId": 3,
+      "sequence": 21,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-01",
+      "orderId": 1,
+      "code": "PROX_PIGEON",
+      "occurredAtSimSeconds": 19.70000000000001,
+      "title": "AUTO_EVADE · pigeon",
+      "description": "D-01 · Validated escape segment and onward route; motion remains subject to the final joint guard.",
+      "source": "proximity",
+      "action": "AUTO_EVADE",
+      "category": "updates"
+    },
+    {
+      "id": "E3-22",
+      "sessionId": 3,
+      "sequence": 22,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-04",
+      "orderId": 4,
+      "code": "LANDED",
+      "occurredAtSimSeconds": 19.80000000000001,
+      "title": "Landed at pickup",
+      "description": "DR-04 · PS-1 (R1 Burger)",
+      "category": "updates"
+    },
+    {
+      "id": "E3-23",
+      "sessionId": 3,
+      "sequence": 23,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-01",
+      "orderId": 1,
+      "code": "PROX_DRONE",
+      "occurredAtSimSeconds": 20.000000000000014,
+      "title": "AUTO_RESUME · drone",
+      "description": "D-01 · Condition clear for recovery interval; normal planning resumes.",
+      "source": "proximity",
+      "action": "AUTO_RESUME",
+      "category": "updates"
+    },
+    {
+      "id": "E3-24",
+      "sessionId": 3,
+      "sequence": 24,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-04",
+      "orderId": 4,
+      "code": "PICKED_UP",
+      "occurredAtSimSeconds": 20.700000000000024,
+      "title": "Departed pickup",
+      "description": "DR-04 · order #4",
+      "category": "updates"
+    },
+    {
+      "id": "E3-25",
+      "sessionId": 3,
+      "sequence": 25,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-01",
+      "orderId": 1,
+      "code": "PROX_PIGEON",
+      "occurredAtSimSeconds": 22.000000000000043,
+      "title": "AUTO_RESUME · pigeon",
+      "description": "D-01 · Condition clear for recovery interval; normal planning resumes.",
+      "source": "proximity",
+      "action": "AUTO_RESUME",
+      "category": "updates"
+    },
+    {
+      "id": "E3-26",
+      "sessionId": 3,
+      "sequence": 26,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-02",
+      "orderId": 2,
+      "code": "LANDED",
+      "occurredAtSimSeconds": 24.900000000000084,
+      "title": "Landed at pickup",
+      "description": "DR-02 · PS-2 (R2 Ramen)",
+      "category": "updates"
+    },
+    {
+      "id": "E3-27",
+      "sessionId": 3,
+      "sequence": 27,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-02",
+      "orderId": 2,
+      "code": "PICKED_UP",
+      "occurredAtSimSeconds": 25.800000000000097,
+      "title": "Departed pickup",
+      "description": "DR-02 · order #2",
+      "category": "updates"
+    },
+    {
+      "id": "E3-28",
+      "sessionId": 3,
+      "sequence": 28,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-03",
+      "orderId": 3,
+      "code": "LANDED",
+      "occurredAtSimSeconds": 26.0000000000001,
+      "title": "Landed at pickup",
+      "description": "DR-03 · PS-3 (R3 Slow-Roast)",
+      "category": "updates"
+    },
+    {
+      "id": "E3-29",
+      "sessionId": 3,
+      "sequence": 29,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-03",
+      "orderId": 3,
+      "code": "PICKED_UP",
+      "occurredAtSimSeconds": 26.900000000000112,
+      "title": "Departed pickup",
+      "description": "DR-03 · order #3",
+      "category": "updates"
+    },
+    {
+      "id": "E3-30",
+      "sessionId": 3,
+      "sequence": 30,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-01",
+      "orderId": 1,
+      "code": "NO_VALID_ROUTE",
+      "category": "critical",
+      "occurredAtSimSeconds": 30.100000000000158,
+      "title": "Route blocked",
+      "description": "DR-01 · QA impossible airspace blocks every permitted route"
+    },
+    {
+      "id": "E3-31",
+      "sessionId": 3,
+      "sequence": 31,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-02",
+      "orderId": 2,
+      "code": "NO_VALID_ROUTE",
+      "category": "critical",
+      "occurredAtSimSeconds": 30.100000000000158,
+      "title": "Route blocked",
+      "description": "DR-02 · QA impossible airspace blocks every permitted route"
+    },
+    {
+      "id": "E3-32",
+      "sessionId": 3,
+      "sequence": 32,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-03",
+      "orderId": 3,
+      "code": "NO_VALID_ROUTE",
+      "category": "critical",
+      "occurredAtSimSeconds": 30.100000000000158,
+      "title": "Route blocked",
+      "description": "DR-03 · QA impossible airspace blocks every permitted route"
+    },
+    {
+      "id": "E3-33",
+      "sessionId": 3,
+      "sequence": 33,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-04",
+      "orderId": 4,
+      "code": "NO_VALID_ROUTE",
+      "category": "critical",
+      "occurredAtSimSeconds": 30.100000000000158,
+      "title": "Route blocked",
+      "description": "DR-04 · QA impossible airspace blocks every permitted route"
+    },
+    {
+      "id": "E3-34",
+      "sessionId": 3,
+      "sequence": 34,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-01",
+      "orderId": 1,
+      "code": "PROX_BUILDING_OR_AIRSPACE",
+      "occurredAtSimSeconds": 30.100000000000158,
+      "title": "AUTO_HOLD · building_or_airspace",
+      "description": "D-01 · QA impossible airspace blocks every permitted route",
+      "source": "proximity",
+      "action": "AUTO_HOLD",
+      "targets": [],
+      "category": "updates"
+    },
+    {
+      "id": "E3-35",
+      "sessionId": 3,
+      "sequence": 35,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-02",
+      "orderId": 2,
+      "code": "PROX_BUILDING_OR_AIRSPACE",
+      "occurredAtSimSeconds": 30.100000000000158,
+      "title": "AUTO_HOLD · building_or_airspace",
+      "description": "D-02 · QA impossible airspace blocks every permitted route",
+      "source": "proximity",
+      "action": "AUTO_HOLD",
+      "targets": [],
+      "category": "updates"
+    },
+    {
+      "id": "E3-36",
+      "sessionId": 3,
+      "sequence": 36,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-03",
+      "orderId": 3,
+      "code": "PROX_BUILDING_OR_AIRSPACE",
+      "occurredAtSimSeconds": 30.100000000000158,
+      "title": "AUTO_HOLD · building_or_airspace",
+      "description": "D-03 · QA impossible airspace blocks every permitted route",
+      "source": "proximity",
+      "action": "AUTO_HOLD",
+      "targets": [],
+      "category": "updates"
+    },
+    {
+      "id": "E3-37",
+      "sessionId": 3,
+      "sequence": 37,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-04",
+      "orderId": 4,
+      "code": "PROX_BUILDING_OR_AIRSPACE",
+      "occurredAtSimSeconds": 30.100000000000158,
+      "title": "AUTO_HOLD · building_or_airspace",
+      "description": "D-04 · QA impossible airspace blocks every permitted route",
+      "source": "proximity",
+      "action": "AUTO_HOLD",
+      "targets": [],
+      "category": "updates"
+    },
+    {
+      "id": "E3-38",
+      "sessionId": 3,
+      "sequence": 38,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-01",
+      "orderId": 1,
+      "code": "PROX_BUILDING_OR_AIRSPACE",
+      "occurredAtSimSeconds": 30.100000000000158,
+      "title": "HUMAN_REQUIRED · building_or_airspace",
+      "description": "D-01 · Current position violates clearance or permitted airspace. Cannot promise a safe hold. · review airspace / clear external hazard; no forced landing or unsafe override.",
+      "source": "proximity",
+      "action": "HUMAN_REQUIRED",
+      "targets": [],
+      "category": "critical"
+    },
+    {
+      "id": "E3-39",
+      "sessionId": 3,
+      "sequence": 39,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-02",
+      "orderId": 2,
+      "code": "PROX_BUILDING_OR_AIRSPACE",
+      "occurredAtSimSeconds": 30.100000000000158,
+      "title": "HUMAN_REQUIRED · building_or_airspace",
+      "description": "D-02 · Current position violates clearance or permitted airspace. Cannot promise a safe hold. · review airspace / clear external hazard; no forced landing or unsafe override.",
+      "source": "proximity",
+      "action": "HUMAN_REQUIRED",
+      "targets": [],
+      "category": "critical"
+    },
+    {
+      "id": "E3-40",
+      "sessionId": 3,
+      "sequence": 40,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-03",
+      "orderId": 3,
+      "code": "PROX_BUILDING_OR_AIRSPACE",
+      "occurredAtSimSeconds": 30.100000000000158,
+      "title": "HUMAN_REQUIRED · building_or_airspace",
+      "description": "D-03 · Current position violates clearance or permitted airspace. Cannot promise a safe hold. · review airspace / clear external hazard; no forced landing or unsafe override.",
+      "source": "proximity",
+      "action": "HUMAN_REQUIRED",
+      "targets": [],
+      "category": "critical"
+    },
+    {
+      "id": "E3-41",
+      "sessionId": 3,
+      "sequence": 41,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-04",
+      "orderId": 4,
+      "code": "PROX_BUILDING_OR_AIRSPACE",
+      "occurredAtSimSeconds": 30.100000000000158,
+      "title": "HUMAN_REQUIRED · building_or_airspace",
+      "description": "D-04 · Current position violates clearance or permitted airspace. Cannot promise a safe hold. · review airspace / clear external hazard; no forced landing or unsafe override.",
+      "source": "proximity",
+      "action": "HUMAN_REQUIRED",
+      "targets": [],
+      "category": "critical"
+    },
+    {
+      "id": "E3-42",
+      "sessionId": 3,
+      "sequence": 42,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-01",
+      "orderId": 1,
+      "code": "PROX_BUILDING_OR_AIRSPACE",
+      "occurredAtSimSeconds": 40.0000000000003,
+      "title": "HUMAN_ACK · building_or_airspace",
+      "description": "D-01 · Operator reviewed the incident; condition remains open until the hazard clears.",
+      "source": "proximity",
+      "action": "HUMAN_ACK",
+      "category": "updates"
+    },
+    {
+      "id": "E3-43",
+      "sessionId": 3,
+      "sequence": 43,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-02",
+      "orderId": 2,
+      "code": "PROX_BUILDING_OR_AIRSPACE",
+      "occurredAtSimSeconds": 40.0000000000003,
+      "title": "HUMAN_ACK · building_or_airspace",
+      "description": "D-02 · Operator reviewed the incident; condition remains open until the hazard clears.",
+      "source": "proximity",
+      "action": "HUMAN_ACK",
+      "category": "updates"
+    },
+    {
+      "id": "E3-44",
+      "sessionId": 3,
+      "sequence": 44,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-03",
+      "orderId": 3,
+      "code": "PROX_BUILDING_OR_AIRSPACE",
+      "occurredAtSimSeconds": 40.0000000000003,
+      "title": "HUMAN_ACK · building_or_airspace",
+      "description": "D-03 · Operator reviewed the incident; condition remains open until the hazard clears.",
+      "source": "proximity",
+      "action": "HUMAN_ACK",
+      "category": "updates"
+    },
+    {
+      "id": "E3-45",
+      "sessionId": 3,
+      "sequence": 45,
+      "resolvedAtSimSeconds": null,
+      "droneId": "D-04",
+      "orderId": 4,
+      "code": "PROX_BUILDING_OR_AIRSPACE",
+      "occurredAtSimSeconds": 40.0000000000003,
+      "title": "HUMAN_ACK · building_or_airspace",
+      "description": "D-04 · Operator reviewed the incident; condition remains open until the hazard clears.",
+      "source": "proximity",
+      "action": "HUMAN_ACK",
+      "category": "updates"
+    }
+  ]
+}

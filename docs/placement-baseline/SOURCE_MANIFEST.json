@@ -1,0 +1,181 @@
+{
+  "repository": "https://github.com/de-lym/spatial-AI-2026",
+  "branch": "claude/semantic-model-delivery-system",
+  "originalCommit": "f7bdcf0ad371ed5e9c2a9248f539ceefa7610b04",
+  "extensionDate": "2026-11-04",
+  "previousPackage": "AIRSPACE_Proximity_FINAL.zip",
+  "previousPackageSHA256": "1b01bd7600094ced1fac4fd97011b01ca9537e51ac18a7d41c648c8aee127233",
+  "sourceFiles": [
+    {
+      "path": "README.md",
+      "originalSHA256": "80e3b7f08c7b6a69f475086de93e21e6c5837486ce456d38489a3138ee4c66f1",
+      "packageSHA256": "82c10ba9dea6d796ab5a6270aabf501956b8f6ad15c2986372d762989b7a734c",
+      "status": "modified"
+    },
+    {
+      "path": "docs/airspace-simulation-v3.md",
+      "originalSHA256": "13368b75793e58328fd140ae1c6f2bc0e58768adde94a7dd957fb575877c806f",
+      "packageSHA256": "13368b75793e58328fd140ae1c6f2bc0e58768adde94a7dd957fb575877c806f",
+      "status": "unchanged"
+    },
+    {
+      "path": "docs/airspace-simulation.md",
+      "originalSHA256": "3efde823586ef95abb1db1edf95f9c234319798216f06306571a026b7c35dd0c",
+      "packageSHA256": "3efde823586ef95abb1db1edf95f9c234319798216f06306571a026b7c35dd0c",
+      "status": "unchanged"
+    },
+    {
+      "path": "docs/drone-location-simulation.md",
+      "originalSHA256": "3d831363749ee4d6f9c7b47d16371422d393f87b95234ad7caf14cf6129ef4d1",
+      "packageSHA256": "3d831363749ee4d6f9c7b47d16371422d393f87b95234ad7caf14cf6129ef4d1",
+      "status": "unchanged"
+    },
+    {
+      "path": "docs/screenshot-airspace.png",
+      "originalSHA256": "83cd45008c746e926755a61e7b3584708a8decd3c6ead0860821d758757a10bc",
+      "packageSHA256": "83cd45008c746e926755a61e7b3584708a8decd3c6ead0860821d758757a10bc",
+      "status": "unchanged"
+    },
+    {
+      "path": "docs/screenshot-drone-location.png",
+      "originalSHA256": "93bd573947d54481b52979baf0c694a83c2583f9dc0552e29c0d72996add0e9a",
+      "packageSHA256": "93bd573947d54481b52979baf0c694a83c2583f9dc0552e29c0d72996add0e9a",
+      "status": "unchanged"
+    },
+    {
+      "path": "docs/screenshot-v3-landuse.png",
+      "originalSHA256": "7768b2e18cd2ae94c4c25b6540db3a524d528ac5ccd9abbf04d2ca74c3604b79",
+      "packageSHA256": "7768b2e18cd2ae94c4c25b6540db3a524d528ac5ccd9abbf04d2ca74c3604b79",
+      "status": "unchanged"
+    },
+    {
+      "path": "docs/screenshot-v3-live.png",
+      "originalSHA256": "589a9db714c02030c389f7b11b45e6a18ebbfa06be24bde4e1eb21f555246c09",
+      "packageSHA256": "589a9db714c02030c389f7b11b45e6a18ebbfa06be24bde4e1eb21f555246c09",
+      "status": "unchanged"
+    },
+    {
+      "path": "index.html",
+      "originalSHA256": "d6ed6684a4383a75c32fcb177fcf3317b80b96d8b49c43311e85574085c65b3d",
+      "packageSHA256": "a93b57840545a1ea03facd133d3591c3e8cb40f3011271766610435a1f5e4ef9",
+      "status": "modified"
+    },
+    {
+      "path": "main.js",
+      "originalSHA256": "138eaefe8f1ea8ea8cb15308262f6e1f4a5cea1cd28e30fcf3da30854273be78",
+      "packageSHA256": "9cde799a627dd23f4d33f2c9231c397c89168f29e2e52681936ffb9bfa70091f",
+      "status": "modified"
+    },
+    {
+      "path": "ops-events.js",
+      "originalSHA256": "8cc59f108aed814b78a58168852dfea714c78c1025197e18934805ced6abe085",
+      "packageSHA256": "8cc59f108aed814b78a58168852dfea714c78c1025197e18934805ced6abe085",
+      "status": "unchanged"
+    },
+    {
+      "path": "spatial.js",
+      "originalSHA256": "3a78946e3e57c3d4dfc53bc594302e07892c74bd9e64af15eb5a1f27cbbf59a5",
+      "packageSHA256": "c68c70ff6251c56f533c9d4e95fe65902f32af36f4a89ae536e2005ae250d59c",
+      "status": "modified"
+    },
+    {
+      "path": "style.css",
+      "originalSHA256": "a6615672f2c78e38c77ec4e2fed45654a86c59026c32fe0627ecda9a838f7e95",
+      "packageSHA256": "a6ce2c80c9130be7b89e6974a6e9802a127608a6eb2420427e1db7fe045b11f2",
+      "status": "modified"
+    },
+    {
+      "path": "vendor/OrbitControls.js",
+      "originalSHA256": "3d79d07ecb686b4e5d93232eedab255331c1beef711e13164eaa1f68655a5f2b",
+      "packageSHA256": "3d79d07ecb686b4e5d93232eedab255331c1beef711e13164eaa1f68655a5f2b",
+      "status": "unchanged"
+    },
+    {
+      "path": "vendor/RoundedBoxGeometry.js",
+      "originalSHA256": "c5feab96123858ed8823c889b238dc8734adab7e760e3cfd21e7f3f2f3e348e3",
+      "packageSHA256": "c5feab96123858ed8823c889b238dc8734adab7e760e3cfd21e7f3f2f3e348e3",
+      "status": "unchanged"
+    },
+    {
+      "path": "vendor/THREE_LICENSE",
+      "originalSHA256": "8b378ebe60e2fe500158cb0ac71cb5e8b7d92953c2abcc63a0eb90499653b5bc",
+      "packageSHA256": "8b378ebe60e2fe500158cb0ac71cb5e8b7d92953c2abcc63a0eb90499653b5bc",
+      "status": "unchanged"
+    },
+    {
+      "path": "vendor/three.core.js",
+      "originalSHA256": "9edde002b066a9a05676a6127f67735b62baf399bdea529f2f7e31657da769e6",
+      "packageSHA256": "9edde002b066a9a05676a6127f67735b62baf399bdea529f2f7e31657da769e6",
+      "status": "unchanged"
+    },
+    {
+      "path": "vendor/three.module.js",
+      "originalSHA256": "9052042d676cb0fdc1ddfefe193053f34b7ac0513a616fdac4535d49987812ea",
+      "packageSHA256": "9052042d676cb0fdc1ddfefe193053f34b7ac0513a616fdac4535d49987812ea",
+      "status": "unchanged"
+    }
+  ],
+  "placementCodeDelta": [
+    {
+      "path": "main.js",
+      "previousSHA256": "84befe51a019ef0106b7f4e80cc6cd9f97861b8176910bdcb3c0e7ead332107d",
+      "currentSHA256": "9cde799a627dd23f4d33f2c9231c397c89168f29e2e52681936ffb9bfa70091f",
+      "status": "modified"
+    },
+    {
+      "path": "spatial.js",
+      "previousSHA256": "3a78946e3e57c3d4dfc53bc594302e07892c74bd9e64af15eb5a1f27cbbf59a5",
+      "currentSHA256": "c68c70ff6251c56f533c9d4e95fe65902f32af36f4a89ae536e2005ae250d59c",
+      "status": "modified"
+    },
+    {
+      "path": "index.html",
+      "previousSHA256": "7e556b523ccf92c87ab2055537bd5967ad9adb9da0eb7262297b6f02e1fcee25",
+      "currentSHA256": "a93b57840545a1ea03facd133d3591c3e8cb40f3011271766610435a1f5e4ef9",
+      "status": "modified"
+    },
+    {
+      "path": "style.css",
+      "previousSHA256": "542b3285e5ed6875fa3e3b6ad71e6fd5cb951c1b2b444a276e99e3fc7b169418",
+      "currentSHA256": "a6ce2c80c9130be7b89e6974a6e9802a127608a6eb2420427e1db7fe045b11f2",
+      "status": "modified"
+    },
+    {
+      "path": "proximity.js",
+      "previousSHA256": "da4ad2a55ae47af23753d0b4d9df0d8ccc9f33479c83faf8813bb912c2ba48e0",
+      "currentSHA256": "1efa1803af6c55739f100ffee631a0a878513687125a0959892de291f1e09879",
+      "status": "modified"
+    },
+    {
+      "path": "placements.js",
+      "previousSHA256": null,
+      "currentSHA256": "bddc03e23a0020561aa0cd89a5c5515e237eeaf0f4b1b1018424f1a7cbe81ad1",
+      "status": "added"
+    },
+    {
+      "path": "placement-integration.js",
+      "previousSHA256": null,
+      "currentSHA256": "61f12c6a3839d5e14289efa8d7aa2245102c321d40cf331ef112319b6f972d4a",
+      "status": "added"
+    },
+    {
+      "path": "package.json",
+      "previousSHA256": "e66a8ee791819ef21105d13e8476b455b0363413ec8c3b3a54585345bafc2505",
+      "currentSHA256": "1fd86b103c6f27c3fb4230feb614ea9bc58e5dd1bd88aa2ce02da86050034f04",
+      "status": "modified"
+    },
+    {
+      "path": "tests/placements.test.js",
+      "previousSHA256": null,
+      "currentSHA256": "72716a1cd6dcb03e6c81665509f60b07819fc2e5a53b189909e67a38edda8a75",
+      "status": "added"
+    },
+    {
+      "path": "tests/placement-acceptance.cjs",
+      "previousSHA256": null,
+      "currentSHA256": "495d58b37da39fef00cffe7c68c9530777a2d3c373e5599f06dd529c0a3cca07",
+      "status": "added"
+    }
+  ],
+  "note": "Independent copy only. No GitHub modification, commit, push or PR. Current placement evidence is in docs; historical proximity-only evidence is in docs/proximity-baseline."
+}

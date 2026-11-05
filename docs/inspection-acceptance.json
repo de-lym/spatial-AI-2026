@@ -1,0 +1,780 @@
+{
+  "start": {
+    "droneId": "D-02",
+    "orderId": 2,
+    "padId": "DS-9",
+    "time": 39.51420000000327
+  },
+  "paused": {
+    "before": 0.003136802203732205,
+    "after": 0.003136802203732205
+  },
+  "scanning": {
+    "time": 48.314200000003396,
+    "info": {
+      "orderId": 2,
+      "droneId": "D-02",
+      "padId": "DS-9",
+      "status": "scanning",
+      "progress": 0.2514649790360149,
+      "checks": [],
+      "attempts": 1,
+      "token": "I-2-2",
+      "since": 26.61420000000309,
+      "lastQuarter": 1,
+      "message": "Orbiting and collecting simulated observation coverage.",
+      "reviewAt": 0
+    },
+    "orderStatus": "picked_up",
+    "pos": {
+      "x": 45.806324583715885,
+      "y": 16,
+      "z": -31.389969252317904
+    },
+    "delivered": []
+  },
+  "waiting": {
+    "time": 73.0142000000031,
+    "info": {
+      "orderId": 2,
+      "droneId": "D-02",
+      "padId": "DS-9",
+      "status": "waiting",
+      "progress": 1,
+      "checks": [
+        {
+          "id": "orbit",
+          "label": "Observation circuit complete",
+          "pass": true
+        },
+        {
+          "id": "cargo",
+          "label": "Assigned parcel aboard",
+          "pass": true
+        },
+        {
+          "id": "route",
+          "label": "Static approach route valid",
+          "pass": true
+        },
+        {
+          "id": "pad",
+          "label": "Delivery pad available",
+          "pass": false,
+          "detail": "Pad reserved"
+        }
+      ],
+      "attempts": 1,
+      "token": "I-2-2",
+      "since": 26.61420000000309,
+      "lastQuarter": 4,
+      "message": "Pad reserved",
+      "reviewAt": 74.0142000000031,
+      "waitSince": 71.91420000000316
+    },
+    "orderStatus": "picked_up",
+    "pos": {
+      "x": 43.52786404500042,
+      "y": 16,
+      "z": -24.663932022500212
+    },
+    "delivered": []
+  },
+  "passed": {
+    "time": 83.41420000000251,
+    "info": {
+      "orderId": 2,
+      "droneId": "D-02",
+      "padId": "DS-9",
+      "status": "cleared",
+      "progress": 1,
+      "checks": [
+        {
+          "id": "orbit",
+          "label": "Observation circuit complete",
+          "pass": true
+        },
+        {
+          "id": "cargo",
+          "label": "Assigned parcel aboard",
+          "pass": true
+        },
+        {
+          "id": "route",
+          "label": "Static approach route valid",
+          "pass": true
+        },
+        {
+          "id": "pad",
+          "label": "Delivery pad available",
+          "pass": true,
+          "detail": ""
+        }
+      ],
+      "attempts": 1,
+      "token": "I-2-2",
+      "since": 26.61420000000309,
+      "lastQuarter": 4,
+      "message": "Circuit complete. Model checks passed; approach authorized in this simulation.",
+      "reviewAt": 83.91420000000254,
+      "waitSince": 71.91420000000316,
+      "clearedAt": 82.91420000000254
+    },
+    "orderStatus": "picked_up",
+    "pos": {
+      "x": 43.52786404500042,
+      "y": 14.600000000000003,
+      "z": -24.663932022500212
+    },
+    "delivered": [
+      4
+    ]
+  },
+  "delivered": {
+    "time": 89.91420000000214,
+    "info": {
+      "orderId": 2,
+      "droneId": "D-02",
+      "padId": "DS-9",
+      "status": "delivered",
+      "progress": 1,
+      "checks": [
+        {
+          "id": "orbit",
+          "label": "Observation circuit complete",
+          "pass": true
+        },
+        {
+          "id": "cargo",
+          "label": "Assigned parcel aboard",
+          "pass": true
+        },
+        {
+          "id": "route",
+          "label": "Static approach route valid",
+          "pass": true
+        },
+        {
+          "id": "pad",
+          "label": "Delivery pad available",
+          "pass": true,
+          "detail": ""
+        }
+      ],
+      "attempts": 1,
+      "token": "I-2-2",
+      "since": 26.61420000000309,
+      "lastQuarter": 4,
+      "message": "Parcel delivered after completed observation and model checks.",
+      "reviewAt": 83.91420000000254,
+      "waitSince": 71.91420000000316,
+      "clearedAt": 82.91420000000254
+    },
+    "orderStatus": "delivered",
+    "pos": {
+      "x": 48,
+      "y": 0,
+      "z": -26.9
+    },
+    "delivered": [
+      4,
+      3,
+      2
+    ]
+  },
+  "fleet": {
+    "delivered": [
+      {
+        "id": 4,
+        "at": 82.41420000000257
+      },
+      {
+        "id": 3,
+        "at": 83.6142000000025
+      },
+      {
+        "id": 2,
+        "at": 89.01420000000219
+      },
+      {
+        "id": 1,
+        "at": 91.21420000000207
+      }
+    ],
+    "inspection": {
+      "config": {
+        "radiusM": 25,
+        "preferredAltitudeM": 80,
+        "speedMps": 5,
+        "sectors": 48,
+        "retryS": 1,
+        "escalateS": 8
+      },
+      "records": [
+        {
+          "orderId": 4,
+          "droneId": "D-04",
+          "padId": "DS-7",
+          "status": "delivered",
+          "progress": 1,
+          "checks": [
+            {
+              "id": "orbit",
+              "label": "Observation circuit complete",
+              "pass": true
+            },
+            {
+              "id": "cargo",
+              "label": "Assigned parcel aboard",
+              "pass": true
+            },
+            {
+              "id": "route",
+              "label": "Static approach route valid",
+              "pass": true
+            },
+            {
+              "id": "pad",
+              "label": "Delivery pad available",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "attempts": 1,
+          "token": "I-4-1",
+          "since": 21.51420000000302,
+          "lastQuarter": 4,
+          "message": "Parcel delivered after completed observation and model checks.",
+          "reviewAt": 77.31420000000291,
+          "clearedAt": 76.31420000000291
+        },
+        {
+          "orderId": 2,
+          "droneId": "D-02",
+          "padId": "DS-9",
+          "status": "delivered",
+          "progress": 1,
+          "checks": [
+            {
+              "id": "orbit",
+              "label": "Observation circuit complete",
+              "pass": true
+            },
+            {
+              "id": "cargo",
+              "label": "Assigned parcel aboard",
+              "pass": true
+            },
+            {
+              "id": "route",
+              "label": "Static approach route valid",
+              "pass": true
+            },
+            {
+              "id": "pad",
+              "label": "Delivery pad available",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "attempts": 1,
+          "token": "I-2-2",
+          "since": 26.61420000000309,
+          "lastQuarter": 4,
+          "message": "Parcel delivered after completed observation and model checks.",
+          "reviewAt": 83.91420000000254,
+          "waitSince": 71.91420000000316,
+          "clearedAt": 82.91420000000254
+        },
+        {
+          "orderId": 3,
+          "droneId": "D-03",
+          "padId": "DS-8",
+          "status": "delivered",
+          "progress": 1,
+          "checks": [
+            {
+              "id": "orbit",
+              "label": "Observation circuit complete",
+              "pass": true
+            },
+            {
+              "id": "cargo",
+              "label": "Assigned parcel aboard",
+              "pass": true
+            },
+            {
+              "id": "route",
+              "label": "Static approach route valid",
+              "pass": true
+            },
+            {
+              "id": "pad",
+              "label": "Delivery pad available",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "attempts": 1,
+          "token": "I-3-3",
+          "since": 27.714200000003107,
+          "lastQuarter": 4,
+          "message": "Parcel delivered after completed observation and model checks.",
+          "reviewAt": 78.41420000000285,
+          "clearedAt": 77.41420000000285
+        },
+        {
+          "orderId": 1,
+          "droneId": "D-01",
+          "padId": "DS-5",
+          "status": "delivered",
+          "progress": 1,
+          "checks": [
+            {
+              "id": "orbit",
+              "label": "Observation circuit complete",
+              "pass": true
+            },
+            {
+              "id": "cargo",
+              "label": "Assigned parcel aboard",
+              "pass": true
+            },
+            {
+              "id": "route",
+              "label": "Static approach route valid",
+              "pass": true
+            },
+            {
+              "id": "pad",
+              "label": "Delivery pad available",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "attempts": 1,
+          "token": "I-1-4",
+          "since": 45.81420000000336,
+          "lastQuarter": 4,
+          "message": "Parcel delivered after completed observation and model checks.",
+          "reviewAt": 86.11420000000241,
+          "clearedAt": 85.11420000000241
+        }
+      ],
+      "reservations": [],
+      "history": [
+        {
+          "code": "INSPECTION_PLANNED",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-04",
+          "orderId": 4,
+          "occurredAtSimSeconds": 21.51420000000302,
+          "title": "Inspection route ready",
+          "description": "D-04 · DS-7 · 25 m radius, 80 m altitude. Simulated observation, not real vision."
+        },
+        {
+          "code": "INSPECTION_PLANNED",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-02",
+          "orderId": 2,
+          "occurredAtSimSeconds": 26.61420000000309,
+          "title": "Inspection route ready",
+          "description": "D-02 · DS-9 · 25 m radius, 80 m altitude. Simulated observation, not real vision."
+        },
+        {
+          "code": "INSPECTION_PLANNED",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-03",
+          "orderId": 3,
+          "occurredAtSimSeconds": 27.714200000003107,
+          "title": "Inspection route ready",
+          "description": "D-03 · DS-8 · 25 m radius, 80 m altitude. Simulated observation, not real vision."
+        },
+        {
+          "code": "INSPECTION_SCAN_START",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-02",
+          "orderId": 2,
+          "occurredAtSimSeconds": 39.51420000000327,
+          "title": "Scanning delivery site",
+          "description": "D-02 · DS-9 · Progress follows actual flight along the ring."
+        },
+        {
+          "code": "INSPECTION_SCAN_START",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-04",
+          "orderId": 4,
+          "occurredAtSimSeconds": 44.91420000000335,
+          "title": "Scanning delivery site",
+          "description": "D-04 · DS-7 · Progress follows actual flight along the ring."
+        },
+        {
+          "code": "INSPECTION_PLANNED",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-01",
+          "orderId": 1,
+          "occurredAtSimSeconds": 45.81420000000336,
+          "title": "Inspection route ready",
+          "description": "D-01 · DS-5 · 25 m radius, 80 m altitude. Simulated observation, not real vision."
+        },
+        {
+          "code": "INSPECTION_SCAN_START",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-03",
+          "orderId": 3,
+          "occurredAtSimSeconds": 46.01420000000336,
+          "title": "Scanning delivery site",
+          "description": "D-03 · DS-8 · Progress follows actual flight along the ring."
+        },
+        {
+          "code": "INSPECTION_PROGRESS",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-02",
+          "orderId": 2,
+          "occurredAtSimSeconds": 48.314200000003396,
+          "title": "Observation 25%",
+          "description": "D-02 · Circuit coverage only. Landing approval is a separate model check."
+        },
+        {
+          "code": "INSPECTION_PROGRESS",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-04",
+          "orderId": 4,
+          "occurredAtSimSeconds": 52.81420000000346,
+          "title": "Observation 25%",
+          "description": "D-04 · Circuit coverage only. Landing approval is a separate model check."
+        },
+        {
+          "code": "INSPECTION_SCAN_START",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-01",
+          "orderId": 1,
+          "occurredAtSimSeconds": 53.71420000000347,
+          "title": "Scanning delivery site",
+          "description": "D-01 · DS-5 · Progress follows actual flight along the ring."
+        },
+        {
+          "code": "INSPECTION_PROGRESS",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-03",
+          "orderId": 3,
+          "occurredAtSimSeconds": 53.814200000003474,
+          "title": "Observation 25%",
+          "description": "D-03 · Circuit coverage only. Landing approval is a separate model check."
+        },
+        {
+          "code": "INSPECTION_PROGRESS",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-02",
+          "orderId": 2,
+          "occurredAtSimSeconds": 56.21420000000351,
+          "title": "Observation 50%",
+          "description": "D-02 · Circuit coverage only. Landing approval is a separate model check."
+        },
+        {
+          "code": "INSPECTION_PAD_RESERVED",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-02",
+          "orderId": 2,
+          "occurredAtSimSeconds": 58.714200000003544,
+          "title": "Test pad reserved",
+          "description": "DS-9 · Session-only teaching reservation."
+        },
+        {
+          "code": "INSPECTION_PROGRESS",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-04",
+          "orderId": 4,
+          "occurredAtSimSeconds": 60.61420000000357,
+          "title": "Observation 50%",
+          "description": "D-04 · Circuit coverage only. Landing approval is a separate model check."
+        },
+        {
+          "code": "INSPECTION_PROGRESS",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-01",
+          "orderId": 1,
+          "occurredAtSimSeconds": 61.614200000003585,
+          "title": "Observation 25%",
+          "description": "D-01 · Circuit coverage only. Landing approval is a separate model check."
+        },
+        {
+          "code": "INSPECTION_PROGRESS",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-03",
+          "orderId": 3,
+          "occurredAtSimSeconds": 61.714200000003586,
+          "title": "Observation 50%",
+          "description": "D-03 · Circuit coverage only. Landing approval is a separate model check."
+        },
+        {
+          "code": "INSPECTION_PROGRESS",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-02",
+          "orderId": 2,
+          "occurredAtSimSeconds": 64.01420000000361,
+          "title": "Observation 75%",
+          "description": "D-02 · Circuit coverage only. Landing approval is a separate model check."
+        },
+        {
+          "code": "INSPECTION_PROGRESS",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-04",
+          "orderId": 4,
+          "occurredAtSimSeconds": 68.51420000000336,
+          "title": "Observation 75%",
+          "description": "D-04 · Circuit coverage only. Landing approval is a separate model check."
+        },
+        {
+          "code": "INSPECTION_PROGRESS",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-01",
+          "orderId": 1,
+          "occurredAtSimSeconds": 69.4142000000033,
+          "title": "Observation 50%",
+          "description": "D-01 · Circuit coverage only. Landing approval is a separate model check."
+        },
+        {
+          "code": "INSPECTION_PROGRESS",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-03",
+          "orderId": 3,
+          "occurredAtSimSeconds": 69.5142000000033,
+          "title": "Observation 75%",
+          "description": "D-03 · Circuit coverage only. Landing approval is a separate model check."
+        },
+        {
+          "code": "INSPECTION_PROGRESS",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-02",
+          "orderId": 2,
+          "occurredAtSimSeconds": 71.91420000000316,
+          "title": "Observation 100%",
+          "description": "D-02 · Complete flight circuit; evaluating separate landing checks."
+        },
+        {
+          "code": "INSPECTION_WAIT",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-02",
+          "orderId": 2,
+          "occurredAtSimSeconds": 71.91420000000316,
+          "title": "Observation complete — checks pending",
+          "description": "D-02 · Pad reserved. Parcel stays aboard."
+        },
+        {
+          "code": "INSPECTION_PROGRESS",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-04",
+          "orderId": 4,
+          "occurredAtSimSeconds": 76.31420000000291,
+          "title": "Observation 100%",
+          "description": "D-04 · Complete flight circuit; evaluating separate landing checks."
+        },
+        {
+          "code": "INSPECTION_PASSED",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-04",
+          "orderId": 4,
+          "occurredAtSimSeconds": 76.31420000000291,
+          "title": "Model checks passed",
+          "description": "D-04 · Observation complete; cargo, static approach and delivery pad checks passed. Proceeding to approach."
+        },
+        {
+          "code": "INSPECTION_PROGRESS",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-01",
+          "orderId": 1,
+          "occurredAtSimSeconds": 77.31420000000286,
+          "title": "Observation 75%",
+          "description": "D-01 · Circuit coverage only. Landing approval is a separate model check."
+        },
+        {
+          "code": "INSPECTION_PROGRESS",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-03",
+          "orderId": 3,
+          "occurredAtSimSeconds": 77.41420000000285,
+          "title": "Observation 100%",
+          "description": "D-03 · Complete flight circuit; evaluating separate landing checks."
+        },
+        {
+          "code": "INSPECTION_PASSED",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-03",
+          "orderId": 3,
+          "occurredAtSimSeconds": 77.41420000000285,
+          "title": "Model checks passed",
+          "description": "D-03 · Observation complete; cargo, static approach and delivery pad checks passed. Proceeding to approach."
+        },
+        {
+          "code": "INSPECTION_BLOCKED",
+          "category": "critical",
+          "source": "inspection",
+          "droneId": "D-02",
+          "orderId": 2,
+          "occurredAtSimSeconds": 80.71420000000266,
+          "title": "Inspection needs human review",
+          "description": "D-02 · Pad reserved No delivery has been confirmed."
+        },
+        {
+          "code": "INSPECTION_PAD_RELEASED",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-02",
+          "orderId": 2,
+          "occurredAtSimSeconds": 82.11420000000258,
+          "title": "Test pad released",
+          "description": "DS-9 · Session-only teaching reservation."
+        },
+        {
+          "code": "INSPECTION_DROPOFF",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-04",
+          "orderId": 4,
+          "occurredAtSimSeconds": 82.41420000000257,
+          "title": "Inspected delivery complete",
+          "description": "D-04 · Order #4 delivered at DS-7."
+        },
+        {
+          "code": "INSPECTION_PASSED",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-02",
+          "orderId": 2,
+          "occurredAtSimSeconds": 82.91420000000254,
+          "title": "Model checks passed",
+          "description": "D-02 · Observation complete; cargo, static approach and delivery pad checks passed. Proceeding to approach."
+        },
+        {
+          "code": "INSPECTION_DROPOFF",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-03",
+          "orderId": 3,
+          "occurredAtSimSeconds": 83.6142000000025,
+          "title": "Inspected delivery complete",
+          "description": "D-03 · Order #3 delivered at DS-8."
+        },
+        {
+          "code": "INSPECTION_PROGRESS",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-01",
+          "orderId": 1,
+          "occurredAtSimSeconds": 85.11420000000241,
+          "title": "Observation 100%",
+          "description": "D-01 · Complete flight circuit; evaluating separate landing checks."
+        },
+        {
+          "code": "INSPECTION_PASSED",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-01",
+          "orderId": 1,
+          "occurredAtSimSeconds": 85.11420000000241,
+          "title": "Model checks passed",
+          "description": "D-01 · Observation complete; cargo, static approach and delivery pad checks passed. Proceeding to approach."
+        },
+        {
+          "code": "INSPECTION_DROPOFF",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-02",
+          "orderId": 2,
+          "occurredAtSimSeconds": 89.01420000000219,
+          "title": "Inspected delivery complete",
+          "description": "D-02 · Order #2 delivered at DS-9."
+        },
+        {
+          "code": "INSPECTION_DROPOFF",
+          "category": "updates",
+          "source": "inspection",
+          "droneId": "D-01",
+          "orderId": 1,
+          "occurredAtSimSeconds": 91.21420000000207,
+          "title": "Inspected delivery complete",
+          "description": "D-01 · Order #1 delivered at DS-5."
+        }
+      ]
+    },
+    "minSep": 30.181569007873126
+  },
+  "blocked": {
+    "droneId": "D-02",
+    "info": {
+      "orderId": 2,
+      "droneId": "D-02",
+      "padId": "DS-9",
+      "status": "blocked",
+      "progress": 0.003136802203732205,
+      "checks": [],
+      "attempts": 1,
+      "token": "I-2-2",
+      "since": 26.70000000000011,
+      "lastQuarter": 0,
+      "message": "No complete inspection orbit and onward landing route fits the current obstacles, airspace and altitude limit.",
+      "reviewAt": 0
+    },
+    "orderStatus": "picked_up",
+    "carry": true,
+    "critical": [
+      "INSPECTION_BLOCKED",
+      "INSPECTION_BLOCKED",
+      "INSPECTION_BLOCKED",
+      "PROX_BUILDING_OR_AIRSPACE",
+      "PROX_BUILDING_OR_AIRSPACE",
+      "PROX_BUILDING_OR_AIRSPACE",
+      "PROX_BUILDING_OR_AIRSPACE",
+      "NO_VALID_ROUTE",
+      "NO_VALID_ROUTE",
+      "NO_VALID_ROUTE",
+      "NO_VALID_ROUTE"
+    ]
+  },
+  "layout": {
+    "viewport": 1280,
+    "scrollWidth": 1280
+  },
+  "reset": {
+    "config": {
+      "radiusM": 25,
+      "preferredAltitudeM": 80,
+      "speedMps": 5,
+      "sectors": 48,
+      "retryS": 1,
+      "escalateS": 8
+    },
+    "records": [],
+    "reservations": [],
+    "history": []
+  },
+  "pageErrors": []
+}

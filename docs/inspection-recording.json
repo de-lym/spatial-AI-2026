@@ -1,0 +1,186 @@
+{
+  "start": {
+    "droneId": "D-02",
+    "orderId": 2,
+    "padId": "DS-9",
+    "time": 39.551799999997314
+  },
+  "paused": {
+    "before": 0.003136802203732205,
+    "after": 0.003136802203732205
+  },
+  "scanning": {
+    "time": 48.35179999999744,
+    "info": {
+      "orderId": 2,
+      "droneId": "D-02",
+      "padId": "DS-9",
+      "status": "scanning",
+      "progress": 0.2514649790360149,
+      "checks": [],
+      "attempts": 1,
+      "token": "I-2-2",
+      "since": 26.65179999999713,
+      "lastQuarter": 1,
+      "message": "Orbiting and collecting simulated observation coverage.",
+      "reviewAt": 0
+    },
+    "orderStatus": "picked_up",
+    "pos": {
+      "x": 45.806324583715885,
+      "y": 16,
+      "z": -31.389969252317904
+    },
+    "delivered": []
+  },
+  "waiting": {
+    "time": 73.05179999999714,
+    "info": {
+      "orderId": 2,
+      "droneId": "D-02",
+      "padId": "DS-9",
+      "status": "waiting",
+      "progress": 1,
+      "checks": [
+        {
+          "id": "orbit",
+          "label": "Observation circuit complete",
+          "pass": true
+        },
+        {
+          "id": "cargo",
+          "label": "Assigned parcel aboard",
+          "pass": true
+        },
+        {
+          "id": "route",
+          "label": "Static approach route valid",
+          "pass": true
+        },
+        {
+          "id": "pad",
+          "label": "Delivery pad available",
+          "pass": false,
+          "detail": "Pad reserved"
+        }
+      ],
+      "attempts": 1,
+      "token": "I-2-2",
+      "since": 26.65179999999713,
+      "lastQuarter": 4,
+      "message": "Pad reserved",
+      "reviewAt": 74.05179999999714,
+      "waitSince": 71.9517999999972
+    },
+    "orderStatus": "picked_up",
+    "pos": {
+      "x": 43.52786404500042,
+      "y": 16,
+      "z": -24.663932022500212
+    },
+    "delivered": []
+  },
+  "passed": {
+    "time": 83.45179999999655,
+    "info": {
+      "orderId": 2,
+      "droneId": "D-02",
+      "padId": "DS-9",
+      "status": "cleared",
+      "progress": 1,
+      "checks": [
+        {
+          "id": "orbit",
+          "label": "Observation circuit complete",
+          "pass": true
+        },
+        {
+          "id": "cargo",
+          "label": "Assigned parcel aboard",
+          "pass": true
+        },
+        {
+          "id": "route",
+          "label": "Static approach route valid",
+          "pass": true
+        },
+        {
+          "id": "pad",
+          "label": "Delivery pad available",
+          "pass": true,
+          "detail": ""
+        }
+      ],
+      "attempts": 1,
+      "token": "I-2-2",
+      "since": 26.65179999999713,
+      "lastQuarter": 4,
+      "message": "Circuit complete. Model checks passed; approach authorized in this simulation.",
+      "reviewAt": 83.95179999999658,
+      "waitSince": 71.9517999999972,
+      "clearedAt": 82.95179999999658
+    },
+    "orderStatus": "picked_up",
+    "pos": {
+      "x": 43.52786404500042,
+      "y": 14.600000000000003,
+      "z": -24.663932022500212
+    },
+    "delivered": [
+      4
+    ]
+  },
+  "delivered": {
+    "time": 89.95179999999618,
+    "info": {
+      "orderId": 2,
+      "droneId": "D-02",
+      "padId": "DS-9",
+      "status": "delivered",
+      "progress": 1,
+      "checks": [
+        {
+          "id": "orbit",
+          "label": "Observation circuit complete",
+          "pass": true
+        },
+        {
+          "id": "cargo",
+          "label": "Assigned parcel aboard",
+          "pass": true
+        },
+        {
+          "id": "route",
+          "label": "Static approach route valid",
+          "pass": true
+        },
+        {
+          "id": "pad",
+          "label": "Delivery pad available",
+          "pass": true,
+          "detail": ""
+        }
+      ],
+      "attempts": 1,
+      "token": "I-2-2",
+      "since": 26.65179999999713,
+      "lastQuarter": 4,
+      "message": "Parcel delivered after completed observation and model checks.",
+      "reviewAt": 83.95179999999658,
+      "waitSince": 71.9517999999972,
+      "clearedAt": 82.95179999999658
+    },
+    "orderStatus": "delivered",
+    "pos": {
+      "x": 48,
+      "y": 0,
+      "z": -26.9
+    },
+    "delivered": [
+      4,
+      3,
+      2
+    ]
+  },
+  "pageErrors": []
+}

@@ -1,0 +1,455 @@
+--- a/main.js
++++ b/main.js
+@@ -7,6 +7,7 @@
+   namedVolumes, volumesAt, blockAt, roofUnder, ceilingMAt, inPermitted, LAND, tileAt, exposureOf, criterionText,
+ } from './spatial.js';
+ import { createEventStore } from './ops-events.js';
++import { installProximity } from './proximity-integration.js';
+ 
+ /* ====================================================================
+    AIRSPACE — a location-aware drone delivery sandbox (synthetic, classroom only)
+@@ -782,7 +783,7 @@
+   } else c.hold.reason = plan.reason;
+   return false;
+ }
+-function flyStep(c, dt) {
++function preflight(c, dt) {
+   const task = c.task, R = task.route;
+   if (c.hold) {
+     c.hold.timer -= dt;
+@@ -798,6 +799,10 @@
+       if (!replan(c, bad)) return false;
+     }
+   }
++}
++function flyStep(c, dt) {
++  if (c.hold) return false;
++  const task = c.task, R = task.route;
+   // drone-to-drone separation: a drone that must yield moves at a fraction of its speed, or not at all (WAITING_FOR_CLEARANCE)
+   const sf = c.sepFactor ?? 1;
+   if (sf <= 0) { c.speedU *= Math.max(0, 1 - dt * 6); return false; }
+@@ -1268,7 +1273,10 @@
+   // restaurants: preparation clocks run for orders being prepared (Rule 4)
+   for (const o of S.orders) if (o.status === 'preparing' && o.prepRemaining > 0) o.prepRemaining = Math.max(0, o.prepRemaining - dt);
+ 
++  for (const c of S.couriers) if (c.task) preflight(c, dt);
++  proximity.prepare(dt);
+   sepPlan(dt);
++  proximity.guard(dt);
+   for (const c of S.couriers) droneStep(c, dt);
+   sepTrack();
+   if ((S.timers.sense -= dt) <= 0) { // nearest-obstacle readout (robot panel)
+@@ -1313,6 +1321,7 @@
+     ground_block: { block_id: tile.id, name: tile.name, land_use: LAND[tile.landUse].label, risk_cost: tile.risk },
+     nearby_landmark: lm.name,
+     status: c.hold ? 'HOVER (NO_VALID_ROUTE)' : statusWord(c),
++    proximity: [...proximity.conditions.values()].filter(s => s.droneId === c.id),
+     separation: { state: sepLabel(c), waiting_for: c.sep?.by ?? [] },
+     description: hv.lines[0] ?? '',
+     heading_deg: Math.round(c.headingDeg),
+@@ -1993,6 +2002,8 @@
+     const hv = humanView(c);
+     setHTML($('insp-human'), `<p><b>${esc(hv.headline)}</b></p>` + hv.lines.slice(0, 3).map((l) => `<p>${esc(l)}</p>`).join(''));
+     setHTML($('insp-dl'), dlRow('Flight state', flightState(c) + (c.hold ? ` · ${c.hold.reason}` : '')) + dlRow('Separation', sepLabel(c) + (c.sep?.by?.length ? ` · ${aliases(c.sep.by)}` : ''))
++      + dlRow('Building surface clearance', `${fmt(proximity.building(c).metres)} m · ${proximity.building(c).name} (threshold ${cfg.clearanceM} m)`)
++      + dlRow('Proximity', [...proximity.conditions.values()].filter(s => s.droneId === c.id).map(s => `${s.cause}: ${s.action} · ${s.message}`).join(' | ') || 'Clear')
+       + dlRow('Mission', missionLabel(c)) + dlRow('Current leg', attentionText(c)) + dlRow('Altitude', `${Math.round(c.pos.y * SCALE_M)} m`)
+       + dlRow('ETA', etaText(c)) + dlRow('Battery', 'Unavailable · no model'));
+   } else if (tab === 'location') {
+@@ -2255,6 +2266,7 @@
+ modeSwitch();
+ 
+ function resetWorld(silent = false) {
++  proximity.reset();
+   ops.reset(); ui.shownDrone = null; ui.opsNote = false; evKey = ''; evSeen = new Set();
+   [...S.orders].forEach(removeOrder);
+   [...S.couriers].forEach(removeCourier);
+@@ -2332,6 +2344,7 @@
+ new ResizeObserver(resizeMap).observe(mapEl);
+ addEventListener('resize', resizeMap);
+ 
++const proximity = installProximity({S, cfg, world, scale: SCALE_M, ops, scene, segCheck, planRoute, destOf, toast, selectDrone, prioCmp});
+ controls.update(); controls.saveState();
+ finishBlocks(); regenAirspace();
+ resetWorld(true);
+@@ -2351,4 +2364,4 @@
+ updatePanels(true);
+ frame();
+ // exposed for debugging / automated checks
+-window.__sim = { sepEvade, sepPlan, posAfter, prioCmp, scene, LAND, regenAirspace, segCheck, inPermitted, volumesAt, S, act, step, world, cfg, planRoute, planMission, getLocation, getAgentsAt, getAgentsInBox, setStage, previews, selectVolume, resetWorld, ui, ops, selectDrone, clearDroneSelection, renderEvents, camera, renderer, controls };
++window.__sim = { proximity, sepEvade, sepPlan, posAfter, prioCmp, scene, LAND, regenAirspace, segCheck, inPermitted, volumesAt, S, act, step, world, cfg, planRoute, planMission, getLocation, getAgentsAt, getAgentsInBox, setStage, previews, selectVolume, resetWorld, ui, ops, selectDrone, clearDroneSelection, renderEvents, camera, renderer, controls };
+--- a/index.html
++++ b/index.html
+@@ -196,6 +196,20 @@
+       <div id="lu-rules"></div>
+       <div class="dim small">Simulation policies, not legal rules. The floor is the lowest permitted altitude above a block of that use; risk (0–10) is the soft cost per metre flown over it. Permission is a hard constraint, risk is only a preference.</div>
+     </details>
++    <details class="sec" id="sec-proximity" open>
++      <summary>Proximity · automatic response / human review</summary>
++      <p class="small" id="prox-summary" role="status">Initializing proximity…</p>
++      <div id="prox-active" class="prox-active" aria-label="Active proximity conditions"></div>
++      <div class="scen">
++        <button id="prox-encounter">Pigeon encounter</button><button id="prox-clear">Clear pigeons</button>
++        <button id="prox-ack">Record human review</button><button id="prox-export">Export session JSON</button>
++      </div>
++      <div class="prm"><label>Pigeon clearance (m) <span id="p-bird-v"></span><input type="range" id="p-bird" min="8" max="35" step="1"></label></div>
++      <div class="prm"><label>Pigeon uncertainty buffer (m) <span id="p-uncertainty-v"></span><input type="range" id="p-uncertainty" min="0" max="12" step="1"></label></div>
++      <div class="prm"><label>Pigeon look-ahead (s) <span id="p-birdlook-v"></span><input type="range" id="p-birdlook" min="1" max="4" step="0.5"></label></div>
++      <div class="prm"><label>Persistent hazard → human review (s) <span id="p-escalate-v"></span><input type="range" id="p-escalate" min="3" max="20" step="1"></label></div>
++      <p class="dim small">Synthetic classroom simulation. A hold can still be approached by a pigeon. No safe manoeuvre → HUMAN_REQUIRED; review does not clear the hazard. Clear for 2 s → resume. Events are session-only; export before Reset. Drone/building thresholds remain below in Route cost &amp; separation.</p>
++    </details>
+     <details class="sec" id="sec-params">
+       <summary>Route cost &amp; separation <small>(classroom parameters)</small></summary>
+       <div class="dim small" id="cost-formula"></div>
+--- a/style.css
++++ b/style.css
+@@ -209,3 +209,8 @@
+   :root { --left: 260px; --inspector: 320px; --fleet-h: 220px; }
+   .statusbar span { padding: 0 9px; }
+ }
++
++/* Scoped proximity additions retain the existing operations shell. */
++.prox-active { display:grid; gap:8px; margin:8px 0; }
++.prox-active button { width:100%; text-align:left; white-space:normal; overflow-wrap:anywhere; }
++#sec-proximity button:focus-visible { outline:2px solid #333; outline-offset:2px; }
+--- /dev/null
++++ b/proximity.js
+@@ -0,0 +1,67 @@
++/** Pure proximity geometry. Scene axes: x east / y up / z south; distances in scene units. */
++export const proximityConfig = {
++  birdClearanceM: 18, birdLookS: 2, birdUncertaintyM: 4,
++  recoveryS: 2, escalateS: 8, escapeM: 35,
++};
++export const distance = (a,b) => Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z);
++const mix = (a,b,t) => ({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t,z:a.z+(b.z-a.z)*t});
++export function closestApproach(a,b,c,d) {
++  const r = [a.x-c.x,a.y-c.y,a.z-c.z];
++  const v = [b.x-a.x-d.x+c.x,b.y-a.y-d.y+c.y,b.z-a.z-d.z+c.z];
++  const vv = v.reduce((s,x)=>s+x*x,0);
++  const t = vv ? Math.max(0,Math.min(1,-r.reduce((s,x,i)=>s+x*v[i],0)/vv)) : 0;
++  return Math.hypot(...r.map((x,i)=>x+t*v[i]));
++}
++/** Exact piecewise route prediction, including waypoint turns and vertical speed. */
++export function trajectory(c, seconds, factor=1, speed=4, verticalFactor=.7) {
++  const out = [{t:0,p:{...c.pos}}]; let p={...c.pos}, t=0;
++  if (c.task && !c.hold && factor>0) for (const w of c.task.route.pts.slice(c.task.route.idx)) {
++    const d=distance(p,w); if (d<1e-9) continue;
++    const v=speed*factor*(Math.hypot(w.x-p.x,w.z-p.z)<.01?verticalFactor:1);
++    const need=d/v, used=Math.min(need,seconds-t);
++    const q=mix(p,w,used/need); t+=used; out.push({t,p:q}); p=q;
++    if(t>=seconds-1e-9) break;
++  }
++  if(t<seconds) out.push({t:seconds,p});
++  return out;
++}
++export function at(path,t) {
++  for(let i=1;i<path.length;i++) if(t<=path[i].t+1e-9) {
++    const a=path[i-1],b=path[i]; return mix(a.p,b.p,(t-a.t)/(b.t-a.t||1));
++  }
++  return path.at(-1).p;
++}
++export function pathCPA(a,b) {
++  const times=[...new Set([...a,...b].map(x=>x.t))].sort((x,y)=>x-y);
++  let min=Infinity;
++  for(let i=1;i<times.length;i++) min=Math.min(min,closestApproach(at(a,times[i-1]),at(a,times[i]),at(b,times[i-1]),at(b,times[i])));
++  return min;
++}
++export function boxSurfaceDistance(p,o) {
++  return Math.hypot(Math.max(o.x0-p.x,0,p.x-o.x1),Math.max(-p.y,0,p.y-o.h),Math.max(o.z0-p.z,0,p.z-o.z1));
++}
++/** If already inside a margin, only non-worsening, strictly separating motion is admissible. */
++export function unsafeApproach(a,b,margin) {
++  const initial=distance(a[0].p,b[0].p), min=pathCPA(a,b);
++  if(initial<margin) return min<initial-1e-6 || distance(a.at(-1).p,b.at(-1).p)<=initial+1e-6;
++  return min<margin;
++}
++/** Seeded changes make the bird unpredictable to the constant-velocity predictor, reproducible in tests. */
++export function createBird(seed=19) {
++  let s=seed;
++  const random=()=>((s=(s*16807)%2147483647)/2147483647);
++  return {id:'P-01',pos:{x:12,y:12,z:8},prev:{x:12,y:12,z:8},velocity:{x:0,y:0,z:0},turnIn:0,life:0,
++    step(dt,bounds=55) {
++      this.prev={...this.pos}; this.life+=dt; this.turnIn-=dt;
++      if(this.turnIn<=0) {
++        const angle=random()*Math.PI*2, speed=1+random()*1.5;
++        this.velocity={x:Math.cos(angle)*speed,y:(random()-.5)*.7,z:Math.sin(angle)*speed};
++        this.turnIn=.4+random()*.8;
++      }
++      for(const k of ['x','y','z']) this.pos[k]+=this.velocity[k]*dt;
++      for(const k of ['x','z']) if(Math.abs(this.pos[k])>bounds) {this.pos[k]=Math.sign(this.pos[k])*bounds;this.velocity[k]*=-1;}
++      if(this.pos.y<4||this.pos.y>22) {this.pos.y=Math.max(4,Math.min(22,this.pos.y));this.velocity.y*=-1;}
++    },
++  };
++}
++export function birdPath(b,seconds) {return [{t:0,p:{...b.pos}},{t:seconds,p:{x:b.pos.x+b.velocity.x*seconds,y:b.pos.y+b.velocity.y*seconds,z:b.pos.z+b.velocity.z*seconds}}];}
+--- /dev/null
++++ b/proximity-integration.js
+@@ -0,0 +1,174 @@
++import * as THREE from 'three';
++import {proximityConfig as config,trajectory,pathCPA,birdPath,createBird,distance,unsafeApproach,boxSurfaceDistance} from './proximity.js';
++
++/** Adapter uses the existing route planner, delivery state and operations store; no second simulation clock. */
++export function installProximity({S,cfg,world,scale,ops,scene,segCheck,planRoute,destOf,toast,selectDrone,prioCmp}) {
++  let birds=[], sequence=0, archive=[], dropped=0;
++  const conditions=new Map(), markers=new Map();
++  const key=(c,cause)=>`${c.id}:${cause}`;
++  function record(c,cause,action,message,extra={}) {
++    const e={code:`PROX_${cause}`,droneId:c.id,orderId:c.task?.order?.id??null,
++      occurredAtSimSeconds:S.time,title:`${action} · ${cause.toLowerCase()}`,
++      description:`${c.id} · ${message}`,source:'proximity',action,...extra};
++    if(action==='HUMAN_REQUIRED') ops.open({...e,category:'critical'}); else ops.update(e);
++    archive.push({auditId:++sequence,...e,positionM:{east:c.pos.x*scale,north:-c.pos.z*scale,up:c.pos.y*scale},
++      thresholds:{...config,separationM:cfg.sepM,buildingClearanceM:cfg.clearanceM}});
++    if(archive.length>2000) {archive.shift();dropped++;}
++  }
++  function condition(c,cause,message,{immediate=false,auto='AUTO_HOLD',targets=[]}={}) {
++    const k=key(c,cause); let state=conditions.get(k);
++    if(!state) {
++      state={droneId:c.id,cause,since:S.time,lastSeen:S.time,message,action:auto,targets}; conditions.set(k,state);
++      state.reportedAction=auto;record(c,cause,auto,message,{targets});
++    }
++    state.lastSeen=S.time; state.message=message; state.targets=targets;
++    if(state.action!=='HUMAN_REQUIRED') state.action=auto;
++    if(immediate||S.time-state.since>=config.escalateS) {
++      if(state.action!=='HUMAN_REQUIRED') {
++        state.action='HUMAN_REQUIRED';state.reportedAction='HUMAN_REQUIRED';record(c,cause,'HUMAN_REQUIRED',message+' · review airspace / clear external hazard; no forced landing or unsafe override.',{targets});
++      }
++    }
++  }
++  const predict=(c,s,f=1)=>trajectory(c,s,f);
++  const birdMargin=()=> (config.birdClearanceM+config.birdUncertaintyM)/scale;
++  function birdRisk(c,f=1,h=config.birdLookS) {
++    return birds.filter(b=>pathCPA(predict(c,h,f),birdPath(b,h))<birdMargin());
++  }
++  function tryEscape(c) {
++    if(!c.task||c.hold) return false;
++    // Emergency candidates remain inside the existing permitted union and obstacle clearance.
++    for(const dy of [0,2,-2]) for(let i=0;i<8;i++) {
++      const angle=i*Math.PI/4,r=config.escapeM/scale;
++      const q={x:c.pos.x+Math.cos(angle)*r,y:c.pos.y+dy,z:c.pos.z+Math.sin(angle)*r,phase:'cruise'};
++      if(segCheck(c.pos,q)) continue;
++      const route={pts:[q],idx:0}, probe={pos:c.pos,task:{route}};
++      const duration=distance(c.pos,q)/4;
++      if(birds.some(b=>unsafeApproach(predict(probe,duration),birdPath(b,duration),birdMargin()))) continue;
++      if(S.couriers.some(other=>other!==c&&other.pos.y>.3&&unsafeApproach(predict(probe,duration),predict(other,duration,other.sepFactor??1),cfg.sepM/scale))) continue;
++      const plan=planRoute(q,destOf(c.task).acc);
++      if(!plan.ok) continue;
++      const R=c.task.route; R.pts=[q,...plan.pts];R.idx=0;R.rerouted=true;R.plan=plan.mission;
++      c.rerouteWhy='to avoid an unpredictable pigeon';c.rerouteUntil=S.time+3;
++      record(c,'PIGEON','AUTO_EVADE','Validated escape segment and onward route; motion remains subject to the final joint guard.');
++      return true;
++    }
++    return false;
++  }
++  function prepare(dt) {
++    for(const b of birds) {b.step(dt,world.bounds-3);const m=markers.get(b.id);if(m)m.position.set(b.pos.x,b.pos.y+.4,b.pos.z);}
++    // The teaching bird is not constrained to navigable drone airspace. Its direction changes are hidden from prediction.
++    for(const c of S.couriers) {
++      c.proximityStop=false;
++      if(!c.task||c.pos.y<.3) continue;
++      const risks=birdRisk(c);
++      if(risks.length) {
++        if(S.time>=(c.nextBirdPlan??0)) {
++          c.nextBirdPlan=S.time+.75;
++          c.birdEvading=tryEscape(c);
++        }
++        const safe=c.birdEvading&&!birdRisk(c).length;
++        c.proximityStop=!safe;
++        condition(c,'PIGEON',`${risks.map(b=>b.id).join(', ')} predicted inside ${config.birdClearanceM} m + ${config.birdUncertaintyM} m uncertainty. ${safe?'Escape selected.':'Braking; no validated escape currently available.'}`,{auto:safe?'AUTO_EVADE':'AUTO_HOLD',targets:risks.map(b=>b.id)});
++      }
++      // A post-emergency quiet interval prevents repeated stop/resume oscillation.
++      const p=conditions.get(key(c,'PIGEON'));
++      if(!risks.length&&p&&S.time-p.lastSeen<config.recoveryS&&!c.birdEvading) c.proximityStop=true;
++      if(c.blocked?.until>S.time&&!c.hold) condition(c,'BUILDING_OR_AIRSPACE','Obstacle or restricted volume detected; existing planner recalculated a validated route.',{auto:'AUTO_REROUTE'});
++      if(c.hold) condition(c,'BUILDING_OR_AIRSPACE',c.hold.reason,{auto:'AUTO_HOLD'});
++    }
++  }
++  function guard(dt) {
++    const active=S.couriers.filter(c=>c.task||c.pos.y>=.3);
++    for(const c of active) if(c.proximityStop)c.sepFactor=0;
++    // Monotonic fixed-point stops: any stop may expose a new conflict for a higher-priority drone.
++    for(let iteration=0;iteration<=active.length;iteration++) {
++      let changed=false;
++      for(const c of active) {
++        let path=predict(c,dt,c.sepFactor??1);
++        const bad=path.slice(1).some((p,i)=>segCheck(path[i].p,p.p));
++        const birdBad=birds.filter(b=>unsafeApproach(path,birdPath(b,dt),birdMargin()));
++        if(bad||birdBad.length) {
++          if(c.sepFactor>0) {c.sepFactor=0;changed=true;}
++          condition(c,bad?'BUILDING_OR_AIRSPACE':'PIGEON','Next movement rejected by swept geometry; hold is a fallback, not a guarantee.',{auto:'AUTO_HOLD'});
++        }
++      }
++      for(let i=0;i<active.length;i++) for(let j=i+1;j<active.length;j++) {
++        const a=active[i],b=active[j];
++        if(a.pos.y<.3&&b.pos.y<.3) continue;
++        const pa=predict(a,dt,a.sepFactor??1),pb=predict(b,dt,b.sepFactor??1);
++        if(!unsafeApproach(pa,pb,cfg.sepM/scale)) continue;
++        // Existing sepPlan determines right of way. Stop the yielding drone first; then recheck BOTH trajectories.
++        const loser=(a.sepFactor??1)<(b.sepFactor??1)?a:(b.sepFactor??1)<(a.sepFactor??1)?b:prioCmp(a,b)<=0?b:a;
++        const stop=(loser.sepFactor??1)>0?loser:loser===a?b:a;
++        if((stop.sepFactor??1)>0) {stop.sepFactor=0;changed=true;}
++        condition(stop,'DRONE',`Yield to ${stop===a?b.id:a.id}; joint motion guard.`,{targets:[stop===a?b.id:a.id]});
++      }
++      if(!changed)break;
++    }
++    for(const c of active) {
++      if(c.sep?.state==='waiting'||c.sep?.state==='yielding') condition(c,'DRONE',`Existing priority: occupied pad, deadlock boost, earlier departure, then ID; yielding to ${(c.sep.by??[]).join(', ')||'traffic'}.`,{auto:c.sepFactor===0?'AUTO_HOLD':'AUTO_SLOW',targets:c.sep.by});
++      const p=predict(c,dt,c.sepFactor??1);
++      const residual=birds.filter(b=>unsafeApproach(p,birdPath(b,dt),birdMargin()));
++      if(residual.length) condition(c,'PIGEON','No validated safe movement: bird may enter the hold position. Unresolved proximity; human review required.',{immediate:true,targets:residual.map(b=>b.id)});
++      if(segCheck(c.pos,c.pos)) condition(c,'BUILDING_OR_AIRSPACE','Current position violates clearance or permitted airspace. Cannot promise a safe hold.',{immediate:true});
++      for(const other of active) if(other!==c&&c.pos.y>=.3&&other.pos.y>=.3&&distance(c.pos,other.pos)<cfg.sepM/scale) condition(c,'DRONE','Separation already breached; do not teleport or force an unsafe manoeuvre.',{immediate:true,targets:[other.id]});
++      if((c.sepFactor??1)===0&&c.task) c.sep={state:'waiting',by:c.sep?.by??[]};
++    }
++    for(const [k,s] of conditions) if(S.time-s.lastSeen>=config.recoveryS) {
++      const c=S.couriers.find(c=>c.id===s.droneId);
++      if(c) {ops.resolve(`PROX_${s.cause}`,c.id,S.time);record(c,s.cause,'AUTO_RESUME','Condition clear for recovery interval; normal planning resumes.');c.birdEvading=false;}
++      conditions.delete(k);
++    }
++    for(const s of conditions.values()) if(s.reportedAction!==s.action) {
++      const c=S.couriers.find(c=>c.id===s.droneId);if(c)record(c,s.cause,s.action,s.message,{targets:s.targets});s.reportedAction=s.action;
++    }
++    render();
++  }
++  function reset() {
++    for(const m of markers.values()){scene.remove(m);m.geometry.dispose();m.material.dispose();}
++    markers.clear();birds=[];conditions.clear();archive=[];sequence=0;dropped=0;render();
++  }
++  function encounter() {
++    const c=S.couriers.find(c=>c===S.selected&&c.task&&c.pos.y>4)??S.couriers.find(c=>c.task&&c.pos.y>4);
++    if(!c){toast('Start Live Flight and wait until a drone is airborne above 20 m.');return false;}
++    const b=createBird(19+sequence);b.id=`P-${String(markers.size+1).padStart(2,'0')}`;
++    const p=predict(c,.8).at(-1).p;
++    b.pos={x:p.x+3,y:p.y,z:p.z};b.velocity={x:-2,y:0,z:0};b.turnIn=1;
++    if(birds.length>=8) {toast('Eight pigeons already active; use Clear pigeons first.');return false;}
++    birds.push(b);
++    const mesh=new THREE.Mesh(new THREE.SphereGeometry(.45,8,6),new THREE.MeshStandardMaterial({color:0x595959}));
++    mesh.position.set(b.pos.x,b.pos.y+.4,b.pos.z);scene.add(mesh);markers.set(b.id,mesh);
++    record(c,'PIGEON','SCENARIO','Synthetic pigeon spawned near predicted flight path.',{targets:[b.id]});render();return true;
++  }
++  function clearBirds() {for(const m of markers.values()){scene.remove(m);m.geometry.dispose();m.material.dispose();}markers.clear();birds=[];toast('Pigeons cleared. Recovery still requires the quiet interval.');render();}
++  function acknowledge() {
++    const pending=[...conditions.values()].filter(s=>s.action==='HUMAN_REQUIRED'&&!s.acknowledged);
++    for(const s of pending) {s.acknowledged=true;const c=S.couriers.find(c=>c.id===s.droneId);if(c)record(c,s.cause,'HUMAN_ACK','Operator reviewed the incident; condition remains open until the hazard clears.');}
++    toast(pending.length?'Review recorded; active hazards remain open.':'No unreviewed human escalation.');render();
++  }
++  function building(c) {
++    const nearest=world.obstacles.map(o=>({id:o.id,name:o.name,metres:boxSurfaceDistance(c.pos,o)*scale})).sort((a,b)=>a.metres-b.metres)[0];
++    return nearest??{id:null,name:'No buildings',metres:null};
++  }
++  function snapshot() {return {schemaVersion:1,simulationOnly:true,simSeconds:S.time,config:{...config,separationM:cfg.sepM,buildingClearanceM:cfg.clearanceM},birds:birds.map(b=>({id:b.id,pos:{...b.pos},velocity:{...b.velocity}})),conditions:[...conditions.values()],audit:archive,droppedAuditEvents:dropped,operations:ops.state.events};}
++  function render() {
++    const el=document.getElementById('prox-summary');if(!el)return;
++    const states=[...conditions.values()];el.textContent=`${birds.length} pigeon(s) · ${states.length} active proximity condition(s) · ${states.filter(s=>s.action==='HUMAN_REQUIRED').length} human review(s)`;
++    const list=document.getElementById('prox-active');list.replaceChildren();
++    for(const s of states) {const b=document.createElement('button');b.type='button';b.textContent=`${s.droneId} · ${s.cause} · ${s.action}${s.acknowledged?' · reviewed':''}`;b.title=s.message;b.onclick=()=>selectDrone(s.droneId,b);list.append(b);}
++    document.getElementById('prox-ack').disabled=!states.some(s=>s.action==='HUMAN_REQUIRED'&&!s.acknowledged);
++    document.getElementById('prox-clear').disabled=!birds.length;
++  }
++  for(const [id,k] of [['p-bird','birdClearanceM'],['p-uncertainty','birdUncertaintyM'],['p-birdlook','birdLookS'],['p-escalate','escalateS']]) {
++    const el=document.getElementById(id);el.value=config[k];document.getElementById(id+'-v').textContent=config[k];
++    el.addEventListener('input',()=>{config[k]=Number(el.value);document.getElementById(id+'-v').textContent=config[k];});
++  }
++  document.getElementById('prox-encounter').onclick=encounter;
++  document.getElementById('prox-clear').onclick=clearBirds;
++  document.getElementById('prox-ack').onclick=acknowledge;
++  document.getElementById('prox-export').onclick=()=>{
++    try {const a=document.createElement('a'),url=URL.createObjectURL(new Blob([JSON.stringify(snapshot(),null,2)],{type:'application/json'}));a.href=url;a.download='proximity-session.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Session export created.');}
++    catch {toast('Export failed. Retry in a browser that permits downloads.');}
++  };
++  return {prepare,guard,reset,encounter,clearBirds,acknowledge,snapshot,config,conditions,building};
++}
+--- /dev/null
++++ b/package.json
+@@ -0,0 +1 @@
++{"name":"airspace-proximity-classroom","private":true,"type":"module","scripts":{"test":"node --test tests/*.test.js"},"engines":{"node":">=20"}}
+--- /dev/null
++++ b/tests/proximity.test.js
+@@ -0,0 +1,52 @@
++import {test} from 'node:test';
++import assert from 'node:assert/strict';
++import {closestApproach,trajectory,pathCPA,boxSurfaceDistance,unsafeApproach,createBird} from '../proximity.js';
++import {cfg,world,bump,segCheck,planRoute} from '../spatial.js';
++import {createEventStore} from '../ops-events.js';
++const p=(x,y=10,z=0)=>({x,y,z});
++const line=(a,b,t=1)=>[{t:0,p:a},{t,p:b}];
++test('head-on and crossing encounters are detected between endpoints',()=>{
++ assert.equal(closestApproach(p(-10),p(10),p(10),p(-10)),0);
++ assert.equal(closestApproach(p(-10),p(10),p(0,10,-10),p(0,10,10)),0);
++ assert.equal(closestApproach(p(-10),p(10),p(0,15,-10),p(0,15,10)),5);
++});
++test('piecewise prediction respects turns and vertical speed',()=>{
++ const c={pos:p(0),task:{route:{idx:0,pts:[p(1),p(1,12)]}}};
++ const a=trajectory(c,1);assert.equal(a[1].t,.25);assert.ok(Math.abs(a.at(-1).p.y-12)<1e-9);
++ const held=trajectory({...c,hold:{}},1);assert.deepEqual(held.at(-1).p,c.pos);
++ assert.equal(pathCPA(a,line(p(1,11),p(1,11))),0);
++});
++test('building distance uses surfaces, roofs and corners rather than centres',()=>{
++ const o={x0:0,x1:10,z0:0,z1:10,h:20};
++ assert.equal(boxSurfaceDistance(p(11,10,5),o),1);
++ assert.equal(boxSurfaceDistance(p(5,23,5),o),3);
++ assert.equal(boxSurfaceDistance(p(5,10,5),o),0);
++ assert.equal(boxSurfaceDistance(p(13,24,10),o),5);
++});
++test('existing breach permits only strictly separating motion',()=>{
++ assert.equal(unsafeApproach(line(p(0),p(-2)),line(p(1),p(1)),3),false);
++ assert.equal(unsafeApproach(line(p(0),p(0)),line(p(1),p(1)),3),true);
++ assert.equal(unsafeApproach(line(p(-5),p(5)),line(p(5),p(-5)),3),true);
++});
++test('seeded pigeon turns reproduce and diverge from constant velocity',()=>{
++ const a=createBird(19),b=createBird(19);let changes=0,old='';
++ for(let i=0;i<100;i++){a.step(.1);b.step(.1);const v=JSON.stringify(a.velocity);if(v!==old)changes++;old=v;}
++ assert.deepEqual(a.pos,b.pos);assert.ok(changes>5);
++});
++test('planner and segment validator enforce inflated 3D obstacles and impossible routes',()=>{
++ world.bounds=50;world.obstacles=[{id:'B1',name:'Box',x0:-3,x1:3,z0:-3,z1:3,h:12}];
++ world.volumes=[{x0:-50,x1:50,z0:-50,z1:50,zloM:0,zhiM:120}];world.restricted=[];cfg.clearanceM=6;bump();
++ assert.equal(segCheck(p(-10,10),p(10,10)).reason,'building');
++ assert.equal(segCheck(p(-10,14),p(10,14)),null);
++ const r=planRoute(p(-10,10),p(10,10));assert.ok(r.ok);
++ let prev=p(-10,10);for(const q of r.pts){assert.equal(segCheck(prev,q),null);prev=q;}
++ world.restricted=[{id:'CLOSED',name:'Closed',active:true,x0:-50,x1:50,z0:-50,z1:50,zloM:0,zhiM:120}];bump();
++ assert.equal(planRoute(p(-10,10),p(10,10)).ok,false);
++});
++test('operations incidents deduplicate and resolve only on model clearance',()=>{
++ const store=createEventStore();const ev={code:'PROX_PIGEON',droneId:'D-01',category:'critical',occurredAtSimSeconds:1};
++ store.open(ev);store.open(ev);assert.equal(store.counts().critical,1);
++ store.update({...ev,action:'HUMAN_ACK'});assert.equal(store.counts().critical,1);
++ store.resolve(ev.code,ev.droneId,3);assert.equal(store.counts().critical,0);
++ store.reset();assert.equal(store.state.events.length,0);
++});
+--- /dev/null
++++ b/tests/browser-acceptance.cjs
+@@ -0,0 +1,32 @@
++const {chromium}=require('playwright');
++const fs=require('fs');const assert=require('assert/strict');
++(async()=>{
++ const browser=await chromium.launch({headless:true,channel:'chrome'});
++ const page=await browser.newPage({viewport:{width:1440,height:900}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
++ await page.goto(process.env.AIRSPACE_URL || 'http://127.0.0.1:8000');await page.waitForFunction(()=>window.__sim);
++ const result={};
++ result.baseline=await page.evaluate(()=>{const a=__sim;a.setStage(4);a.S.running=false;a.S.intake=false;for(let i=0;i<2400;i++)a.step(.1);return {time:a.S.time,delivered:a.S.delivered.length,minSepM:a.S.minSepM,conditions:a.proximity.snapshot().conditions};});
++ assert.ok(result.baseline.delivered>=4,'first four deliveries must complete');
++ result.pigeon=await page.evaluate(()=>{const a=__sim;a.resetWorld(true);a.S.running=false;a.S.intake=false;for(let i=0;i<180;i++)a.step(.1);const spawned=a.proximity.encounter();for(let i=0;i<20;i++)a.step(.1);return {spawned,snapshot:a.proximity.snapshot()};});
++ assert.ok(result.pigeon.spawned);assert.ok(result.pigeon.snapshot.audit.some(e=>e.code==='PROX_PIGEON'&&e.action.startsWith('AUTO')));
++ result.recovery=await page.evaluate(()=>{const a=__sim;a.proximity.clearBirds();for(let i=0;i<100;i++)a.step(.1);return {conditions:a.proximity.snapshot().conditions,audit:a.proximity.snapshot().audit};});
++ assert.ok(!result.recovery.conditions.some(s=>s.cause==='PIGEON'));
++ assert.ok(result.recovery.audit.some(e=>e.code==='PROX_PIGEON'&&e.action==='AUTO_RESUME'));
++ // Closed airspace: current pose becomes illegal, must escalate and never falsely resolve on acknowledgment.
++ result.blocked=await page.evaluate(()=>{const a=__sim;const r={id:'QA-CLOSED',name:'QA impossible airspace',active:true,x0:-58,x1:58,z0:-58,z1:58,zloM:0,zhiM:200};a.world.restricted.push(r);a.world.version++;for(let i=0;i<100;i++)a.step(.1);const before=a.ops.list('critical').map(e=>e.code);a.proximity.acknowledge();return {before,after:a.ops.list('critical').map(e=>e.code),snapshot:a.proximity.snapshot()};});
++ assert.ok(result.blocked.before.includes('PROX_BUILDING_OR_AIRSPACE'));assert.deepEqual(result.blocked.before,result.blocked.after);
++ await page.getByRole('button',{name:'Advanced',exact:true}).click();
++ await page.locator('#sec-proximity').scrollIntoViewIfNeeded();
++ await page.screenshot({path:'docs/proximity-live-1440.png'});
++ await page.setViewportSize({width:1280,height:800});await page.screenshot({path:'docs/proximity-live-1280.png'});
++ result.layout=await page.evaluate(()=>({viewport:innerWidth,pageWidth:document.documentElement.scrollWidth}));
++ // Export is an actual browser download.
++ const downloadPromise=page.waitForEvent('download');await page.locator('#prox-export').click();const download=await downloadPromise;await download.saveAs('docs/sample-session.json');
++ result.export=download.suggestedFilename();
++ await page.evaluate(()=>{const a=__sim;a.resetWorld(true);a.S.running=false;});
++ result.reset=await page.evaluate(()=>__sim.proximity.snapshot());assert.equal(result.reset.birds.length,0);assert.equal(result.reset.conditions.length,0);assert.equal(result.reset.audit.length,0);
++ result.pageErrors=errors;assert.deepEqual(errors,[]);
++ fs.writeFileSync('docs/browser-acceptance.json',JSON.stringify(result,null,2));
++ console.log(JSON.stringify({baseline:result.baseline,pigeonActions:result.pigeon.snapshot.audit.filter(e=>e.code==='PROX_PIGEON').map(e=>e.action),critical:result.blocked.before,layout:result.layout,export:result.export,pageErrors:errors}));
++ await browser.close();
++})().catch(e=>{console.error(e);process.exit(1)});

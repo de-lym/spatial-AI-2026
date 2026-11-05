@@ -20,6 +20,8 @@
       <option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option>
     </select>
     <button id="btn-reset">Reset</button>
+    <button id="btn-inspection">Inspection</button>
+    <button id="btn-placements">Placements</button>
     <button id="btn-advanced" aria-expanded="false" aria-controls="advanced">Advanced</button>
   </div>
 </header>
@@ -196,6 +198,38 @@
       <div id="lu-rules"></div>
       <div class="dim small">Simulation policies, not legal rules. The floor is the lowest permitted altitude above a block of that use; risk (0–10) is the soft cost per metre flown over it. Permission is a hard constraint, risk is only a preference.</div>
     </details>
+    <details class="sec" id="sec-inspection" open>
+      <summary>Pre-delivery inspection · Orbit &amp; check</summary>
+      <p class="small" id="inspection-summary">No inspection yet.</p>
+      <div class="scen"><button id="inspection-start">Start inspection demo</button><button id="inspection-view">View inspection</button><button id="inspection-reserve">Test: reserve delivery pad</button></div>
+      <div id="inspection-list" aria-label="Delivery inspections"></div>
+      <div class="prm"><label>Orbit radius (m) <span id="inspection-radius-v"></span><input type="range" id="inspection-radius" min="15" max="40" step="5"></label></div>
+      <div class="prm"><label>Preferred orbit altitude (m) <span id="inspection-altitude-v"></span><input type="range" id="inspection-altitude" min="60" max="110" step="10"></label></div>
+      <div class="prm"><label>Orbit speed (m/s) <span id="inspection-speed-v"></span><input type="range" id="inspection-speed" min="2" max="8" step="1"></label></div>
+      <p class="dim small">Settings apply to the next circuit. Altitude is selected within the current ceiling to find a valid complete circle. Progress follows actual flight. 100% observation is not landing approval: cargo, approach route and pad availability must also pass. All observations are synthetic model checks, not real camera recognition.</p>
+    </details>
+    <details class="sec" id="sec-placement" open>
+      <summary>Spatial placements · Skybridge tour</summary>
+      <p class="small">UNDER the skybridge · BETWEEN two buildings · NEXT TO another drone. Relations may overlap.</p>
+      <p id="placement-tour-state" role="status" class="small">Tour: idle</p>
+      <div class="scen"><button id="placement-start">Start placement tour</button><button id="placement-view">View skybridge</button></div>
+      <div id="placement-facts" aria-label="Live placement facts"></div>
+      <p class="dim small">A tour starts a fresh delivery session. Two drones meet at the entrance and use parallel lanes 35 m apart. Existing collision and airspace checks stay active. If current settings block the passage, the tour cannot start.</p>
+    </details>
+    <details class="sec" id="sec-proximity" open>
+      <summary>Proximity · automatic response / human review</summary>
+      <p class="small" id="prox-summary" role="status">Initializing proximity…</p>
+      <div id="prox-active" class="prox-active" aria-label="Active proximity conditions"></div>
+      <div class="scen">
+        <button id="prox-encounter">Pigeon encounter</button><button id="prox-clear">Clear pigeons</button>
+        <button id="prox-ack">Record human review</button><button id="prox-export">Export session JSON</button>
+      </div>
+      <div class="prm"><label>Pigeon clearance (m) <span id="p-bird-v"></span><input type="range" id="p-bird" min="8" max="35" step="1"></label></div>
+      <div class="prm"><label>Pigeon uncertainty buffer (m) <span id="p-uncertainty-v"></span><input type="range" id="p-uncertainty" min="0" max="12" step="1"></label></div>
+      <div class="prm"><label>Pigeon look-ahead (s) <span id="p-birdlook-v"></span><input type="range" id="p-birdlook" min="1" max="4" step="0.5"></label></div>
+      <div class="prm"><label>Persistent hazard → human review (s) <span id="p-escalate-v"></span><input type="range" id="p-escalate" min="3" max="20" step="1"></label></div>
+      <p class="dim small">Synthetic classroom simulation. A hold can still be approached by a pigeon. No safe manoeuvre → HUMAN_REQUIRED; review does not clear the hazard. Clear for 2 s → resume. Events are session-only; export before Reset. Drone/building thresholds remain below in Route cost &amp; separation.</p>
+    </details>
     <details class="sec" id="sec-params">
       <summary>Route cost &amp; separation <small>(classroom parameters)</small></summary>
       <div class="dim small" id="cost-formula"></div>
@@ -242,6 +276,19 @@
 <div id="toast"></div>
 <div class="screenreader" role="status" id="selection-announcement"></div>
 
+<div id="inspection-live" class="inspection-live" hidden>
+  <strong id="inspection-live-title"></strong><progress id="inspection-progress" max="100" value="0" aria-label="Observation circuit progress"></progress><span id="inspection-live-text"></span>
+</div>
+<div id="placement-live" class="placement-live" role="status" hidden></div>
+<dialog id="dlg-inspection" aria-labelledby="dlg-inspection-title">
+  <h2 id="dlg-inspection-title">Start a new inspection demo?</h2><p>This resets orders, incidents, pigeons and placement history. Export the current session first if needed.</p>
+  <div class="scen"><button id="inspection-cancel">Cancel</button><button id="inspection-confirm">Reset and start demo</button></div>
+</dialog>
+<dialog id="dlg-placement" aria-labelledby="dlg-placement-title">
+  <h2 id="dlg-placement-title">Start a new placement tour?</h2>
+  <p>This resets current orders, incidents and pigeons. Export your session first if needed. The original delivery simulation continues after the passage.</p>
+  <div class="scen"><button id="placement-cancel">Cancel</button><button id="placement-confirm">Reset and start tour</button></div>
+</dialog>
 <script type="module" src="main.js"></script>
 </body>
 </html>

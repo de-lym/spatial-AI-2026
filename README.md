@@ -1,47 +1,81 @@
-# spatial-AI-2026
+# AIRSPACE — Pre-delivery Orbit Inspection
 
-## AIRSPACE — a land-use-aware drone delivery sandbox
+A separate working extension of the placement + proximity delivery simulator. All new interface text and recording captions are in English. The existing GitHub repository and earlier ZIP packages remain unchanged.
 
-A single-page vanilla-JavaScript web app (three.js) on top of the delivery-platform semantic model:
-*navigable airspace is shaped not only by buildings but by the urban activity underneath.* Every ground block has a land use;
-land use sets the permitted 3D volumes and the cost of flying over it; four drones plan validated smooth routes across the city and keep their distance;
-every drone is described twice — as machine state and as a human-readable update.
+## Run
 
-![Live Flight](docs/screenshot-v3-live.png)
+```sh
+python3 -m http.server 8000
+```
 
-**Run:** serve the folder with any static server (ES modules need http), e.g. `python3 -m http.server`, then open `http://localhost:8000`.
-three.js is vendored in `vendor/`; no network or build step is needed.
+Open http://localhost:8000 in a desktop browser. No frontend install or build is required; Three.js is vendored. Do not double-click index.html because ES modules need HTTP.
 
-### Operations interface (full-page map with floating translucent panels)
-The 3D map fills the whole page; the header, status pills, left cards, Fleet Monitoring and the drone inspector float over it as soft glass cards, with one orange accent for emphasis (Run, selection, counts, the drone illustration in the inspector). Map layers are collapsed behind a `>` button. Tall and low buildings, parks, water and utility lots are scattered across the whole city (no single tower district).
-Left column Operations are direct controls (no menus): an **Order Intake** switch (off stops new orders; existing ones continue), a **Fleet Allocation** target `− n / N +` (idle drones are only drawn into service up to the target; flights in progress are never interrupted) and **Return / Repair / Land** buttons for the selected drone, which stay disabled because the simulator has no emergency-command API. The manual Accept / Mark Ready / Evaluate / Assign actions live in Advanced.
-Header (Run/Pause, speed, Reset with confirmation, Advanced) · one status bar (time, fleet total/active, first deliveries, on-time, active alerts, simulation state) · left column (In Progress: Flight Ops / Hub Ops; Order Intake, Fleet Allocation, Emergency Response; Incident Queue tabs Critical / Low battery / Updates) · full-width map with the existing canvas · Fleet Monitoring table for all drones.
-A **drone inspector** (Flight details / Location / History) overlays the map's right side only when a drone is explicitly selected (map click, fleet row, event). It is an absolute overlay: the map rect, renderer buffer and camera are identical with and without it. Close button, Escape or a click on empty map clears the selection. `DR-0x` is a display alias for the internal `D-0x`.
-The stages, layers, spatial query, land-use rules, route-cost / separation parameters, test situations, statistics and log live in the **Advanced** drawer; nothing was removed.
-Incidents come from a structured event store (`ops-events.js`) fed by real state transitions, not by parsing the log: `NO_VALID_ROUTE` opens one critical incident per drone and closes when the route recovers; Updates keep the newest 200. **Not modelled:** there is no battery model (Low battery stays 0 / "not connected"), no delivery deadline (On-time shows "—") and no emergency flight-command API (return / land / stop are shown disabled).
+## Delivery sequence
 
-### Four stages (Advanced drawer stepper) and independent layers
-1. **Land Use** — *What kind of place is this?* Each of the 49 blocks is Housing, CBD / Office, Green Space / Park, Logistics / Commercial or a Sensitive Facility, tinted softly on the ground. Click a block (the ground) for its ID, building height, simulated permission policy and risk cost.
-2. **Airspace** — *Where can a drone fly?* Mint permitted prisms and blush-red restricted prisms with real height and dashed edges, generated from each block's rule, the building volumes and the altitude envelope. A green park block is not automatically green airspace.
-3. **Routes** — *Which feasible route should it take?* Up to three different, fully collision-tested candidates per leg (thin dashed), scored with `w_length·length + w_climb·climb + w_landuse·risk-weighted exposure`; the cheapest becomes a smooth cobalt curve that was re-tested against every volume and building.
-4. **Live Flight** — four drones (`D-01…D-04`) fly validated routes to pads at different edges of the city (one short, one medium, two long trips). A predicted conflict makes the lower-priority drone slow, yield or wait for clearance (`WAITING_FOR_CLEARANCE`), sidestep or re-plan; nothing is animated through another drone.
+**Pick up → Approach observation circuit → Orbit and observe → Evaluate model checks → Approach / descend → Drop off.**
 
-Toggles for **Land use / Permitted / Restricted / Candidate routes / Selected route** work independently of the stage. **All labels are hidden until their entity is selected.**
+Every customer-delivery leg now starts with an inspection task. The parcel stays on the drone throughout observation and any wait. Completing 100% of the circuit does not mark the order delivered.
 
-### Change a rule, change the airspace
-Open *Land-use rules*: raising the Housing floor, lowering a risk cost or changing the Care Centre's restricted altitude **regenerates the prisms and re-plans every route**; *Route cost & separation* holds the three weights, separation distance, look-ahead and the test situations (*Conflict test* forces yielding within seconds; *Raise hazard HZ-1* shows `NO_VALID_ROUTE`).
+Click **Inspection** in the header, then **Start inspection demo** and confirm the session reset. Orders run normally; no new orders are created during the demo. **View inspection** centers an active drone and its site. You can also run the existing delivery session without starting a dedicated demo: the new behavior is built into ordinary deliveries.
 
-### Location, both ways
-* **Agent → location:** click a drone (or a fleet card). Console: `getLocation('D-02')` → XYZ, ground block, land use, risk cost, volumes, separation state, human description.
-* **Location → agents:** click a prism or choose a block / volume in *Spatial inspector*. Console: `getAgentsAt('V-01')`, `getAgentsAt({block:'D4'})`, `getAgentsInBox(...)`. Membership uses X, Y **and** Z.
+The full ring is a faint blue line; the completed arc fills as the drone actually travels, with a dashed observation cue to the destination. The HUD, drone inspector, fleet attention and event queue show the current phase and progress. No timer can complete the circuit while the drone is stopped.
 
-### Delivery model (unchanged semantics)
-ORDER (revenue = box size; `pending → preparing → ready → assigned → picked_up → delivered`), CUSTOMER houses, RESTAURANT shops, PLATFORM tower (= launch hub), COURIER drones. The first four orders are scripted and pinned one per drone, so Stage 3's routes are the routes flown in Stage 4. Revenue-weighted priority is a **simulation hypothesis**.
+## Separate completion and approval
 
-### Look
-Soft "clay" isometric city (orthographic camera, soft shadows, rounded forms). White massing, green parks, blue water; saturated colour is reserved for roles (restaurants coral/orange, customers forest/denim, platform navy, drones mustard with a small identifying cap) and for the airspace language: mint = permitted, blush red = restricted, amber = hazard, muted cyan/violet = candidates, cobalt = selected route; land-use tints are low-saturation ground colours.
+The model checks all of the following before continuing to the delivery pad:
 
-### Files
-`spatial.js` — land-use table, navigable-space model, candidate generation, cost, smoothing, volume queries. `main.js` — scene, delivery model, land use, airspace generation, separation, panels. `ops-events.js` — structured operations events for the Incident Queue. `index.html` / `style.css` — operations layout.
-`docs/airspace-simulation-v3.md` — the V3 brief plus the implementation report (what worked, what was simplified); `docs/airspace-simulation.md` — the V2 record.
-All geometry, land-use rules and parameters are synthetic classroom assumptions; nothing here claims regulatory compliance, real airspace authorization or validated risk scores.
+1. A complete observation circuit has been flown.
+2. The assigned parcel is aboard the same drone.
+3. A statically valid approach route exists.
+4. The delivery pad is neither occupied nor reserved for the teaching test.
+
+**Test: reserve delivery pad** makes the current target unavailable in this local simulation. The drone can finish the circuit but then stays at 100% with checks pending. **Test: release delivery pad** lets checks retry and, if they pass, the drone proceeds to land and deliver. This is an explicit synthetic reservation, not a real external landing authorization.
+
+Persistent failed checks or a blocked orbit raise a critical human-review incident. Acknowledging other proximity incidents never bypasses inspection checks. A new obstacle or avoidance reroute can interrupt and restart the observation route. New pad unavailability after approval pauses the final approach.
+
+## Configuration
+
+- Orbit radius: 25 m by default; editable 15–40 m.
+- Preferred altitude: 80 m by default. The planner tries that level, a higher level, and a level below the configured ceiling, using only complete validated circles.
+- Orbit speed: 5 m/s by default; editable 2–8 m/s. Predictions, actual motion and ETA share the same waypoint speed calculation.
+- Circle: 48 straight segments approximating a full orbit.
+- Failed-check retry: 1 simulated second. Human escalation: 8 simulated seconds.
+
+Inputs apply when the next circuit is planned. Near the city edge, the orbit center may shift slightly inward so the circle remains inside the permitted map envelope. The actual circle must still pass the existing building, restriction and permitted-volume checks; an onward landing route must also exist.
+
+All numbers are illustrative classroom parameters. There is no real camera, obstacle recognition, terrain sensing or certified flight authorization. The observation cue illustrates a conceptual sensor, while the pass/fail checks inspect the known simulation model. Completing a ring is not proof that a real landing site is safe.
+
+## Existing features
+
+The skybridge, BETWEEN / UNDER / NEXT TO placement tour, original order flow, map layers, queries and drone–drone / building / pigeon proximity controls remain available. See PLACEMENT_IMPLEMENTATION.md and docs/PLACEMENT_SCOPE.md for the preserved placement feature. Historical verification files from the previous package are identified as such under docs/placement-baseline and docs/proximity-baseline.
+
+The previous route previews do not include the new observation circuit: the actual customer leg is planned after pickup. The inspected delivery adds flight time and may change subsequent traffic interactions.
+
+## Files and verification
+
+- INSPECTION_IMPLEMENTATION.md: Claude integration handoff and constraints.
+- docs/INSPECTION_SCOPE.md: feature scope and movement/trigger definitions.
+- docs/VERIFICATION.md: current acceptance results.
+- docs/inspection-acceptance.json: actual browser evidence.
+- docs/inspection-session.json: real downloaded session export, including inspection context.
+- docs/inspection-demo.gif and inspection-*.png: actual simulation captures.
+- inspection.js: pure orbit planning, progress, model checks and shared waypoint speed.
+- inspection-integration.js: lifecycle, visuals, reservation test, UI and event integration.
+- inspection-code.patch: code delta against the separate airspace-placement-final copy.
+
+Node >=20, without installing dependencies:
+
+```sh
+npm test
+```
+
+Optional browser checks require Playwright and Chrome. Start the HTTP server, then run:
+
+```sh
+npm install --no-save --package-lock=false playwright
+AIRSPACE_URL=http://127.0.0.1:8000 node tests/inspection-acceptance.cjs
+```
+
+The browser script creates temporary frames under work/inspection-frames and writes its evidence into docs. It injects a test-only closed airspace in its disposable page; close that page afterward. Application source does not contain that active closure.
+
+Session records and reservations reset with Reset / demo restart or a page refresh. Export before resetting. The inspection audit keeps the newest 400 events; the most recent 12 records are shown in the list. Session export retains inspection records and the original operations events. No backend, user identity or real flight command API is connected.
