@@ -11,6 +11,8 @@ import { installProximity } from './proximity-integration.js';
 import { buildPlacementArchitecture, installPlacements } from './placement-integration.js';
 import { installInspection } from './inspection-integration.js';
 import { waypointSpeed } from './inspection.js';
+import { installDroneView } from './drone-view.js';
+import { installTutorial } from './tutorial.js';
 
 /* ====================================================================
    AIRSPACE — a location-aware drone delivery sandbox (synthetic, classroom only)
@@ -46,7 +48,7 @@ const PATH_COLOR = { blocked: 0xd32f2f };
 // muted cyan/violet = candidate routes, cobalt = selected route
 const AIR = { permitted: 0x6fcf9f, edgePermitted: 0x3fa874, restricted: 0xe0707c, edgeRestricted: 0xc8404f, hazard: 0xf0b13a, edgeHazard: 0xc8860f, cobalt: 0x1f4fd1 };
 const CAND_COLOR = [0x2f9fc4, 0x7f6fd0, 0x3a9a8a];
-const DRONE_TINT = [0x7b6fd0, 0x2fa89a, 0xc2569b, 0xb5882a]; // small identifying cap on each drone body
+const DRONE_TINT = [0xff5a14, 0x2f7de0, 0x2fa86a, 0x8a5cd6]; // each drone has its own body colour: orange, blue, green, violet
 const STAGES = [
   ['Land Use', 'What kind of place is this?', 'Every ground block carries one land-use category — Housing, CBD / Office, Park, Logistics or a Sensitive Facility — tinted softly on the ground. Click a block for its ID, building height, simulated permission policy and risk cost.'],
   ['Airspace', 'Where can a drone fly?', 'Permitted (mint) and restricted (red) 3D prisms are generated from each block\'s land-use rule, the building volumes and the altitude envelope. A green park block is not automatically green airspace.'],
@@ -641,20 +643,20 @@ function addCourier() {
   S.homes[id] = new THREE.Vector3(-2.7 + slot * 1.8, 0, 5.3);
   c.prev.copy(c.pos);
   const g = new THREE.Group(), inner = new THREE.Group(); g.add(inner);
-  const body = box(inner, 1.5, 0.55, 1.5, CLR.mustard, 0, 0.75, 0, 0.25);
+  const body = box(inner, 1.5, 0.55, 1.5, c.tint, 0, 0.75, 0, 0.25);
   box(inner, 0.7, 0.3, 0.5, CLR.navy, 0, 0.98, 0.65, 0.12).userData.solid = false;   // nose
   body.userData.solid = false; inner.children.forEach((m) => { m.userData.solid = false; });
   const arm = (rz) => { const a = shade(new THREE.Mesh(new RoundedBoxGeometry(3.4, 0.1, 0.22, 2, 0.04), mat(0x8c857c))); a.position.y = 1.05; a.rotation.y = rz; inner.add(a); };
   arm(Math.PI / 4); arm(-Math.PI / 4);
   c.rotors = [];
   for (const [rx, rz] of [[1.2, 1.2], [-1.2, 1.2], [1.2, -1.2], [-1.2, -1.2]]) {
-    const r = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.62, 0.05, 20), new THREE.MeshStandardMaterial({ color: 0x5f5a54, transparent: true, opacity: 0.55, roughness: 0.9 })));
+    const r = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.62, 0.05, 20), new THREE.MeshStandardMaterial({ color: c.tint, transparent: true, opacity: 0.5, roughness: 0.9 })));
     r.position.set(rx, 1.15, rz); inner.add(r); c.rotors.push(r);
   }
   for (const [lx, lz] of [[-0.55, -0.55], [0.55, -0.55], [-0.55, 0.55], [0.55, 0.55]]) {
     const l = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.6, 6), mat(0x8c857c))); l.position.set(lx, 0.3, lz); inner.add(l);
   }
-  const cap = shade(new THREE.Mesh(new THREE.SphereGeometry(0.34, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), mat(c.tint))); // identifying colour cap
+  const cap = shade(new THREE.Mesh(new THREE.SphereGeometry(0.34, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), mat(0xffffff))); // white canopy contrasts with the coloured body
   cap.position.set(0, 1.03, 0); inner.add(cap);
   const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 10), new THREE.MeshStandardMaterial({ color: 0x5fd38d, emissive: 0x5fd38d, emissiveIntensity: 0.6 }));
   lamp.position.set(0, 0.62, 0.75); inner.add(lamp);
@@ -1957,6 +1959,7 @@ function renderFleet() {
       tr.innerHTML = '<td><button type="button"></button></td><td></td><td></td><td></td><td></td><td></td><td></td>';
       row = { tr, tds: [...tr.children], btn: tr.querySelector('button') };
       row.btn.addEventListener('click', (e) => selectDrone(c.id, e.currentTarget));
+      row.btn.style.setProperty('--dc', hex(c.tint));
       row.btn.dataset.select = c.id; row.btn.setAttribute('aria-label', `Inspect ${dispId(c.id)}`);
       body.append(tr); fleetRows.set(c.id, row);
     }
@@ -2015,7 +2018,7 @@ function renderInspector() {
   if (!c) { ins.hidden = true; ui.shownDrone = null; return; }
   if (ui.shownDrone !== c.id) { ui.shownDrone = c.id; ui.activeInspectorTab = 'flight'; $('inspector-body').scrollTop = 0; }
   ins.hidden = false;
-  setText($('inspector-title'), dispId(c.id));
+  setText($('inspector-title'), dispId(c.id)); $('inspector').style.setProperty('--dc', hex(c.tint));
   setText($('inspector-subtitle'), `Selected drone · display alias for ${c.id}`);
   const tab = ui.activeInspectorTab;
   document.querySelectorAll('[data-detail]').forEach((b) => { const on = b.dataset.detail === tab; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; });
@@ -2391,11 +2394,16 @@ function frame() {
   if (S.running && S.stage === 4) { let t = dt * S.speed; while (t > 1e-6) { const s = Math.min(0.1, t); step(s); t -= s; } }
   controls.update();
   syncVisuals(dt);
+  droneView.render(dt);
   if ((panelClock += dt) > 0.25) updatePanels();
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
+const droneView = installDroneView({ scene, canvas: $('drone-live'), getDrone: () => selectedDrone(), hiddenWhileRendering: [selRing] });
+const tutorial = installTutorial({ selectDrone, clearDroneSelection, S });
+$('btn-tour').addEventListener('click', () => tutorial.start(true));
 updatePanels(true);
 frame();
+tutorial.maybeAutoStart();
 // exposed for debugging / automated checks
 window.__sim = { inspection, placement, proximity, sepEvade, sepPlan, posAfter, prioCmp, scene, LAND, regenAirspace, segCheck, inPermitted, volumesAt, S, act, step, world, cfg, planRoute, planMission, getLocation, getAgentsAt, getAgentsInBox, setStage, previews, selectVolume, resetWorld, ui, ops, selectDrone, clearDroneSelection, renderEvents, camera, renderer, controls };

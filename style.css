@@ -224,3 +224,53 @@ i.cd { display: inline-block; width: 9px; height: 3px; margin-right: 4px; vertic
 .inspection-live progress{width:100%;height:8px;accent-color:#1f4fd1;}
 #inspection-list{max-height:220px;overflow:auto;}
 @media(max-width:1279px){.inspection-live{left:320px;right:360px;}}
+
+/* ---- per-drone identity colour + live inspector view ---- */
+.fleet td button::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--dc, var(--accent)); margin-right: 7px; box-shadow: 0 0 0 2px rgba(255,255,255,.85); vertical-align: -1px; }
+.inspectorart { position: relative; height: 196px; padding: 0 14px 8px; display: block; flex-shrink: 0; }
+#drone-live { width: 100%; height: 100%; display: block; border-radius: 20px; background: #e6e4e1; box-shadow: inset 0 0 0 2px var(--dc, var(--accent)), 0 8px 18px rgba(60,40,20,.16); }
+.livechip { position: absolute; left: 26px; top: 10px; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; letter-spacing: .02em; padding: 3px 10px 3px 8px; border-radius: 999px; background: rgba(255,255,255,.88); box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+.livechip i { width: 8px; height: 8px; border-radius: 50%; background: var(--dc, var(--accent)); animation: livepulse 1.4s ease-in-out infinite; }
+@keyframes livepulse { 50% { opacity: .3; } }
+.inspectorhead h2::before { content: ""; display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: var(--dc, var(--accent)); margin-right: 10px; vertical-align: 2px; }
+
+/* ---- guided tour ---- */
+.tour { position: fixed; inset: 0; z-index: 60; font-family: inherit; }
+.tour-block { position: absolute; inset: 0; background: transparent; }
+.tour.dim .tour-block { background: rgba(40,30,20,.42); backdrop-filter: blur(2px); }
+.tour-frame { position: absolute; border: 2px solid var(--accent); border-radius: 22px; box-shadow: 0 0 0 9999px rgba(40,30,20,.40), 0 0 24px 4px rgba(255,90,20,.45); pointer-events: none; transition: all .35s cubic-bezier(.3,.7,.2,1); }
+.tour-frame b { position: absolute; width: 9px; height: 9px; background: #fff; border: 1.5px solid var(--accent); border-radius: 2px; }
+.tour-frame b:nth-child(1) { left: -5px; top: -5px; } .tour-frame b:nth-child(2) { right: -5px; top: -5px; }
+.tour-frame b:nth-child(3) { left: -5px; bottom: -5px; } .tour-frame b:nth-child(4) { right: -5px; bottom: -5px; }
+.tour-frame b:nth-child(5) { left: calc(50% - 5px); top: -5px; } .tour-frame b:nth-child(6) { left: calc(50% - 5px); bottom: -5px; }
+.tour-frame b:nth-child(7) { left: -5px; top: calc(50% - 5px); } .tour-frame b:nth-child(8) { right: -5px; top: calc(50% - 5px); }
+.tour-pill { position: absolute; display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px 6px 10px; border-radius: 999px; background: #fff; border: 2px solid var(--accent); color: var(--ink); font-weight: 600; font-size: 13px; box-shadow: 0 6px 20px rgba(255,90,20,.28); white-space: nowrap; transition: all .35s cubic-bezier(.3,.7,.2,1); }
+.tour-pill svg:first-child { color: var(--accent); }
+.tour-pill .tcursor { position: absolute; right: -14px; bottom: -16px; }
+.tour-card { position: absolute; width: 330px; background: #fff; border-radius: 20px; box-shadow: 0 18px 50px rgba(40,25,10,.32), 0 0 0 1px rgba(60,50,40,.08); padding: 14px 16px 14px; transition: left .35s cubic-bezier(.3,.7,.2,1), top .35s cubic-bezier(.3,.7,.2,1); }
+.tour-card.welcome { width: 360px; }
+.tour-card header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
+.tour-card h2 { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+.tour-x { width: 28px; min-height: 28px; padding: 0; border: 0; background: transparent; font-size: 20px; line-height: 1; }
+.tour-prev { position: relative; background: #f4f2ef; border-radius: 12px; padding: 0 0 14px; margin-bottom: 12px; overflow: hidden; }
+.tour-prev::before { content: ""; display: block; height: 34px; background: var(--accent-soft); border-bottom: 3px solid var(--accent); }
+.tour-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 12px 4px; background: #fff; margin: 14px 14px 0; border-radius: 12px; box-shadow: 0 2px 8px rgba(60,40,20,.08); padding-bottom: 12px; position: relative; top: -2px; }
+.tour-chips span { position: relative; font-size: 12px; padding: 3px 11px; border-radius: 999px; background: rgba(60,50,40,.06); }
+.tour-chips span.hit { background: var(--accent-soft); box-shadow: inset 0 0 0 1.5px var(--accent); font-weight: 600; }
+.tour-chips .tcursor { position: absolute; right: -9px; bottom: -14px; }
+.tour-note { position: absolute; right: 12px; bottom: 6px; font: 600 15px/1 "Bradley Hand", "Segoe Print", "Comic Sans MS", cursive; color: var(--accent); transform: rotate(-4deg); }
+.tour-text { font-size: 13px; color: #3b3631; margin: 0 0 12px; }
+.tour-never { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+.tour-card footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tour-dots { display: flex; gap: 4px; flex-wrap: wrap; max-width: 110px; }
+.tour-dots i { width: 6px; height: 6px; border-radius: 50%; background: rgba(60,50,40,.18); } .tour-dots i.on { background: var(--accent); }
+.tour-actions { display: flex; gap: 6px; margin-left: auto; }
+.tour-actions button { min-height: 32px; border-radius: 8px; padding: 4px 12px; background: #fff; }
+.tour-next { background: var(--accent) !important; border-color: var(--accent) !important; color: #fff !important; font-weight: 600; }
+.tour-next:hover { background: #ff7236 !important; }
+.tour-tail { position: absolute; width: 16px; height: 16px; background: #fff; transform: rotate(45deg); box-shadow: 0 0 0 1px rgba(60,50,40,.06); }
+.tour-tail[data-side=right] { left: -7px; } .tour-tail[data-side=left] { right: -7px; }
+.tour-tail[data-side=bottom] { top: -7px; } .tour-tail[data-side=top] { bottom: -7px; }
+.tour-actions button, .tour-dots { white-space: nowrap; }
+.tour-dots { max-width: 96px; gap: 3px; }
+.fleet th:first-child { width: 116px; }
