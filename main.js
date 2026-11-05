@@ -11,8 +11,8 @@ import { installProximity } from './proximity-integration.js';
 import { buildPlacementArchitecture, installPlacements } from './placement-integration.js';
 import { installInspection } from './inspection-integration.js';
 import { waypointSpeed } from './inspection.js';
-import { installDroneView } from './drone-view.js';
-import { installTutorial } from './tutorial.js';
+import { installDroneView } from './drone-view.js?v=3';
+import { installTutorial } from './tutorial.js?v=3';
 
 /* ====================================================================
    AIRSPACE — a location-aware drone delivery sandbox (synthetic, classroom only)
@@ -2394,12 +2394,13 @@ function frame() {
   if (S.running && S.stage === 4) { let t = dt * S.speed; while (t > 1e-6) { const s = Math.min(0.1, t); step(s); t -= s; } }
   controls.update();
   syncVisuals(dt);
-  droneView.render(dt);
+  try { droneView.render(dt); } catch (e) { droneView = { render() {} }; console.error(e); }
   if ((panelClock += dt) > 0.25) updatePanels();
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
-const droneView = installDroneView({ scene, canvas: $('drone-live'), getDrone: () => selectedDrone(), hiddenWhileRendering: [selRing] });
+let droneView = { render() {} };
+try { droneView = installDroneView({ scene, canvas: $('drone-live'), getDrone: () => selectedDrone(), hiddenWhileRendering: [selRing] }); } catch (e) { console.error('Live drone view unavailable', e); }
 const tutorial = installTutorial({ selectDrone, clearDroneSelection, S });
 $('btn-tour').addEventListener('click', () => tutorial.start(true));
 updatePanels(true);
