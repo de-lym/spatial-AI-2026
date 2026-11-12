@@ -90,31 +90,89 @@ function drawCyclist(g, ph) {
   g.beginPath(); g.moveTo(116, 36); g.lineTo(128, 28); g.lineTo(137, 36); g.closePath(); g.fill();  // cap
 }
 
+// ---- silhouette → solid: trace the opaque pixels into outline loops and extrude them (so figures have real volume) ----
+function traceLoops(mask, w, h) {
+  const out = new Map(), add = (x0, y0, x1, y1) => { const k = x0 * 4096 + y0; (out.get(k) || out.set(k, []).get(k)).push([x1, y1]); };
+  const on = (x, y) => x >= 0 && y >= 0 && x < w && y < h && mask[y * w + x];
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (on(x, y)) {
+    if (!on(x, y - 1)) add(x, y, x + 1, y);
+    if (!on(x + 1, y)) add(x + 1, y, x + 1, y + 1);
+    if (!on(x, y + 1)) add(x + 1, y + 1, x, y + 1);
+    if (!on(x - 1, y)) add(x, y + 1, x, y);
+  }
+  const loops = [];
+  for (const [k0, list] of out) {
+    while (list.length) {
+      const sx = Math.floor(k0 / 4096), sy = k0 % 4096; let cx = sx, cy = sy; const pts = [[sx, sy]];
+      for (let guard = 0; guard < 200000; guard++) {
+        const key = cx * 4096 + cy, l = out.get(key); if (!l || !l.length) break;
+        const nxt = l.pop(); cx = nxt[0]; cy = nxt[1];
+        if (cx === sx && cy === sy) break; pts.push([cx, cy]);
+      }
+      if (pts.length > 3) loops.push(pts);
+    }
+  }
+  return loops;
+}
+function simplify(pts, eps) {   // Douglas–Peucker on a closed loop
+  const n = pts.length; if (n < 8) return pts;
+  let far = 0, fd = 0; for (let i = 1; i < n; i++) { const d = Math.hypot(pts[i][0] - pts[0][0], pts[i][1] - pts[0][1]); if (d > fd) { fd = d; far = i; } }
+  const arr = pts.concat([pts[0]]), keep = new Set([0, far, n]);
+  const rec = (a, b) => {
+    let md = 0, mi = -1; const [x0, y0] = arr[a], [x1, y1] = arr[b], dx = x1 - x0, dy = y1 - y0, L = Math.hypot(dx, dy) || 1;
+    for (let i = a + 1; i < b; i++) { const d = Math.abs(dy * (arr[i][0] - x0) - dx * (arr[i][1] - y0)) / L; if (d > md) { md = d; mi = i; } }
+    if (mi > 0 && md > eps) { keep.add(mi); rec(a, mi); rec(mi, b); }
+  };
+  rec(0, far); rec(far, n);
+  return [...keep].filter((i) => i < n).sort((a, b) => a - b).map((i) => arr[i]);
+}
+const area = (l) => { let s = 0; for (let i = 0; i < l.length; i++) { const [x0, y0] = l[i], [x1, y1] = l[(i + 1) % l.length]; s += x0 * y1 - x1 * y0; } return s / 2; };
+const inside = (pt, poly) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if ((yi > pt[1]) !== (yj > pt[1]) && pt[0] < (xj - xi) * (pt[1] - yi) / (yj - yi) + xi) c = !c; } return c; };
+
+/** canvas frame → THREE.ExtrudeGeometry of unit height (figure height = 1), centred on its thickness */
+function solidFromFrame(canvas, fx, fw, fh, scale, depth) {
+  const w = Math.round(fw * scale), h = Math.round(fh * scale), c = document.createElement('canvas'); c.width = w; c.height = h;
+  const g = c.getContext('2d'); g.drawImage(canvas, fx, 0, fw, fh, 0, 0, w, h);
+  const d = g.getImageData(0, 0, w, h).data, mask = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) mask[i] = d[i * 4 + 3] > 100 ? 1 : 0;
+  const loops = traceLoops(mask, w, h).map((l) => simplify(l, 0.55)).filter((l) => l.length >= 3);
+  if (!loops.length) return null;
+  const areas = loops.map(area), big = areas.reduce((m, a) => (Math.abs(a) > Math.abs(m) ? a : m), 0);
+  const outers = [], holes = [];
+  loops.forEach((l, i) => (Math.sign(areas[i]) === Math.sign(big) ? outers : holes).push(l));
+  const tx = (pt) => new THREE.Vector2((pt[0] - w / 2) / h, (h - pt[1]) / h);
+  const shapes = outers.map((o) => new THREE.Shape(o.map(tx)));
+  for (const hl of holes) { const k = outers.findIndex((o) => inside(hl[0], o)); (shapes[k >= 0 ? k : 0])?.holes.push(new THREE.Path(hl.map(tx))); }
+  const geos = shapes.map((s) => new THREE.ExtrudeGeometry(s, { depth, bevelEnabled: false, curveSegments: 1 }));
+  geos.forEach((gm) => gm.translate(0, 0, -depth / 2));
+  if (geos.length === 1) return geos[0];
+  const merged = new THREE.BufferGeometry(), pos = [], nor = [];
+  for (const gm of geos) { const ng = gm.index ? gm.toNonIndexed() : gm; pos.push(...ng.attributes.position.array); nor.push(...ng.attributes.normal.array); }
+  merged.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); merged.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3)); return merged;
+}
+
 export function createPeopleKit(seed = 41) {
   const R = rngOf(seed);
   const pick = (a) => a[Math.floor(R() * a.length)];
   const KINDS = ['trousers', 'trousers', 'coat', 'dress', 'skirt', 'trousers', 'shorts', 'coat'];
   const variants = [];
   for (let i = 0; i < 12; i++) variants.push({ kind: KINDS[i % KINDS.length], hair: pick(['bun', 'pony', 'long', 'cap', 'tuft', 'none', 'long']), bag: pick(['none', 'none', 'hand', 'shoulder', 'pack']), lean: R() * 1.2, tall: 0.94 + R() * 0.12 });
-  const atlas = (w, h, n, draw) => {
-    const cv = document.createElement('canvas'); cv.width = w * n; cv.height = h;
-    const g = cv.getContext('2d');
-    for (let f = 0; f < n; f++) { g.save(); g.translate(f * w, 0); g.beginPath(); g.rect(0, 0, w, h); g.clip(); draw(g, f / n); g.restore(); }
-    const t = new THREE.CanvasTexture(cv); t.generateMipmaps = false; t.minFilter = THREE.LinearFilter; t.magFilter = THREE.LinearFilter; return { tex: t, canvas: cv };
+  const build = (fw, fh, n, scale, depth, draw) => {
+    const cv = document.createElement('canvas'); cv.width = fw * n; cv.height = fh; const g = cv.getContext('2d');
+    for (let f = 0; f < n; f++) { g.save(); g.translate(f * fw, 0); g.beginPath(); g.rect(0, 0, fw, fh); g.clip(); draw(g, f / n); g.restore(); }
+    const geos = []; for (let f = 0; f < n; f++) geos.push(solidFromFrame(cv, f * fw, fw, fh, scale, depth) || geos[f - 1]);
+    return { geos, frames: n, aspect: fw / fh };
   };
-  const mk = (tex) => new THREE.MeshBasicMaterial({ map: tex, color: 0x000000, alphaTest: 0.35, alphaToCoverage: true, side: THREE.DoubleSide });
-  const kit = { walkers: variants.map((v) => { const a = atlas(FW, FH, FRAMES, (g, ph) => drawWalker(g, v, ph)); return { ...a, mat: mk(a.tex), frames: FRAMES, aspect: FW / FH }; }) };
-  const dog = atlas(96, 96, 8, (g, ph) => drawDog(g, ph)); kit.dog = { ...dog, mat: mk(dog.tex), frames: 8, aspect: 1 };
-  const cyc = atlas(176, 192, 8, (g, ph) => drawCyclist(g, ph)); kit.cyclist = { ...cyc, mat: mk(cyc.tex), frames: 8, aspect: 176 / 192 };
-  /** upright billboard of the given world height; bottom of the quad sits on the origin */
-  kit.billboard = (set, height) => {
-    const w = height * set.aspect, geo = new THREE.PlaneGeometry(w, height); geo.translate(0, height / 2, 0);
-    const m = new THREE.Mesh(geo, set.mat); m.userData.set = set; m.userData.h = height; m.frustumCulled = false; return m;
+  const mat = new THREE.MeshStandardMaterial({ color: 0x0a0a0b, roughness: 1, metalness: 0 });
+  const kit = { mat };
+  kit.walkers = variants.map((v) => build(FW, FH, FRAMES, 0.5, 0.2, (g, ph) => drawWalker(g, v, ph)));
+  kit.dog = build(96, 96, 8, 0.6, 0.2, (g, ph) => drawDog(g, ph));
+  kit.cyclist = build(176, 192, 8, 0.5, 0.1, (g, ph) => drawCyclist(g, ph));
+  /** solid 3D figure of the given world height standing on the origin; local +x is its facing / walking direction */
+  kit.solid = (set, height) => {
+    const m = new THREE.Mesh(set.geos[0], mat); m.scale.setScalar(height); m.userData.set = set; m.castShadow = true; m.receiveShadow = true;
+    m.position.y = 0; m.frustumCulled = false; m.userData.f = 0; return m;
   };
-  kit.setFrame = (m, ph) => {
-    const set = m.userData.set, f = Math.floor(((ph % 1) + 1) % 1 * set.frames), uv = m.geometry.attributes.uv, u0 = f / set.frames, u1 = (f + 1) / set.frames;
-    if (m.userData.f === f) return; m.userData.f = f;
-    uv.setXY(0, u0, 1); uv.setXY(1, u1, 1); uv.setXY(2, u0, 0); uv.setXY(3, u1, 0); uv.needsUpdate = true;
-  };
+  kit.setFrame = (m, ph) => { const set = m.userData.set, f = Math.floor(((ph % 1) + 1) % 1 * set.frames); if (m.userData.f !== f) { m.userData.f = f; m.geometry = set.geos[f]; } };
   return kit;
 }
