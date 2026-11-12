@@ -13,7 +13,7 @@ import { installInspection } from './inspection-integration.js';
 import { waypointSpeed } from './inspection.js';
 import { installDroneView } from './drone-view.js?v=3';
 import { createInkPass } from './ink.js?v=12';
-import { buildStreetscape } from './streetscape.js?v=23';
+import { buildStreetscape } from './streetscape.js?v=24';
 import { installTutorial } from './tutorial.js?v=3';
 
 /* ====================================================================
@@ -407,6 +407,7 @@ function ledged(g, w, h, d, x, z, typo, step = 1.5) {
 const PARKS = ['Linden Park', 'Maple Green', 'Cedar Court', 'Birch Green', 'Aspen Green'];
 const FIXED = { '0,-16': 'tb1', '16,0': 'civic', '-16,0': 'care' }; // deterministic lots: the 95 m tower and the two Sensitive Facilities
 let parkN = 0, pondN = 0;
+const greenAt = new Set();
 function buildFiller(x, z) {
   const g = new THREE.Group(); g.position.set(x, SLAB, z); g.userData.fillerParcel = key(x,z); scene.add(g);
   // dense (taller) lots are scattered through the whole city by a fixed pattern, not clustered in one district
@@ -416,6 +417,12 @@ function buildFiller(x, z) {
     const t = srand();
     kind = mid ? (t < 0.5 ? 'tower' : t < 0.68 ? 'block' : t < 0.8 ? 'stack' : t < 0.9 ? 'park' : t < 0.95 ? 'pond' : 'dome')
       : (t < 0.14 ? 'tower' : t < 0.28 ? 'block' : t < 0.5 ? 'house' : t < 0.62 ? 'stack' : t < 0.78 ? 'park' : t < 0.88 ? 'pond' : t < 0.95 ? 'tank' : 'dome');
+  }
+  // green blocks (forest / pond) are never edge-adjacent (diagonal is allowed) to another green block: swap in a built lot instead
+  if (kind === 'park' || kind === 'pond') {
+    const touching = [...greenAt].some((k) => { const [gx, gz] = k.split(',').map(Number); return (Math.abs(gx - x) === 16 && gz === z) || (Math.abs(gz - z) === 16 && gx === x); });   // edge-adjacent only; diagonal neighbours are fine
+    if (touching) kind = mid ? 'block' : 'house';
+    else greenAt.add(key(x, z));
   }
   const addLandmark = (name) => world.landmarks.push({ name, x, z });
   const LU = { tb1: 'cbd', tower: 'cbd', block: 'cbd', house: 'housing', stack: 'housing', park: 'park', pond: 'park', tank: 'logistics', dome: 'logistics', civic: 'sensitive', care: 'sensitive' }[kind];
