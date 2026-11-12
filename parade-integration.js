@@ -40,7 +40,7 @@ export function installParade({S, scene, world, planRoute, segCheck, camera, con
   const paradeVisual = createParadeVisual(group, engine.state.parade, {avoid});
   const eventVisual = createEventVisual(group);
   for (const p of pads) {
-    const ring = new THREE.Mesh(new THREE.RingGeometry(1, 1.5, 40), new THREE.MeshBasicMaterial({color: 0x141414, side: THREE.DoubleSide}));
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.78, 0.94, 40), new THREE.MeshBasicMaterial({color: 0x555555, side: THREE.DoubleSide}));
     ring.rotation.x = -Math.PI / 2; ring.position.set(p.pos.x, p.roof + .48, p.pos.z); group.add(ring);
   }
   const zoneRects = CROWD_ZONES.map(z => ({x0: z.x0, z0: z.z0, x1: z.x1, z1: z.z1}));   // Parade Zone: tinted translucent yellow by the ink pass
