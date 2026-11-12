@@ -14,6 +14,7 @@ varying vec2 vUv;
 uniform sampler2D tColor, tDepth;
 uniform vec2 uRes;
 uniform float uNear, uFar, uOrtho, uDpr, uCell, uEdge;
+const float DOTMIN = .26;
 const vec3 PAPER = vec3(.957,.949,.937), INK = vec3(.075,.075,.08);
 float luma(vec3 c){ return dot(c, vec3(.2126,.7152,.0722)); }
 float tone(vec2 uv){ return pow(clamp(luma(texture2D(tColor, uv).rgb), 0., 1.), 1./2.2); }
@@ -45,10 +46,10 @@ void main(){
   mat2 R = mat2(.7071, -.7071, .7071, .7071);
   vec2 q = R * p / uCell;
   float r = length(fract(q) - .5);
-  float dotR = sqrt(clamp((dark - .10) / .9, 0., 1.)) * .74;
+  float dotR = sqrt(clamp((dark - DOTMIN) / (1. - DOTMIN), 0., 1.)) * .74;
   float aa = .6 / uCell / max(1., uDpr * .5);
   float dots = 1. - smoothstep(dotR - aa, dotR + aa, r);
-  dots *= step(.10, dark);                              // brightest tones stay clean paper
+  dots *= step(DOTMIN, dark);                           // lit surfaces stay flat paper; only shadow / dark tones get screentone
   float solid = smoothstep(.72, .84, dark);             // deepest shadows fill solid
   float ink = max(max(dots, solid), edge);
   float sky = d0 >= .99999 ? 1. : 0.;
