@@ -13,7 +13,7 @@ import { installInspection } from './inspection-integration.js';
 import { waypointSpeed } from './inspection.js';
 import { installDroneView } from './drone-view.js?v=3';
 import { createInkPass } from './ink.js?v=12';
-import { buildStreetscape } from './streetscape.js?v=18';
+import { buildStreetscape } from './streetscape.js?v=21';
 import { installTutorial } from './tutorial.js?v=3';
 
 /* ====================================================================
@@ -461,9 +461,12 @@ function buildFiller(x, z) {
     for (let i = 0; i < n; i++) { const a = i * 2.4 + srand(), r = 1 + srand() * 3.2; tree(g, Math.cos(a) * r, Math.sin(a) * r, 0.14, 0.8 + srand() * 0.5); }
     const pn = PARKS[parkN++ % PARKS.length]; addLandmark(pn); setLU(x, z, LU, pn);
   } else if (kind === 'pond') {
-    flat(box(g, 10, 0.18, 9, CLR.water, 0, 0, 0, 0.8));
-    flat(box(g, 3.4, 0.2, 1.1, CLR.white, 0, 0, 0, 0.1));
-    tree(g, -4.6, 4.6); tree(g, 4.6, -4.6);
+    const lawn = flat(shade(new THREE.Mesh(new THREE.CylinderGeometry(5.6, 5.6, 0.1, 48), mat(0xb6c9a8)))); lawn.position.y = 0.05; g.add(lawn);
+    const pondShape = new THREE.Shape(); for (let i = 0; i <= 40; i++) { const a = i / 40 * Math.PI * 2, r = 3.3 + Math.sin(a * 2 + 0.6) * 0.45 + Math.sin(a * 3) * 0.3; const px = Math.cos(a) * r * 1.15, pz = Math.sin(a) * r * 0.85; i ? pondShape.lineTo(px, pz) : pondShape.moveTo(px, pz); }
+    const water = flat(shade(new THREE.Mesh(new THREE.ShapeGeometry(pondShape), new THREE.MeshStandardMaterial({ color: 0x98a3ad, roughness: 0.3 })))); water.rotation.x = -Math.PI / 2; water.position.y = 0.115; water.receiveShadow = true; g.add(water);
+    const bank = flat(new THREE.Mesh(new THREE.ShapeGeometry(pondShape), mat(0x6e6e6e))); bank.rotation.x = -Math.PI / 2; bank.scale.set(1.07, 1.07, 1); bank.position.y = 0.108; g.add(bank);   // dark shoreline
+    for (const [rx, rz, rs] of [[-1.2, -0.5, 0.7], [1.3, 0.6, 0.55], [0.2, 1.4, 0.4]]) { const ring = flat(new THREE.Mesh(new THREE.RingGeometry(rs, rs + 0.06, 24), new THREE.MeshBasicMaterial({ color: 0x4a4a4a, side: THREE.DoubleSide }))); ring.rotation.x = -Math.PI / 2; ring.scale.y = 0.75; ring.position.set(rx, 0.13, rz); g.add(ring); }
+    for (let i = 0; i < 7; i++) { const a = i * 0.9 + 0.4, r = 4.3 + (i % 2) * 0.5; tree(g, Math.cos(a) * r, Math.sin(a) * r * 0.9, 0.1, 0.8 + (i % 3) * 0.15); }
     const pn = ['Mirror Pond', 'Heron Pond', 'Reed Pond'][pondN++ % 3]; addLandmark(pn); setLU(x, z, LU, pn + ' (park)');
   } else if (kind === 'tank') {
     const tank = solid(shade(new THREE.Mesh(new THREE.CylinderGeometry(1.9, 1.9, 2.4, 28), mat(TYPO.tank.body))));
