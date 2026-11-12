@@ -33,7 +33,7 @@ void main(){
   float depthEdge = max(max(abs(dd - dL), abs(dd - dR)), max(abs(dd - dU), abs(dd - dD)));
   float depthRef = uOrtho > .5 ? 0.9 : 0.02 * dd;
   float de = smoothstep(depthRef, depthRef * 2.2, depthEdge) * (d0 < .99999 ? 1. : 0.);
-  float lumEdge = max(max(abs(l0 - lL), abs(l0 - lR)), max(abs(l0 - lU), abs(l0 - lD)));
+  float lumEdge = max(max(lL, lR), max(lU, lD)) - l0;   // one-sided: only the darker pixel of an edge is inked, so lines stay hairline
   float le = smoothstep(.07, .2, lumEdge) * (d0 < .99999 ? .0 : .0) + smoothstep(.07, .2, lumEdge) * .9;
   float edge = clamp(max(de, le) * uEdge, 0., 1.);
 
