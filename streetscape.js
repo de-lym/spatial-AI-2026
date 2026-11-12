@@ -5,6 +5,7 @@
 // Everything here is DECOR: nothing is registered as an obstacle, so routing / airspace / picking are unaffected.
 // Static pieces are merged into one mesh per material; only the people / cyclists / dogs are animated.
 import * as THREE from 'three';
+import { createPeopleKit } from './people.js?v=2';
 
 const TAU = Math.PI * 2;
 const rngOf = (seed) => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -287,70 +288,52 @@ export function buildStreetscape({ scene, camera, world, buildingGroups, ROADS, 
   }
   B.build(root); glassB.build(root, false);
 
-  // ---------- street life ---------------------------------------------------------------------------
-  const H = 1.75;                                                // person height in world units (1 unit ≈ 2 m)
-  const geo = { leg: new THREE.CylinderGeometry(0.05, 0.04, 0.44, 6), torso: new THREE.CylinderGeometry(0.11, 0.09, 0.4, 8), arm: new THREE.CylinderGeometry(0.035, 0.03, 0.34, 5), head: new THREE.SphereGeometry(0.085, 10, 8), hair: new THREE.SphereGeometry(0.092, 10, 8, 0, TAU, 0, Math.PI * 0.62), skirt: new THREE.CylinderGeometry(0.1, 0.17, 0.26, 10), bag: new THREE.BoxGeometry(0.1, 0.13, 0.05) };
-  const cloth = [M.ink, M.white, M.mid, M.dark, M.light, std(0xffffff, { map: dotTex('#f4f3f0', '#1b1b1d') }), std(0xffffff, { map: dotTex('#2b2b2d', '#f4f3f0') }), std(0xffffff, { map: awningTex() })];
-  const pick = (a) => a[Math.floor(R() * a.length)];
-  function makePerson() {
-    const g = new THREE.Group(), top = pick(cloth), bottom = pick([M.ink, M.dark, M.mid, M.light, cloth[5]]);
-    const mk = (geom, mat, x, y, z) => { const m = new THREE.Mesh(geom, mat); m.position.set(x, y, z); m.castShadow = true; return m; };
-    const legs = [-1, 1].map((s) => { const p = new THREE.Group(); p.position.set(s * 0.055, 0.46, 0); const m = mk(geo.leg, bottom, 0, -0.22, 0); p.add(m); g.add(p); return p; });
-    const tor = mk(geo.torso, top, 0, 0.66, 0); g.add(tor);
-    if (R() < 0.35) g.add(mk(geo.skirt, bottom, 0, 0.5, 0));
-    const arms = [-1, 1].map((s) => { const p = new THREE.Group(); p.position.set(s * 0.14, 0.8, 0); p.add(mk(geo.arm, R() < 0.5 ? top : M.skin, 0, -0.16, 0)); g.add(p); return p; });
-    g.add(mk(geo.head, M.skin, 0, 0.94, 0)); const hr = mk(geo.hair, R() < 0.3 ? M.light : M.ink, 0, 0.945, 0); hr.rotation.x = -0.15; g.add(hr);
-    if (R() < 0.3) g.add(mk(geo.bag, pick([M.ink, M.white]), 0.15, 0.42, 0.02));
-    g.scale.setScalar(H / 1.02); root.add(g); return { g, legs, arms };
-  }
-  const people = [];
-  const addWalker = (a, b, y, speed) => { const p = makePerson(); const L = Math.hypot(b[0] - a[0], b[1] - a[1]); people.push({ ...p, a, b, y, L, s: R() * L, dir: R() < 0.5 ? 1 : -1, speed, ph: R() * 6 }); return people[people.length - 1]; };
-  const dogGeo = { body: new THREE.BoxGeometry(0.28, 0.14, 0.12), head: new THREE.BoxGeometry(0.11, 0.1, 0.1), leg: new THREE.CylinderGeometry(0.018, 0.015, 0.14, 4), tail: new THREE.CylinderGeometry(0.01, 0.012, 0.14, 4) };
-  const dogs = [];
-  const makeDog = () => { const g = new THREE.Group(); const mk = (geom, mat, x, y, z) => { const m = new THREE.Mesh(geom, mat); m.position.set(x, y, z); m.castShadow = true; g.add(m); return m; }; const mat = pick([M.light, M.white, M.mid]);
-    mk(dogGeo.body, mat, 0, 0.2, 0); mk(dogGeo.head, mat, 0.2, 0.28, 0); mk(dogGeo.tail, M.ink, -0.17, 0.27, 0).rotation.z = 0.8; const legs = [[0.1, 0.06], [0.1, -0.06], [-0.1, 0.06], [-0.1, -0.06]].map(([x, z]) => mk(dogGeo.leg, M.ink, x, 0.07, z)); g.scale.setScalar(1.25); root.add(g); return { g, legs }; };
-
+  // ---------- street life: solid-black cut-out figures (billboards) --------------------------------
+  const kit = createPeopleKit(41);
+  const H = 2.1;                                                 // person height in world units (1 unit ≈ 2 m)
+  const people = [], dogs = [], cyclists = [];
+  const addWalker = (a, b, y, speed) => {
+    const set = kit.walkers[Math.floor(R() * kit.walkers.length)], m = kit.billboard(set, H * (0.94 + R() * 0.1));
+    root.add(m); const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const p = { m, a, b, y, L, s: R() * L, dir: R() < 0.5 ? 1 : -1, speed, ph: R() };
+    people.push(p); return p;
+  };
   const rr = (n, k) => Array.from({ length: n }, () => walkLines[Math.floor(R() * walkLines.length)]).filter(Boolean).slice(0, k);
   if (walkLines.length) {
-    for (const l of rr(46, 40)) { const wk = addWalker(l.a, l.b, slab, 0.45 + R() * 0.35); if (R() < 0.12) { const d = makeDog(); wk.dog = d; } }
-    // pedestrians crossing at zebra crossings
-    for (const c of crossings.filter(() => R() < 0.07)) {
-      const hx = c.ax ? 0 : 1, hz = c.ax ? 1 : 0;         // crossing direction (across the carriageway)
+    for (const l of rr(46, 40)) { const wk = addWalker(l.a, l.b, slab, 0.45 + R() * 0.35); if (R() < 0.14) { wk.dog = kit.billboard(kit.dog, 0.55); root.add(wk.dog); } }
+    for (const c of crossings.filter(() => R() < 0.07)) {            // pedestrians crossing at zebra crossings
       const a = [c.x + (c.ax ? 0 : -2.7), c.z + (c.ax ? -2.7 : 0)], b = [c.x + (c.ax ? 0 : 2.7), c.z + (c.ax ? 2.7 : 0)];
       addWalker(a, b, 0, 0.7 + R() * 0.2).cross = true;
     }
   }
-  // cyclists on the carriageways (their lane, then wrap round)
-  const cyclists = [];
-  const makeCyclist = () => {
-    const g = new THREE.Group(), mk = (geom, mat, x, y, z) => { const m = new THREE.Mesh(geom, mat); m.position.set(x, y, z); m.castShadow = true; g.add(m); return m; };
-    const wheelGeo = new THREE.TorusGeometry(0.2, 0.014, 5, 16);
-    const w1 = mk(wheelGeo, M.ink, -0.34, 0.22, 0), w2 = mk(wheelGeo, M.ink, 0.34, 0.22, 0); w1.rotation.y = w2.rotation.y = Math.PI / 2; w1.rotation.y = 0; w2.rotation.y = 0;
-    for (const [a, b, c2, d2] of [[-0.34, 0.22, -0.05, 0.42], [-0.05, 0.42, 0.28, 0.4], [0.28, 0.4, 0.34, 0.22], [-0.05, 0.42, 0.02, 0.22], [0.02, 0.22, -0.34, 0.22]]) { const L = Math.hypot(c2 - a, d2 - b), m = mk(cyl, M.ink, (a + c2) / 2, (b + d2) / 2, 0); m.scale.set(0.012, L, 0.012); m.rotation.z = Math.atan2(c2 - a, d2 - b) * -1; }
-    const rider = makePerson(); root.remove(rider.g); rider.g.position.set(-0.04, 0.2, 0); rider.g.scale.multiplyScalar(0.95); g.add(rider.g);
-    rider.legs.forEach((l, i) => { l.rotation.z = 0; l.rotation.x = 0; l.position.z = (i ? 1 : -1) * 0.055; });
-    rider.g.rotation.y = Math.PI / 2; // face along +x (bike local)
-    g.scale.setScalar(1); root.add(g); return { g, w1, w2 };
-  };
-  for (let i = 0; i < 5; i++) { const r = ROADS[Math.floor(R() * ROADS.length)], vert = R() < 0.5, lane = R() < 0.5 ? 1 : -1; const c = makeCyclist(); cyclists.push({ ...c, r, vert, lane, s: R() * 116 - 58, speed: 1.4 + R() * 0.8 }); }
+  for (let i = 0; i < 5; i++) {                                    // cyclists on the carriageways
+    const r = ROADS[Math.floor(R() * ROADS.length)], vert = R() < 0.5, lane = R() < 0.5 ? 1 : -1;
+    const m = kit.billboard(kit.cyclist, 1.7); root.add(m); cyclists.push({ m, r, vert, lane, s: R() * 116 - 58, speed: 1.4 + R() * 0.8, ph: R() });
+  }
 
   const loc = (o, t) => [o.a[0] + (o.b[0] - o.a[0]) * t, o.a[1] + (o.b[1] - o.a[1]) * t];
-  let clock = 0;
+  const _right = new THREE.Vector3(), _fwd = new THREE.Vector3();
+  let facing = 0;
+  /** every cut-out stands upright and turns to the camera; it is mirrored so that it walks toward screen-left / right */
+  function orient(m, dx, dz, flipSign = 1) {
+    m.rotation.y = facing;
+    const screenX = dx * _right.x + dz * _right.z;
+    m.scale.x = (screenX >= 0 ? 1 : -1) * flipSign;
+  }
   function update(dt) {
-    clock += dt;
+    camera.getWorldDirection(_fwd); facing = Math.atan2(-_fwd.x, -_fwd.z);
+    _right.set(Math.cos(facing), 0, -Math.sin(facing));
     for (const p of people) {
       p.s += p.dir * p.speed * dt; if (p.s > p.L) { p.s = p.L; p.dir = -1; } else if (p.s < 0) { p.s = 0; p.dir = 1; }
-      const t = p.s / p.L, [x, z] = loc(p, t); p.ph += p.speed * dt * 7;
+      const t = p.s / p.L, [x, z] = loc(p, t); p.ph += p.speed * dt * 1.15;
       const dx = (p.b[0] - p.a[0]) * p.dir, dz = (p.b[1] - p.a[1]) * p.dir;
-      p.g.position.set(x, p.cross ? (Math.abs(t - 0.5) > 0.37 ? slab : 0) : p.y, z); p.g.rotation.y = Math.atan2(dx, dz);
-      const sw = Math.sin(p.ph) * 0.55; p.legs[0].rotation.x = sw; p.legs[1].rotation.x = -sw; p.arms[0].rotation.x = -sw * 0.8; p.arms[1].rotation.x = sw * 0.8;
-      if (p.dog) { const d = p.dog, bx0 = x - Math.sin(p.g.rotation.y) * 0.7 + Math.cos(p.g.rotation.y) * 0.22, bz0 = z - Math.cos(p.g.rotation.y) * 0.7 - Math.sin(p.g.rotation.y) * 0.22; d.g.position.set(bx0, p.y, bz0); d.g.rotation.y = p.g.rotation.y - Math.PI / 2; d.legs.forEach((l, i) => { l.rotation.z = Math.sin(p.ph * 1.4 + (i % 2) * Math.PI) * 0.6; }); }
+      p.m.position.set(x, p.cross ? (Math.abs(t - 0.5) > 0.37 ? slab : 0) : p.y, z); orient(p.m, dx, dz); kit.setFrame(p.m, p.ph);
+      if (p.dog) { const d = p.dog, L = Math.hypot(dx, dz) || 1; d.position.set(x - dx / L * 0.85 + dz / L * 0.2, p.y, z - dz / L * 0.85 - dx / L * 0.2); orient(d, dx, dz); kit.setFrame(d, p.ph * 1.3); }
     }
     for (const c of cyclists) {
-      c.s += c.speed * dt * c.lane; if (c.s > 60) c.s = -60; if (c.s < -60) c.s = 60;
-      const off = c.r + c.lane * 0.95;
-      if (c.vert) { c.g.position.set(off, 0, c.s); c.g.rotation.y = c.lane > 0 ? -Math.PI / 2 : Math.PI / 2; } else { c.g.position.set(c.s, 0, off); c.g.rotation.y = c.lane > 0 ? 0 : Math.PI; }
-      c.w1.rotation.z = c.w2.rotation.z = -clock * 6;
+      c.s += c.speed * dt * c.lane; if (c.s > 60) c.s = -60; if (c.s < -60) c.s = 60; c.ph += c.speed * dt * 0.6;
+      const off = c.r + c.lane * 0.95, dx = c.vert ? 0 : c.lane, dz = c.vert ? c.lane : 0;
+      c.m.position.set(c.vert ? off : c.s, 0, c.vert ? c.s : off); orient(c.m, dx, dz); kit.setFrame(c.m, c.ph);
     }
   }
   return { update, root, stats: () => ({ people: people.length, cyclists: cyclists.length, crossings: crossings.length, facades: boxes.length, walkLines: walkLines.length }) };
