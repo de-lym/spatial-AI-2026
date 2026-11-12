@@ -13,7 +13,7 @@ import { installInspection } from './inspection-integration.js';
 import { waypointSpeed } from './inspection.js';
 import { installDroneView } from './drone-view.js?v=3';
 import { createInkPass } from './ink.js?v=4';
-import { buildStreetscape } from './streetscape.js?v=7';
+import { buildStreetscape } from './streetscape.js?v=8';
 import { installTutorial } from './tutorial.js?v=3';
 
 /* ====================================================================
@@ -258,7 +258,7 @@ world.ewStreets = ROADS.map((z, i) => ({ name: EW_NAMES[i], z }));
 world.nsStreets = ROADS.map((x, i) => ({ name: NS_NAMES[i], x }));
 
 // ---- terrain: roads, lane marks, parcels -------------------------------
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshStandardMaterial({ color: 0xf8f6f3, roughness: 1 }));
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshStandardMaterial({ color: 0xb4b2af, roughness: 1 }));
 ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
 scene.add(ground);
 {

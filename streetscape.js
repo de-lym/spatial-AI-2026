@@ -111,8 +111,7 @@ export function buildStreetscape({ scene, camera, world, buildingGroups, ROADS, 
       for (let i = -3; i <= 3; i++) {
         const off = i * 0.56;
         // arm along x (ax≠0): carriageway runs along x, stripes along x spread in z
-        if (ax) { bx(M.ink, cx, 0.009, rz + off, 1.74, 0.02, 0.36); bx(M.white, cx, 0.012, rz + off, 1.7, 0.022, 0.32); }
-        else { bx(M.ink, rx + off, 0.009, cz, 0.36, 0.02, 1.74); bx(M.white, rx + off, 0.012, cz, 0.32, 0.022, 1.7); }
+        if (ax) bx(M.white, cx, 0.012, rz + off, 1.7, 0.022, 0.32); else bx(M.white, rx + off, 0.012, cz, 0.32, 0.022, 1.7);   // no outline on crossings
       }
       crossings.push({ x: cx, z: cz, ax, az });
     }
