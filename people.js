@@ -183,12 +183,8 @@ export function createPeopleKit(seed = 41) {
     const u = grp.userData;
     if (u.plan !== plan) { u.plan = plan; u.flat.visible = !plan; u.solid.visible = plan; u.f = -1; }
     if (plan) u.solid.rotation.y = Math.atan2(-dz, dx);
-    else {
-      // the cut-out stands in the vertical plane of its walking direction, so it always FACES where it is going. Looking straight along that
-      // path would show it edge-on, so the plane is allowed to swing toward the camera, but never past MAXD from the viewer's line of sight.
-      const th = Math.atan2(-dz, dx), x = facing - th, d = x - Math.PI * Math.round(x / Math.PI), MAXD = 1.1;
-      u.flat.rotation.y = Math.abs(d) > MAXD ? th + (Math.abs(d) - MAXD) * Math.sign(d) : th; u.flat.scale.x = 1;
-    }
+    else { u.flat.rotation.y = facing; u.flat.scale.x = (dx * rightX + dz * rightZ) >= 0 ? 1 : -1; }
+
   };
   kit.setFrame = (grp, ph) => {
     const u = grp.userData, set = u.set, f = Math.floor(((ph % 1) + 1) % 1 * set.frames); if (u.f === f) return; u.f = f;

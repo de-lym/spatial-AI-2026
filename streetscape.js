@@ -5,7 +5,7 @@
 // Everything here is DECOR: nothing is registered as an obstacle, so routing / airspace / picking are unaffected.
 // Static pieces are merged into one mesh per material; only the people / cyclists / dogs are animated.
 import * as THREE from 'three';
-import { createPeopleKit } from './people.js?v=6';
+import { createPeopleKit } from './people.js?v=7';
 
 const TAU = Math.PI * 2;
 const rngOf = (seed) => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -306,7 +306,7 @@ export function buildStreetscape({ scene, camera, world, buildingGroups, ROADS, 
       addWalker(a, b, 0, 0.7 + R() * 0.2).cross = true;
     }
   }
-  for (let i = 0; i < 5; i++) {                                    // cyclists on the carriageways
+  for (let i = 0; i < 0; i++) {                                    // cyclists removed on the carriageways
     const r = ROADS[Math.floor(R() * ROADS.length)], vert = R() < 0.5, lane = R() < 0.5 ? 1 : -1;
     const m = kit.figure(kit.cyclist, 1.15); root.add(m); cyclists.push({ m, r, vert, lane, s: R() * 116 - 58, speed: 1.4 + R() * 0.8, ph: R() });
   }
