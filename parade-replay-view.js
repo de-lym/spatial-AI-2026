@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import {OrbitControls} from './vendor/OrbitControls.js';
 import {createParadeVisual} from './parade-visual.js';
 import {createEventVisual} from './parade-event-visual.js?v=2';
-import {createInkPass} from './ink.js?v=12';
+import {createInkPass} from './ink.js?v=17';
 
 // Independent scene graph, transforms, instance buffers and camera. Static geometry/materials
 // may be shared read-only; no live object or simulation state is ever updated here.

@@ -12,9 +12,9 @@ import { buildPlacementArchitecture, installPlacements } from './placement-integ
 import { installInspection } from './inspection-integration.js';
 import { waypointSpeed } from './inspection.js';
 import { installDroneView } from './drone-view.js?v=3';
-import { createInkPass } from './ink.js?v=12';
-import { installParade } from './parade-integration.js?v=11';
-import { buildStreetscape } from './streetscape.js?v=32';
+import { createInkPass } from './ink.js?v=17';
+import { installParade } from './parade-integration.js?v=13';
+import { buildStreetscape } from './streetscape.js?v=34';
 import { installTutorial } from './tutorial.js?v=3';
 
 /* ====================================================================
@@ -2470,7 +2470,7 @@ function frame() {
 }
 let droneView = { render() {} };
 try { droneView = installDroneView({ scene, canvas: $('drone-live'), getDrone: () => selectedDrone(), hiddenWhileRendering: [selRing] }); } catch (e) { console.error('Live drone view unavailable', e); }
-if (PARADE_MODE) parade = installParade({ S, scene, world, planRoute, segCheck, camera, controls, removeOrder, routeLayer, selRing, setAdvanced, toast, SLAB, streetLabels });
+if (PARADE_MODE) parade = installParade({ S, scene, world, planRoute, segCheck, camera, controls, removeOrder, routeLayer, selRing, setAdvanced, toast, SLAB, streetLabels, ink });
 const tutorial = parade ? null : installTutorial({ selectDrone, clearDroneSelection, S });
 if (tutorial) $('btn-tour').addEventListener('click', () => tutorial.start(true));
 if (!parade) updatePanels(true);

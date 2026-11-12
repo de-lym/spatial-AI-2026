@@ -216,17 +216,18 @@ export function createCrowdKit() {
   const R = rngOf(77), pick = a => a[Math.floor(R() * a.length)];
   const atlas = (n, v, fw = FW, fh = FH) => {
     const cv = document.createElement('canvas'); cv.width = fw * n; cv.height = fh; const g = cv.getContext('2d');
-    for (let f = 0; f < n; f++) { g.save(); g.translate(f * fw, 0); g.beginPath(); g.rect(0, 0, fw, fh); g.clip(); drawWalker(g, v, n > 1 ? f / n : 0.3); g.restore(); }
-    const t = new THREE.CanvasTexture(cv); t.generateMipmaps = false; t.minFilter = t.magFilter = THREE.LinearFilter; return {tex: t, frames: n, aspect: fw / fh};
+    for (let f = 0; f < n; f++) { g.save(); g.translate(f * fw, 0); g.beginPath(); g.rect(0, 0, fw, fh); g.clip(); g.translate(fw / 2, 0); g.scale(1.32, 1); g.translate(-fw / 2, 0); drawWalker(g, v, n > 1 ? f / n : 0.3 + (R() - 0.5) * 0.2); g.restore(); }   // 1.32× wider = sturdier body, same height
+    const t = new THREE.CanvasTexture(cv); t.generateMipmaps = false; t.minFilter = t.magFilter = THREE.LinearFilter; return {tex: t, frames: n, aspect: fw / fh, geo: solidFromFrame(cv, 0, fw, fh, 0.5, 0.2)};
   };
-  const S = (o) => ({kind: 'trousers', hair: 'none', bag: 'none', arm: 'swing', lean: R() * 0.8, tall: 0.95 + R() * 0.1, still: true, ...o});
+  // everybody is an ordinary walking person (swinging arms, mid-stride); only outfits differ
+  const S = (o) => ({kind: 'trousers', hair: 'none', bag: 'none', arm: 'swing', lean: R() * 0.8, tall: 0.95 + R() * 0.1, still: false, ...o});
   const spectators = [
-    S({kind: 'coat', hair: 'long', arm: 'wave'}), S({kind: 'dress', hair: 'bun', arm: 'wave'}), S({kind: 'trousers', hair: 'tuft', arm: 'wave'}), S({kind: 'skirt', hair: 'pony', arm: 'phone'}),
-    S({kind: 'coat', hair: 'none', arm: 'swing', bag: 'shoulder'}), S({kind: 'trousers', hat: 'cap', arm: 'flag'}), S({kind: 'dress', hair: 'long', arm: 'swing'}), S({kind: 'shorts', hair: 'pony', arm: 'wave', bag: 'pack'}),
-    S({kind: 'trousers', hair: 'bun', arm: 'swing', bag: 'hand'}), S({kind: 'coat', hat: 'cap', arm: 'wave'}),
+    S({kind: 'coat', hair: 'long'}), S({kind: 'dress', hair: 'bun'}), S({kind: 'trousers', hair: 'tuft'}), S({kind: 'skirt', hair: 'pony'}),
+    S({kind: 'coat', bag: 'shoulder'}), S({kind: 'trousers', hat: 'cap'}), S({kind: 'dress', hair: 'long'}), S({kind: 'shorts', hair: 'pony', bag: 'pack'}),
+    S({kind: 'trousers', hair: 'bun', bag: 'hand'}), S({kind: 'coat', hat: 'cap'}),
   ].map(v => atlas(1, v));
-  const marchers = [{hat: 'shako'}, {hat: 'shako', bag: 'none'}].map(o => atlas(8, S({kind: 'marcher', arm: 'baton', still: false, tall: 1.02, lean: 0.2, ...o})));
-  const handlers = [{hat: 'cap'}, {hair: 'bun'}].map(o => atlas(1, S({kind: 'handler', arm: 'rope', lean: 1.4, ...o})));
+  const marchers = [{hat: 'shako'}, {hat: 'shako', bag: 'none'}].map(o => atlas(8, S({kind: 'marcher', tall: 1.02, lean: 0.2, ...o})));
+  const handlers = [{hat: 'cap'}, {hair: 'bun'}].map(o => atlas(1, S({kind: 'handler', lean: 0.6, ...o})));
   crowdKit = {spectators, marchers, handlers, pick};
   return crowdKit;
 }

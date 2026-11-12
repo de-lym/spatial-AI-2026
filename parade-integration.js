@@ -6,7 +6,7 @@ import {CONFIG, createParade, distance} from './parade.js';
 import {METHODS} from './parade-methods.js';
 import {EVENT_IDS, EVENT_SCHEDULE} from './parade-events.js';
 import {CROWD_ZONES} from './parade-environment.js';
-import {createParadeVisual} from './parade-visual.js?v=2';
+import {createParadeVisual} from './parade-visual.js?v=4';
 import {createEventVisual} from './parade-event-visual.js?v=2';
 import {installObservability, TABS} from './parade-observability.js?v=4';
 
@@ -16,7 +16,7 @@ const fresh = id => { const el = $(id); const c = el.cloneNode(true); el.replace
 const SCALE_M = 5;                                                                                    // one scene unit = 5 m
 const f1 = (n, s = '') => (n === null || n === undefined ? '—' : `${n.toFixed(1)}${s}`);
 
-export function installParade({S, scene, world, planRoute, segCheck, camera, controls, removeOrder, routeLayer, selRing, setAdvanced, toast, SLAB, streetLabels}) {
+export function installParade({S, scene, world, planRoute, segCheck, camera, controls, removeOrder, routeLayer, selRing, setAdvanced, toast, SLAB, streetLabels, ink}) {
   document.body.classList.add('parade-mode');
   for (const o of [...S.orders]) removeOrder(o);
   S.intake = false; S.selected = null; S.track = null; routeLayer.visible = false; S.running = false; S.stage = 4; S.speed = 1;
@@ -36,17 +36,15 @@ export function installParade({S, scene, world, planRoute, segCheck, camera, con
 
   // ---- 3D actors ----
   const group = new THREE.Group(); scene.add(group);
-  const paradeVisual = createParadeVisual(group, engine.state.parade);
+  const avoid = [...S.restaurants, ...S.customers].map(e => ({x: e.acc.x, z: e.acc.z})).concat([{x: 0, z: 5.3}, {x: -1.8, z: 5.3}, {x: 1.8, z: 5.3}]);   // ground landing pads: nobody stands here
+  const paradeVisual = createParadeVisual(group, engine.state.parade, {avoid});
   const eventVisual = createEventVisual(group);
   for (const p of pads) {
     const ring = new THREE.Mesh(new THREE.RingGeometry(1, 1.5, 40), new THREE.MeshBasicMaterial({color: 0x141414, side: THREE.DoubleSide}));
     ring.rotation.x = -Math.PI / 2; ring.position.set(p.pos.x, p.roof + .48, p.pos.z); group.add(ring);
   }
-  const crowdLayer = new THREE.Group(); group.add(crowdLayer);        // published crowd reservations (22.5 m low-overflight exclusion)
-  for (const z of CROWD_ZONES) {
-    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(z.x1 - z.x0, z.h, z.z1 - z.z0)), new THREE.LineDashedMaterial({color: 0x141414, dashSize: .6, gapSize: .5}));
-    edges.computeLineDistances(); edges.position.set((z.x0 + z.x1) / 2, SLAB + z.h / 2, (z.z0 + z.z1) / 2); crowdLayer.add(edges);
-  }
+  const zoneRects = CROWD_ZONES.map(z => ({x0: z.x0, z0: z.z0, x1: z.x1, z1: z.z1}));   // Parade Zone: tinted translucent yellow by the ink pass
+  ink.setZones(zoneRects, true);
   const routeLines = S.couriers.map(() => { const l = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({color: 0x141414, dashSize: .5, gapSize: .35})); l.visible = false; group.add(l); return l; });
   const sensed = new THREE.Points(new THREE.BufferGeometry(), new THREE.PointsMaterial({color: 0x141414, size: .55})); sensed.visible = false; group.add(sensed);
   const sensor = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({color: 0x141414, transparent: true, opacity: .35})); sensor.visible = false; group.add(sensor);
@@ -94,8 +92,8 @@ export function installParade({S, scene, world, planRoute, segCheck, camera, con
   }
   // Layers: only the layers that exist in this scenario.
   for (const id of ['lay-perm', 'lay-cand', 'lay-sel']) $(id).closest('label').hidden = true;
-  $('lay-rest').closest('label').lastChild.textContent = ' Crowd zones'; S.layers.rest = false; $('lay-rest').checked = false;
-  $('legend').innerHTML = '<section><b>Encounters</b><div><i style="background:#fff;border:1.5px solid #141414;border-radius:50%"></i>○ Notice</div><div><i style="background:#fff;border:3px solid #141414;border-radius:50%"></i>! Conflict</div><div><i style="background:#141414;border-radius:50%"></i>!! Urgent</div></section><section><b>Scene</b><div><i style="background:#f6f4f0;border:1.5px solid #141414"></i>Parade balloon</div><div><i style="background:#1b1b1d"></i>Crowd / marchers</div><div><i style="border:1.5px dashed #141414"></i>Crowd zone (&lt; 22.5 m)</div><div><i style="border:1.5px solid #141414;border-radius:50%"></i>Rooftop pad</div></section>';
+  $('lay-rest').closest('label').lastChild.textContent = ' Parade Zone'; S.layers.rest = true; $('lay-rest').checked = true;
+  $('legend').innerHTML = '<section><b>Encounters</b><div><i style="background:#fff;border:1.5px solid #141414;border-radius:50%"></i>○ Notice</div><div><i style="background:#fff;border:3px solid #141414;border-radius:50%"></i>! Conflict</div><div><i style="background:#141414;border-radius:50%"></i>!! Urgent</div></section><section><b>Scene</b><div><i style="background:#f6f4f0;border:1.5px solid #141414"></i>Parade balloon</div><div><i style="background:#1b1b1d"></i>Crowd / marchers</div><div><i style="background:rgba(255,205,20,.55)"></i>Parade Zone (no landing, no flight &lt; 22.5 m)</div><div><i style="border:1.5px solid #141414;border-radius:50%"></i>Rooftop pad</div></section>';
   // Advanced drawer: setup, results, decision trace, model info — same section styling.
   document.querySelector('#advanced .advbody').innerHTML = `
     <p class="small">Results, decision trace and model notes for the parade experiment. The original delivery simulator is available at <code>?mode=legacy</code>.</p>
@@ -138,8 +136,7 @@ export function installParade({S, scene, world, planRoute, segCheck, camera, con
   reset.addEventListener('click', () => doReset());
   locate.addEventListener('click', () => { const p = engine.state.balloon; controls.target.set(p.x, 6, p.z); camera.position.set(p.x + 65, 58, p.z + 65); camera.zoom = 1.5; camera.updateProjectionMatrix(); controls.update(); });
   city.addEventListener('click', () => { camera.position.copy(initialView.position); controls.target.copy(initialView.target); camera.zoom = initialView.zoom; camera.updateProjectionMatrix(); controls.update(); });
-  $('lay-rest').addEventListener('change', e => { crowdLayer.visible = e.target.checked; });
-  crowdLayer.visible = false;
+  $('lay-rest').addEventListener('change', e => ink.setZones(zoneRects, e.target.checked));
   $('trace-filter').addEventListener('change', renderUI);
   $('trace-log').addEventListener('click', e => { const b = e.target.closest('[data-trace-record]'); if (b) obs.open(engine.state.log.find(r => r.recordId === b.dataset.traceRecord), b); });
   $('export-json').addEventListener('click', () => {

@@ -5,7 +5,7 @@
 // Everything here is DECOR: nothing is registered as an obstacle, so routing / airspace / picking are unaffected.
 // Static pieces are merged into one mesh per material; only the people / cyclists / dogs are animated.
 import * as THREE from 'three';
-import { createPeopleKit } from './people.js?v=8';
+import { createPeopleKit } from './people.js?v=10';
 
 const TAU = Math.PI * 2;
 const rngOf = (seed) => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -311,6 +311,9 @@ export function buildStreetscape({ scene, camera, world, buildingGroups, ROADS, 
     const m = kit.figure(kit.cyclist, 1.15); root.add(m); cyclists.push({ m, r, vert, lane, s: R() * 116 - 58, speed: 1.4 + R() * 0.8, ph: R() });
   }
 
+  // landing pads (ground): lot front at z + 5.1, plus the hub slots; pedestrians and dogs are hidden while on one
+  const padSpots = [...takenAt].map(k => k.split(',').map(Number)).map(([x, z]) => [x, z + 5.1]).concat([[0, 5.3], [-1.8, 5.3], [1.8, 5.3]]);
+  const onPad = (x, z) => padSpots.some(([px, pz]) => Math.hypot(px - x, pz - z) < 2.1);
   const loc = (o, t) => [o.a[0] + (o.b[0] - o.a[0]) * t, o.a[1] + (o.b[1] - o.a[1]) * t];
   // flat cut-outs turn to the camera and mirror toward their walking direction; from a bird's-eye camera they swap to extruded 3D figures
   const _fwd = new THREE.Vector3(); let facing = 0, rightX = 1, rightZ = 0, plan = false;
@@ -322,8 +325,8 @@ export function buildStreetscape({ scene, camera, world, buildingGroups, ROADS, 
       p.s += p.dir * p.speed * dt; if (p.s > p.L) { p.s = p.L; p.dir = -1; } else if (p.s < 0) { p.s = 0; p.dir = 1; }
       const t = p.s / p.L, [x, z] = loc(p, t); p.ph += p.speed * dt * 1.15;
       const dx = (p.b[0] - p.a[0]) * p.dir, dz = (p.b[1] - p.a[1]) * p.dir;
-      p.m.position.set(x, p.cross ? (Math.abs(t - 0.5) > 0.37 ? slab : 0) : p.y, z); orient(p.m, dx, dz); kit.setFrame(p.m, p.ph);
-      if (p.dog) { const d = p.dog, L = Math.hypot(dx, dz) || 1; d.position.set(x - dx / L * 0.85 + dz / L * 0.2, p.y, z - dz / L * 0.85 - dx / L * 0.2); orient(d, dx, dz); kit.setFrame(d, p.ph * 1.3); }
+      p.m.visible = !onPad(x, z); p.m.position.set(x, p.cross ? (Math.abs(t - 0.5) > 0.37 ? slab : 0) : p.y, z); orient(p.m, dx, dz); kit.setFrame(p.m, p.ph);
+      if (p.dog) { const d = p.dog, L = Math.hypot(dx, dz) || 1; d.position.set(x - dx / L * 0.85 + dz / L * 0.2, p.y, z - dz / L * 0.85 - dx / L * 0.2); orient(d, dx, dz); kit.setFrame(d, p.ph * 1.3); d.visible = p.m.visible && !onPad(d.position.x, d.position.z); }
     }
     for (const c of cyclists) {
       c.s += c.speed * dt * c.lane; if (c.s > 60) c.s = -60; if (c.s < -60) c.s = 60; c.ph += c.speed * dt * 0.6;

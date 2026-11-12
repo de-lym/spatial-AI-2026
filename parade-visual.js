@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import {PARADE_ROUTE,PARADE} from './parade-environment.js';
-import {createCrowdKit} from './people.js?v=8';
+import {createCrowdKit} from './people.js?v=10';
 
 // Shared soft geometry and materials: lightweight crowd, editable 3D character.
-export function createParadeVisual(parent,initial){
+export function createParadeVisual(parent,initial,{avoid=[]}={}){
   const root=new THREE.Group();root.name='Patterned street parade';parent.add(root);
   const material=color=>new THREE.MeshStandardMaterial({color,roughness:.88});
   // monochrome: the balloon is white paper with grey / black details; people are dark cut-out silhouettes
@@ -44,22 +44,24 @@ export function createParadeVisual(parent,initial){
       vertexShader:'attribute float frame; uniform float uFrames; varying vec2 vUv; void main(){ vUv = vec2((uv.x + frame) / uFrames, uv.y); gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0); }',
       fragmentShader:'uniform sampler2D map; varying vec2 vUv; void main(){ if (texture2D(map, vUv).a < .4) discard; gl_FragColor = vec4(vec3(.04), 1.0); }'});
     gr.mesh=new THREE.InstancedMesh(geo,mat,n);gr.mesh.frustumCulled=false;gr.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);root.add(gr.mesh);
+    gr.solid=new THREE.InstancedMesh(gr.set.geo,new THREE.MeshStandardMaterial({color:0x0a0a0b,roughness:1}),n);gr.solid.frustumCulled=false;gr.solid.castShadow=true;gr.solid.visible=false;gr.solid.instanceMatrix.setUsage(THREE.DynamicDrawUsage);root.add(gr.solid);
     gr.items.forEach((it,k)=>{it.group=gr;it.k=k;it.frame=0;});
   }
   const _m=new THREE.Matrix4(),_q=new THREE.Quaternion(),_p=new THREE.Vector3(),_s=new THREE.Vector3(),_up=new THREE.Vector3(0,1,0);
-  let facing=0,rightX=1,rightZ=0,camStamp='';
+  let facing=0,rightX=1,rightZ=0,camStamp='',plan=false;
   function place(it){
-    const p=it.p,sc=H*(it.role==='marcher'?1.04:1),dirX=Math.sin(p.heading),dirZ=Math.cos(p.heading),flip=(dirX*rightX+dirZ*rightZ)>=0?1:-1;
+    const p=it.p,onPad=avoid.some(a=>Math.hypot(a.x-p.pos.x,a.z-p.pos.z)<2.1),sc=onPad?0:H*(it.role==='marcher'?1.04:1),dirX=Math.sin(p.heading),dirZ=Math.cos(p.heading),flip=(dirX*rightX+dirZ*rightZ)>=0?1:-1;
     _q.setFromAxisAngle(_up,facing);_p.set(p.pos.x,Y0,p.pos.z);_s.set(sc*it.group.set.aspect*flip,sc,1);
     it.group.mesh.setMatrixAt(it.k,_m.compose(_p,_q,_s));
+    if(plan){_q.setFromAxisAngle(_up,Math.atan2(-dirZ,dirX));_s.setScalar(sc);it.group.solid.setMatrixAt(it.k,_m.compose(_p,_q,_s));}
   }
   function refresh(frames){
     for(const it of people){place(it);if(frames!==undefined&&it.group.set.frames>1)it.group.frame.setX(it.k,frames(it));}
-    for(const gr of groups.values()){gr.mesh.instanceMatrix.needsUpdate=true;gr.frame.needsUpdate=true;}
+    for(const gr of groups.values()){gr.mesh.visible=!plan;gr.solid.visible=plan;gr.mesh.instanceMatrix.needsUpdate=true;gr.solid.instanceMatrix.needsUpdate=true;gr.frame.needsUpdate=true;}
   }
   /** turn every figure to the given camera (called each frame; cheap, only re-uploads when the view yaw changes) */
   function face(camera){
-    const d=new THREE.Vector3();camera.getWorldDirection(d);const yaw=Math.atan2(-d.x,-d.z),stamp=yaw.toFixed(3);if(stamp===camStamp)return;camStamp=stamp;
+    const d=new THREE.Vector3();camera.getWorldDirection(d);const yaw=Math.atan2(-d.x,-d.z),down=-d.y,nextPlan=plan?down>.84:down>.9,stamp=yaw.toFixed(3)+nextPlan;if(stamp===camStamp)return;camStamp=stamp;plan=nextPlan;
     facing=yaw;rightX=Math.cos(facing);rightZ=-Math.sin(facing);refresh();
   }
   const ropeMaterial=new THREE.LineBasicMaterial({color:0x2a2a2c});

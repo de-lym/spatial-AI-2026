@@ -16,6 +16,7 @@ uniform vec2 uRes;
 uniform float uNear, uFar, uOrtho, uDpr, uCell, uEdge, uPatY, uPatScale, uPatOn;
 uniform sampler2D tPattern;
 uniform mat4 uInvVP;
+uniform vec4 uZones[6]; uniform float uZoneOn;
 const float DOTMIN = .26;
 const vec3 PAPER = vec3(.957,.949,.937), INK = vec3(.075,.075,.08);
 float luma(vec3 c){ return dot(c, vec3(.2126,.7152,.0722)); }
@@ -92,6 +93,10 @@ void main(){
       col = mix(vec3(.52), PAPER, smoothstep(.3, .95, pv));
     }
   }
+  if (uZoneOn > .5 && d0 < .99999) {                    // Parade Zone: translucent yellow on ground-level surfaces (roads, pavements) inside the zone rectangles
+    vec4 wp = uInvVP * vec4(vUv * 2. - 1., d0 * 2. - 1., 1.); wp /= wp.w;
+    if (wp.y < .55) { for (int i = 0; i < 6; i++) { vec4 z = uZones[i]; if (wp.x > z.x && wp.x < z.z && wp.z > z.y && wp.z < z.w) { col = mix(col, vec3(1., .80, .08), .5); break; } } }
+  }
   gl_FragColor = vec4(col, 1.);
 }`;
 
@@ -103,7 +108,7 @@ export function createInkPass(renderer, { cell = 2.0, edge = 1 } = {}) {
   pattern.wrapS = pattern.wrapT = THREE.RepeatWrapping; pattern.anisotropy = 8; pattern.minFilter = THREE.LinearMipmapLinearFilter;
   const mat = new THREE.ShaderMaterial({
     vertexShader: VERT, fragmentShader: FRAG, depthTest: false, depthWrite: false,
-    uniforms: { tPattern: { value: pattern }, uPatY: { value: -1.4 }, uPatScale: { value: 40 }, uPatOn: { value: 0 }, uInvVP: { value: new THREE.Matrix4() }, tColor: { value: target.texture }, tDepth: { value: target.depthTexture }, uRes: { value: new THREE.Vector2(1, 1) },
+    uniforms: { tPattern: { value: pattern }, uPatY: { value: -1.4 }, uPatScale: { value: 40 }, uPatOn: { value: 0 }, uInvVP: { value: new THREE.Matrix4() }, uZones: { value: Array.from({ length: 6 }, () => new THREE.Vector4()) }, uZoneOn: { value: 0 }, tColor: { value: target.texture }, tDepth: { value: target.depthTexture }, uRes: { value: new THREE.Vector2(1, 1) },
       uNear: { value: 0.1 }, uFar: { value: 100 }, uOrtho: { value: 1 }, uDpr: { value: 1 }, uCell: { value: cell }, uEdge: { value: edge } },
   });
   const quadScene = new THREE.Scene();
@@ -131,5 +136,5 @@ export function createInkPass(renderer, { cell = 2.0, edge = 1 } = {}) {
     camera.layers.mask = mask;
     scene.background = bg; renderer.autoClear = auto;
   }
-  return { render, setBackdrop({ y, scale }) { mat.uniforms.uPatY.value = y; mat.uniforms.uPatScale.value = scale; } };
+  return { render, setZones(rects, on) { rects.forEach((r, i) => mat.uniforms.uZones.value[i].set(r.x0, r.z0, r.x1, r.z1)); mat.uniforms.uZoneOn.value = on ? 1 : 0; }, setBackdrop({ y, scale }) { mat.uniforms.uPatY.value = y; mat.uniforms.uPatScale.value = scale; } };
 }
