@@ -241,7 +241,7 @@ export function buildStreetscape({ scene, camera, world, buildingGroups, ROADS, 
       const P = (u, v, out) => [faceX + tx * u + nx * out, y0 + v, faceZ + tz * u + nz * out];
       const win = (u, v, ww, hh, lit) => {
         const [px, py, pz] = P(u, v, 0.03);
-        bx(lit ? M.light : M.glass, px, py, pz, ww, hh, 0.05, ry, 0, 0, glassB);
+        bx(M.glass, px, py, pz, ww, hh, 0.05, ry, 0, 0, glassB);
         const [mx, my, mz] = P(u, v, 0.06);
         bx(M.white, mx, my, mz, 0.04, hh, 0.02, ry, 0, 0, glassB);
         bx(M.white, mx, my + hh * 0.5, mz, ww, 0.04, 0.02, ry, 0, 0, glassB);
@@ -253,7 +253,7 @@ export function buildStreetscape({ scene, camera, world, buildingGroups, ROADS, 
         const bays = Math.max(1, Math.floor((fw - 0.8) / 2.2)), bw = (fw - 0.8) / bays;
         for (let i = 0; i < bays; i++) {
           const u = -fw / 2 + 0.4 + bw * (i + 0.5);
-          if (i === 0 && R() < 0.7) { win(u, 0.1, Math.min(0.8, bw - 0.3), 1.15, false); } else win(u, 0.28, bw - 0.35, 1.0, R() < 0.12);
+          if (i === 0 && R() < 0.7) { win(u, 0.1, Math.min(0.8, bw - 0.3), 1.15, false); } else win(u, 0.28, bw - 0.35, 1.0, (R(), false));
         }
         storeTop = 1.5;
         if (fw >= 3.4 && R() < 0.85) {                               // slatted awning, tilted, with brackets
@@ -271,7 +271,7 @@ export function buildStreetscape({ scene, camera, world, buildingGroups, ROADS, 
       for (let r = first; r < rows; r++) for (let i = 0; i < cols; i++) {
         const u = -fw / 2 + 0.4 + cw * (i + 0.5);
         if (style < 0.22 && tall) { if (i === 0) for (let k = 0; k < 6; k++) { const [lx, ly, lz] = P(0, r * 1.5 + 0.2 + k * 0.18, 0.04); bx(M.light, lx, ly, lz, fw - 0.5, 0.05, 0.04, ry, 0, 0, glassB); } break; } // louvre band
-        win(u, r * 1.5 + 0.38, Math.min(0.85, cw - 0.3), 0.78, R() < 0.1);
+        win(u, r * 1.5 + 0.38, Math.min(0.85, cw - 0.3), 0.78, (R(), false));
       }
       // blade sign + occasional horizontal banner
       if (ground && fw >= 3 && h >= 3.4 && blade < 40 && R() < 0.45) {

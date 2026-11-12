@@ -13,7 +13,7 @@ import { installInspection } from './inspection-integration.js';
 import { waypointSpeed } from './inspection.js';
 import { installDroneView } from './drone-view.js?v=3';
 import { createInkPass } from './ink.js?v=12';
-import { buildStreetscape } from './streetscape.js?v=24';
+import { buildStreetscape } from './streetscape.js?v=25';
 import { installTutorial } from './tutorial.js?v=3';
 
 /* ====================================================================
@@ -466,9 +466,9 @@ function buildFiller(x, z) {
     lawn.position.y = 0.07; g.add(lawn);
     // forest: dense scatter of mixed trees across the whole lot (rows back-to-front look natural in the isometric view)
     const pts = [];
-    for (let tries = 0; tries < 400 && pts.length < 46; tries++) {
-      const x = (srand() - 0.5) * 11, z = (srand() - 0.5) * 11;
-      if (pts.every(([px, pz]) => Math.hypot(px - x, pz - z) > 1.25)) pts.push([x, z]);
+    for (let tries = 0; tries < 600 && pts.length < 23; tries++) {
+      const a = srand() * Math.PI * 2, r = Math.sqrt(srand()) * 4.6, x = Math.cos(a) * r, z = Math.sin(a) * r;   // inside the lawn circle (radius 5.9) with room for the crowns
+      if (pts.every(([px, pz]) => Math.hypot(px - x, pz - z) > 1.4)) pts.push([x, z]);
     }
     for (const [x, z] of pts) tree(g, x, z, 0.14, 0.75 + srand() * 0.65);
     const pn = PARKS[parkN++ % PARKS.length]; addLandmark(pn); setLU(x, z, LU, pn);
