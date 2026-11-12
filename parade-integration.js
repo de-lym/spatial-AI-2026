@@ -76,7 +76,7 @@ export function installParade({S, scene, world, planRoute, segCheck, camera, con
     <p class="small" id="config-note" role="status"></p>
     <div id="pending-actions" hidden><button id="cfg-apply" disabled>Apply &amp; Restart</button><button id="cfg-discard">Discard</button></div>`;
   logCard.className = 'incidents eventlogcard'; logCard.setAttribute('aria-label', 'Event log');
-  logCard.innerHTML = `<div class="incidenthead"><h2>Event Log <span class="count" id="event-log-count">0</span></h2><small>Important encounters, newest first. Click one to replay it.</small></div><div class="eventlist" id="events" role="list" tabindex="0"></div>`;
+  logCard.innerHTML = `<div class="incidenthead"><h2>Event Log <span class="count" id="event-log-count">0</span></h2></div><div class="eventlist" id="events" role="list" tabindex="0"></div>`;
   // Top bar: Start / speed / Reset stay; the status strip and Advanced drawer button are removed.
   $('statusbar').hidden = true; $('btn-advanced').hidden = true; document.body.style.setProperty('--top', '88px');
   // Fleet Monitoring: same table; the last column becomes the shared 0–150 s event axis.
