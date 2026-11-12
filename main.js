@@ -13,7 +13,7 @@ import { installInspection } from './inspection-integration.js';
 import { waypointSpeed } from './inspection.js';
 import { installDroneView } from './drone-view.js?v=3';
 import { createInkPass } from './ink.js?v=12';
-import { buildStreetscape } from './streetscape.js?v=25';
+import { buildStreetscape } from './streetscape.js?v=26';
 import { installTutorial } from './tutorial.js?v=3';
 
 /* ====================================================================
@@ -165,6 +165,13 @@ function tree(parent, x, z, y = SLAB, s = 1) {
   else if (kind < 0.65) { stem(0.7); ball(0.8, 1.5, c); ball(0.5, 2.35, c2); }
   else if (kind < 0.85) { stem(0.8); ball(0.62, 1.4, c); }
   else { stem(0.4); const b = shade(new THREE.Mesh(ballGeo, mat(c))); b.scale.set(0.7, 1.9, 0.7); b.position.y = 1.5; g.add(b); }
+  g.position.set(x, y, z); g.scale.setScalar(s); parent.add(g);
+}
+/** conifer: a visible trunk (pillar) under a tall cone crown */
+function conifer(parent, x, z, y = SLAB, s = 1) {
+  const g = new THREE.Group(), c = pick(TREE);
+  const trunk = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.13, 0.9, 8), mat(0xc2863f))); trunk.position.y = 0.45; g.add(trunk);
+  const crown = shade(new THREE.Mesh(new THREE.ConeGeometry(0.85, 2.3, 24), mat(c))); crown.position.y = 0.9 + 1.15; g.add(crown);
   g.position.set(x, y, z); g.scale.setScalar(s); parent.add(g);
 }
 function prism(parent, w, h, d, color, x, y, z, ry = 0) { // pitched roof: triangle (w wide, h high) extruded along d
@@ -470,7 +477,7 @@ function buildFiller(x, z) {
       const a = srand() * Math.PI * 2, r = Math.sqrt(srand()) * 4.6, x = Math.cos(a) * r, z = Math.sin(a) * r;   // inside the lawn circle (radius 5.9) with room for the crowns
       if (pts.every(([px, pz]) => Math.hypot(px - x, pz - z) > 1.4)) pts.push([x, z]);
     }
-    for (const [x, z] of pts) tree(g, x, z, 0.14, 0.75 + srand() * 0.65);
+    for (const [x, z] of pts) conifer(g, x, z, 0.14, 0.75 + srand() * 0.45);
     const pn = PARKS[parkN++ % PARKS.length]; addLandmark(pn); setLU(x, z, LU, pn);
   } else if (kind === 'pond') {
     const lawn = flat(shade(new THREE.Mesh(new THREE.CylinderGeometry(5.6, 5.6, 0.1, 48), mat(0xb6c9a8)))); lawn.position.y = 0.05; g.add(lawn);
