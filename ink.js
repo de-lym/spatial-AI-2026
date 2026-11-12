@@ -33,7 +33,7 @@ float scales(vec2 p, float px){
   vec2 c = vec2(i + .5 * odd, k * .5);
   float sd = abs(length(p - c) - .5);
   float line = 1. - smoothstep(px * .35, px * .85, sd);
-  return line * smoothstep(.45, .25, px);
+  return mix(.26, line, smoothstep(.34, .17, px));   // far away the arcs average out to a flat grey tone
 }
 vec2 groundXZ(vec2 uv){
   vec2 ndc = uv * 2. - 1.;
@@ -80,7 +80,7 @@ void main(){
   if (alphaAt(vUv) < .37 && sky < .5 && dir.y < -1e-4) {   // road surface (alpha .25): paving pattern instead of dots
     float t0 = -n.y / dir.y; vec2 w = n.xz + dir.xz * t0;
     vec2 g1 = groundXZ(vUv + vec2(px.x, 0.)), g2 = groundXZ(vUv + vec2(0., px.y));   // pixel footprint on the ground (no fwidth: it breaks across quads)
-    vec2 wp = w * 2.0; float L = scales(wp, max(length(g1 - w), length(g2 - w)) * 2.0);
+    vec2 wp = w * 6.0; float pxw = max(length(g1 - w), length(g2 - w)) * 6.0; float L = scales(wp, pxw);
     col = min(col, vec3(.89));                                    // road = light grey; white crossings / dashes stand out from it
     col = mix(col, vec3(.55), L * step(ink, .35) * .9);
   }
@@ -89,7 +89,7 @@ void main(){
     if (uPatOn > .5 && dir.y < -1e-4) {
       float t = (uPatY - n.y) / dir.y; vec2 w = (n.xz + dir.xz * t) / uPatScale;
       float pv = texture2D(tPattern, w).r;
-      col = mix(INK, PAPER, smoothstep(.3, .95, pv));
+      col = mix(vec3(.52), PAPER, smoothstep(.3, .95, pv));
     }
   }
   gl_FragColor = vec4(col, 1.);
@@ -99,7 +99,7 @@ export function createInkPass(renderer, { cell = 2.0, edge = 1 } = {}) {
   const target = new THREE.WebGLRenderTarget(4, 4, { samples: 4, depthTexture: new THREE.DepthTexture(4, 4), depthBuffer: true });
   target.depthTexture.type = THREE.UnsignedIntType;
   target.texture.minFilter = target.texture.magFilter = THREE.NearestFilter;
-  const pattern = new THREE.TextureLoader().load('./assets/pattern.png', (t) => { mat.uniforms.uPatOn.value = 1; });
+  const pattern = new THREE.TextureLoader().load('./assets/pattern.png?v=2', (t) => { mat.uniforms.uPatOn.value = 1; });
   pattern.wrapS = pattern.wrapT = THREE.RepeatWrapping; pattern.anisotropy = 8; pattern.minFilter = THREE.LinearMipmapLinearFilter;
   const mat = new THREE.ShaderMaterial({
     vertexShader: VERT, fragmentShader: FRAG, depthTest: false, depthWrite: false,
