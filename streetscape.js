@@ -101,11 +101,7 @@ export function buildStreetscape({ scene, camera, world, buildingGroups, ROADS, 
   const tileOfXY = (x, z) => world.tiles[(Math.round(x / 16) + 3) * 7 + Math.round(z / 16) + 3];
 
   // ---------- roads: asphalt, zebra crossings, pavement grid -----------------------------------
-  const asphalt = [];
-  for (const r of ROADS) for (const vert of [0, 1]) {
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(124, 4), M.asphalt);
-    m.rotation.x = -Math.PI / 2; m.rotation.z = vert ? Math.PI / 2 : 0; m.position.set(vert ? r : 0, 0.008, vert ? 0 : r); m.receiveShadow = false; root.add(m); asphalt.push(m);
-  }
+  // roads are simply the ground plane (same tone as the background), so there is no boundary between them
   const crossings = [];
   for (const rx of ROADS) for (const rz of ROADS) {
     // four arms; stripes run along the carriageway, spread across its 4-unit width
@@ -115,7 +111,8 @@ export function buildStreetscape({ scene, camera, world, buildingGroups, ROADS, 
       for (let i = -3; i <= 3; i++) {
         const off = i * 0.56;
         // arm along x (ax≠0): carriageway runs along x, stripes along x spread in z
-        if (ax) bx(M.white, cx, 0.012, rz + off, 1.7, 0.02, 0.32); else bx(M.white, rx + off, 0.012, cz, 0.32, 0.02, 1.7);
+        if (ax) { bx(M.ink, cx, 0.009, rz + off, 1.82, 0.02, 0.44); bx(M.white, cx, 0.012, rz + off, 1.7, 0.022, 0.32); }
+        else { bx(M.ink, rx + off, 0.009, cz, 0.44, 0.02, 1.82); bx(M.white, rx + off, 0.012, cz, 0.32, 0.022, 1.7); }
       }
       crossings.push({ x: cx, z: cz, ax, az });
     }
