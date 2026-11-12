@@ -161,18 +161,34 @@ export function createPeopleKit(seed = 41) {
     const cv = document.createElement('canvas'); cv.width = fw * n; cv.height = fh; const g = cv.getContext('2d');
     for (let f = 0; f < n; f++) { g.save(); g.translate(f * fw, 0); g.beginPath(); g.rect(0, 0, fw, fh); g.clip(); draw(g, f / n); g.restore(); }
     const geos = []; for (let f = 0; f < n; f++) geos.push(solidFromFrame(cv, f * fw, fw, fh, scale, depth) || geos[f - 1]);
-    return { geos, frames: n, aspect: fw / fh };
+    const tex = new THREE.CanvasTexture(cv); tex.generateMipmaps = false; tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter;
+    const flatMat = new THREE.MeshBasicMaterial({ map: tex, color: 0x000000, alphaTest: 0.35, alphaToCoverage: true, side: THREE.DoubleSide });
+    return { geos, frames: n, aspect: fw / fh, flatMat };
   };
-  const mat = new THREE.MeshStandardMaterial({ color: 0x0a0a0b, roughness: 1, metalness: 0 });
-  const kit = { mat };
+  const solidMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0b, roughness: 1, metalness: 0 });
+  const kit = {};
   kit.walkers = variants.map((v) => build(FW, FH, FRAMES, 0.5, 0.2, (g, ph) => drawWalker(g, v, ph)));
   kit.dog = build(96, 96, 8, 0.6, 0.2, (g, ph) => drawDog(g, ph));
   kit.cyclist = build(176, 192, 8, 0.5, 0.1, (g, ph) => drawCyclist(g, ph));
-  /** solid 3D figure of the given world height standing on the origin; local +x is its facing / walking direction */
-  kit.solid = (set, height) => {
-    const m = new THREE.Mesh(set.geos[0], mat); m.scale.setScalar(height); m.userData.set = set; m.castShadow = true; m.receiveShadow = true;
-    m.position.y = 0; m.frustumCulled = false; m.userData.f = 0; return m;
+  /** A figure = flat camera-facing cut-out (normal view) + extruded solid (shown only from a bird's-eye camera). */
+  kit.figure = (set, height) => {
+    const grp = new THREE.Group(), w = height * set.aspect, geo = new THREE.PlaneGeometry(w, height); geo.translate(0, height / 2, 0);
+    const flat = new THREE.Mesh(geo, set.flatMat); flat.frustumCulled = false;
+    const solid = new THREE.Mesh(set.geos[0], solidMat); solid.scale.setScalar(height); solid.castShadow = true; solid.receiveShadow = true; solid.frustumCulled = false; solid.visible = false;
+    grp.add(flat, solid); grp.userData = { set, flat, solid, f: -1, plan: false };
+    return grp;
   };
-  kit.setFrame = (m, ph) => { const set = m.userData.set, f = Math.floor(((ph % 1) + 1) % 1 * set.frames); if (m.userData.f !== f) { m.userData.f = f; m.geometry = set.geos[f]; } };
+  /** plan = bird's-eye camera. facing = camera yaw; rightX/rightZ = camera right vector; (dx,dz) = walking direction */
+  kit.orient = (grp, dx, dz, facing, rightX, rightZ, plan) => {
+    const u = grp.userData;
+    if (u.plan !== plan) { u.plan = plan; u.flat.visible = !plan; u.solid.visible = plan; u.f = -1; }
+    if (plan) u.solid.rotation.y = Math.atan2(-dz, dx);
+    else { u.flat.rotation.y = facing; u.flat.scale.x = (dx * rightX + dz * rightZ) >= 0 ? 1 : -1; }
+  };
+  kit.setFrame = (grp, ph) => {
+    const u = grp.userData, set = u.set, f = Math.floor(((ph % 1) + 1) % 1 * set.frames); if (u.f === f) return; u.f = f;
+    if (u.plan) u.solid.geometry = set.geos[f];
+    else { const uv = u.flat.geometry.attributes.uv, u0 = f / set.frames, u1 = (f + 1) / set.frames; uv.setXY(0, u0, 1); uv.setXY(1, u1, 1); uv.setXY(2, u0, 0); uv.setXY(3, u1, 0); uv.needsUpdate = true; }
+  };
   return kit;
 }
