@@ -26,6 +26,20 @@ float lin(vec2 uv){
   if (uOrtho > .5) return d * (uFar - uNear);
   float z = d * 2. - 1.; return 2. * uNear * uFar / (uFar + uNear - z * (uFar - uNear));
 }
+// light-weight fan / scale paving (pavé): thin arcs, constant ~1px weight, fading out when zoomed far away
+float scales(vec2 p, float px){
+  float k = floor(p.y * 2.) + 1., odd = mod(k, 2.);
+  float i = floor(p.x - .5 * odd + .5);
+  vec2 c = vec2(i + .5 * odd, k * .5);
+  float sd = abs(length(p - c) - .5);
+  float line = 1. - smoothstep(px * .35, px * .85, sd);
+  return line * smoothstep(.45, .25, px);
+}
+vec2 groundXZ(vec2 uv){
+  vec2 ndc = uv * 2. - 1.;
+  vec4 n = uInvVP * vec4(ndc, -1., 1.); n /= n.w; vec4 f = uInvVP * vec4(ndc, 1., 1.); f /= f.w;
+  vec3 d = f.xyz - n.xyz; float t = -n.y / d.y; return n.xz + d.xz * t;
+}
 void main(){
   vec2 px = 1. / uRes;
   float d0 = texture2D(tDepth, vUv).x;
@@ -60,10 +74,18 @@ void main(){
   float ink = max(max(dots, solid), edge);
   float sky = d0 >= .99999 ? 1. : 0.;
   vec3 col = mix(PAPER, INK, ink);
+  vec2 ndc = vUv * 2. - 1.;
+  vec4 n = uInvVP * vec4(ndc, -1., 1.); n /= n.w; vec4 f = uInvVP * vec4(ndc, 1., 1.); f /= f.w;
+  vec3 dir = f.xyz - n.xyz;
+  if (alphaAt(vUv) < .37 && sky < .5 && dir.y < -1e-4) {   // road surface (alpha .25): paving pattern instead of dots
+    float t0 = -n.y / dir.y; vec2 w = n.xz + dir.xz * t0;
+    vec2 g1 = groundXZ(vUv + vec2(px.x, 0.)), g2 = groundXZ(vUv + vec2(0., px.y));   // pixel footprint on the ground (no fwidth: it breaks across quads)
+    vec2 wp = w * 2.0; float L = scales(wp, max(length(g1 - w), length(g2 - w)) * 2.0);
+    col = min(col, vec3(.89));                                    // road = light grey; white crossings / dashes stand out from it
+    col = mix(col, vec3(.55), L * step(ink, .35) * .9);
+  }
   if (sky > .5) {                                       // outside the map border: hand-drawn dash pattern on the water plane
-    vec2 ndc = vUv * 2. - 1.;
-    vec4 n = uInvVP * vec4(ndc, -1., 1.); n /= n.w; vec4 f = uInvVP * vec4(ndc, 1., 1.); f /= f.w;
-    vec3 dir = f.xyz - n.xyz; col = PAPER;
+    col = PAPER;
     if (uPatOn > .5 && dir.y < -1e-4) {
       float t = (uPatY - n.y) / dir.y; vec2 w = (n.xz + dir.xz * t) / uPatScale;
       float pv = texture2D(tPattern, w).r;

@@ -12,7 +12,7 @@ import { buildPlacementArchitecture, installPlacements } from './placement-integ
 import { installInspection } from './inspection-integration.js';
 import { waypointSpeed } from './inspection.js';
 import { installDroneView } from './drone-view.js?v=3';
-import { createInkPass } from './ink.js?v=7';
+import { createInkPass } from './ink.js?v=12';
 import { buildStreetscape } from './streetscape.js?v=10';
 import { installTutorial } from './tutorial.js?v=3';
 
@@ -261,7 +261,9 @@ world.nsStreets = ROADS.map((x, i) => ({ name: NS_NAMES[i], x }));
 // the whole map is one big lot: a solid slab (roads and parcels sit on its top face), its thick dark rim is the map border.
 // Everything outside the border is the patterned backdrop painted by the ink pass at the slab's base level.
 const BASE_H = 1.4, BASE_R = 62;
-const sideM = new THREE.MeshStandardMaterial({ color: 0x303030, roughness: 1 }), topM = new THREE.MeshStandardMaterial({ color: 0x9e9c99, roughness: 1 });
+const sideM = new THREE.MeshStandardMaterial({ color: 0x303030, roughness: 1 }), topM = new THREE.MeshStandardMaterial({ color: 0xf6f4f1, roughness: 1 });
+// the road surface flags itself with alpha .25 so the ink pass paints the paving pattern on it (instead of halftone dots)
+topM.onBeforeCompile = (sh) => { sh.fragmentShader = sh.fragmentShader.replace('#include <dithering_fragment>', '#include <dithering_fragment>\n  gl_FragColor.a = 0.25;'); };
 const ground = new THREE.Mesh(new THREE.BoxGeometry(BASE_R * 2, BASE_H, BASE_R * 2), [sideM, sideM, topM, sideM, sideM, sideM]);
 ground.position.y = -BASE_H / 2; ground.receiveShadow = true; ground.castShadow = false;
 scene.add(ground);
