@@ -92,7 +92,7 @@ export function installParade({S, scene, world, planRoute, segCheck, camera, con
   }
   // Layers: only the layers that exist in this scenario.
   for (const id of ['lay-perm', 'lay-cand', 'lay-sel']) $(id).closest('label').hidden = true;
-  $('lay-rest').closest('label').lastChild.textContent = ' Parade Zone'; S.layers.rest = true; $('lay-rest').checked = true;
+  $('lay-rest').closest('label').hidden = true; S.layers.rest = true;   // the Parade Zone tint is always on
   $('legend').innerHTML = '<section><b>Encounters</b><div><i style="background:#fff;border:1.5px solid #141414;border-radius:50%"></i>○ Notice</div><div><i style="background:#fff;border:3px solid #141414;border-radius:50%"></i>! Conflict</div><div><i style="background:#141414;border-radius:50%"></i>!! Urgent</div></section><section><b>Scene</b><div><i style="background:#f6f4f0;border:1.5px solid #141414"></i>Parade balloon</div><div><i style="background:#1b1b1d"></i>Crowd / marchers</div><div><i style="background:rgba(255,205,20,.55)"></i>Parade Zone (no landing, no flight &lt; 22.5 m)</div><div><i style="border:1.5px solid #141414;border-radius:50%"></i>Rooftop pad</div></section>';
   // Advanced drawer: setup, results, decision trace, model info — same section styling.
   document.querySelector('#advanced .advbody').innerHTML = `
@@ -136,7 +136,6 @@ export function installParade({S, scene, world, planRoute, segCheck, camera, con
   reset.addEventListener('click', () => doReset());
   locate.addEventListener('click', () => { const p = engine.state.balloon; controls.target.set(p.x, 6, p.z); camera.position.set(p.x + 65, 58, p.z + 65); camera.zoom = 1.5; camera.updateProjectionMatrix(); controls.update(); });
   city.addEventListener('click', () => { camera.position.copy(initialView.position); controls.target.copy(initialView.target); camera.zoom = initialView.zoom; camera.updateProjectionMatrix(); controls.update(); });
-  $('lay-rest').addEventListener('change', e => ink.setZones(zoneRects, e.target.checked));
   $('trace-filter').addEventListener('change', renderUI);
   $('trace-log').addEventListener('click', e => { const b = e.target.closest('[data-trace-record]'); if (b) obs.open(engine.state.log.find(r => r.recordId === b.dataset.traceRecord), b); });
   $('export-json').addEventListener('click', () => {
