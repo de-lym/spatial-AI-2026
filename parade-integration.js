@@ -44,7 +44,7 @@ export function installParade({S, scene, world, planRoute, segCheck, camera, con
     ring.rotation.x = -Math.PI / 2; ring.position.set(p.pos.x, p.roof + .48, p.pos.z); group.add(ring);
   }
   const zoneRects = CROWD_ZONES.map(z => ({x0: z.x0, z0: z.z0, x1: z.x1, z1: z.z1}));   // Parade Zone: tinted translucent yellow by the ink pass
-  ink.setZones(zoneRects, true);
+  ink.setZones(zoneRects, false);   // yellow street tint removed (zone data kept for logic)
   const routeLines = S.couriers.map(() => { const l = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({color: 0x141414, dashSize: .5, gapSize: .35})); l.visible = false; group.add(l); return l; });
   const sensed = new THREE.Points(new THREE.BufferGeometry(), new THREE.PointsMaterial({color: 0x141414, size: .55})); sensed.visible = false; group.add(sensed);
   const sensor = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({color: 0x141414, transparent: true, opacity: .35})); sensor.visible = false; group.add(sensor);
@@ -93,7 +93,7 @@ export function installParade({S, scene, world, planRoute, segCheck, camera, con
   // Layers: only the layers that exist in this scenario.
   for (const id of ['lay-perm', 'lay-cand', 'lay-sel']) $(id).closest('label').hidden = true;
   $('lay-rest').closest('label').hidden = true; S.layers.rest = true;   // the Parade Zone tint is always on
-  $('legend').innerHTML = '<section><b>Encounters</b><div><i style="background:#fff;border:1.5px solid #141414;border-radius:50%"></i>○ Notice</div><div><i style="background:#fff;border:3px solid #141414;border-radius:50%"></i>! Conflict</div><div><i style="background:#141414;border-radius:50%"></i>!! Urgent</div></section><section><b>Scene</b><div><i style="background:#f6f4f0;border:1.5px solid #141414"></i>Parade balloon</div><div><i style="background:#1b1b1d"></i>Crowd / marchers</div><div><i style="background:rgba(255,205,20,.55)"></i>Parade Zone (no landing, no flight &lt; 22.5 m)</div><div><i style="border:1.5px solid #141414;border-radius:50%"></i>Rooftop pad</div></section>';
+  $('legend').innerHTML = '<section><b>Encounters</b><div><i style="background:#fff;border:1.5px solid #141414;border-radius:50%"></i>○ Notice</div><div><i style="background:#fff;border:3px solid #141414;border-radius:50%"></i>! Conflict</div><div><i style="background:#141414;border-radius:50%"></i>!! Urgent</div></section><section><b>Scene</b><div><i style="background:#f6f4f0;border:1.5px solid #141414"></i>Parade balloon</div><div><i style="background:#1b1b1d"></i>Crowd / marchers</div><div><i style="border:1.5px solid #141414;border-radius:50%"></i>Rooftop pad</div></section>';
   // Advanced drawer: setup, results, decision trace, model info — same section styling.
   document.querySelector('#advanced .advbody').innerHTML = `
     <p class="small">Results, decision trace and model notes for the parade experiment. The original delivery simulator is available at <code>?mode=legacy</code>.</p>
