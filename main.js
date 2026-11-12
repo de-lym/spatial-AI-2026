@@ -13,7 +13,7 @@ import { installInspection } from './inspection-integration.js';
 import { waypointSpeed } from './inspection.js';
 import { installDroneView } from './drone-view.js?v=3';
 import { createInkPass } from './ink.js?v=12';
-import { buildStreetscape } from './streetscape.js?v=28';
+import { buildStreetscape } from './streetscape.js?v=31';
 import { installTutorial } from './tutorial.js?v=3';
 
 /* ====================================================================
@@ -676,20 +676,6 @@ for (const s of world.nsStreets.filter((q) => Math.abs(q.x) <= 40)) {
 }
 
 // ---- drones (couriers) ------------------------------------------------
-const markCache = [];
-/** four black-and-white canopy markings: solid · stripes · dots · ring */
-function droneMark(p) {
-  if (markCache[p]) return markCache[p];
-  const cv = document.createElement('canvas'); cv.width = cv.height = 128; const g = cv.getContext('2d');
-  g.fillStyle = '#0b0b0c'; g.fillRect(0, 0, 128, 128); g.fillStyle = '#fff'; g.strokeStyle = '#fff';
-  g.save(); g.beginPath(); g.arc(64, 64, 52, 0, 7); g.clip();
-  if (p === 0) g.fillRect(0, 0, 128, 128);
-  else if (p === 1) for (let y = 4; y < 128; y += 26) g.fillRect(0, y, 128, 13);
-  else if (p === 2) for (const [x, y] of [[40, 40], [88, 40], [64, 64], [40, 88], [88, 88]]) { g.beginPath(); g.arc(x, y, 11, 0, 7); g.fill(); }
-  else { g.lineWidth = 14; g.beginPath(); g.arc(64, 64, 30, 0, 7); g.stroke(); }
-  g.restore();
-  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; markCache[p] = t; return t;
-}
 
 function addCourier() {
   if (S.couriers.length >= MAX_COURIERS) return null;
@@ -720,11 +706,22 @@ function addCourier() {
   for (const [lx, lz] of [[-0.55, -0.55], [0.55, -0.55], [-0.55, 0.55], [0.55, 0.55]]) {
     const l = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.6, 6), mat(0x1a1a1c))); l.position.set(lx, 0.3, lz); inner.add(l);
   }
-  const cap = new THREE.Mesh(new THREE.CircleGeometry(0.6, 32), new THREE.MeshBasicMaterial({ map: droneMark(c.pat) }));   // top marking tells the four drones apart without colour
-  cap.rotation.x = -Math.PI / 2; cap.position.set(0, 1.04, 0); inner.add(cap);
   const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 10), new THREE.MeshStandardMaterial({ color: 0x5fd38d, emissive: 0x5fd38d, emissiveIntensity: 0.6 }));
   lamp.position.set(0, 0.62, 0.75); inner.add(lamp);
   c.lamp = lamp;
+  // line-art look: every part is flat white with a black inverted-hull outline; the outline thickens when the drone is selected
+  c.outlineU = { value: 0.08 };
+  const whiteM = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const hullM = new THREE.ShaderMaterial({ side: THREE.BackSide, uniforms: { uThick: c.outlineU },
+    vertexShader: 'uniform float uThick; void main(){ gl_Position = projectionMatrix * modelViewMatrix * vec4(position + normalize(normal) * uThick, 1.0); }', fragmentShader: 'void main(){ gl_FragColor = vec4(0.04, 0.04, 0.045, 1.0); }' });
+  const parts = []; inner.traverse((o) => { if (o.isMesh && o !== lamp) parts.push(o); });
+  for (const o of parts) {
+    if (c.rotors.includes(o)) {   // rotors: a thin black ring (a swirl of blades seen edge-on), not a filled disc
+      o.geometry = new THREE.RingGeometry(0.52, 0.62, 28).rotateX(-Math.PI / 2); o.material = new THREE.MeshBasicMaterial({ color: 0x0a0a0b, side: THREE.DoubleSide }); o.castShadow = false; continue;
+    }
+    o.material = whiteM;
+    const h = new THREE.Mesh(o.geometry, hullM); h.position.copy(o.position); h.quaternion.copy(o.quaternion); h.scale.copy(o.scale); o.parent.add(h);
+  }
   g.position.set(c.pos.x, SLAB, c.pos.z); scene.add(g);
   c.mesh = g; c.inner = inner;
   c.label = makeLabel(); scene.add(c.label);
@@ -1661,14 +1658,14 @@ function syncVisuals(dt) {
     c.inner.rotation.y = c.rot;
     const spin = airborne || c.task ? 28 : 0;
     c.rotors.forEach((r, i) => { r.rotation.y += dt * spin * (i % 2 ? 1 : -1); });
+    c.outlineU.value = S.selected === c ? 0.14 : 0.08;
     const l = load(c);
     const lc = c.hold ? 0xf26b6b : l >= COURIER_CAPACITY ? 0xf2a03d : l > 0 ? 0x3b8fe8 : 0x5fd38d;
     c.lamp.material.color.setHex(lc); c.lamp.material.emissive.setHex(lc);
     c.label.position.set(c.pos.x, SLAB + c.pos.y + 3.4, c.pos.z);
     const alt = Math.round(c.pos.y * SCALE_M);
     c.label.visible = S.selected === c;
-    if (c.label.visible) setLabel(c.label, [{ t: `${dispId(c.id)} · ${statusWord(c)}`, c: c.hold || c.sep?.state === 'waiting' ? '#c0392b' : dark(c.tint, 0.8), s: 36 },
-      { t: `z ${alt} m · ${sepLabel(c)} · ${l}/${COURIER_CAPACITY} orders`, c: '#7a736b', s: 26 }]);
+    if (c.label.visible) setLabel(c.label, [{ t: dispId(c.id).replace(/\D/g, '') || dispId(c.id), c: '#141414', s: 50 }]);
     c.halo.visible = live.has(c.id); c.halo.position.copy(c.mesh.position).y += 0.8;
     {
       const isSel = S.selected === c, anySel = S.selected?.type === 'courier', mp = c.mesh.position;
