@@ -290,3 +290,10 @@ button[aria-selected=true] .count { background: #fff; color: #141414; }
 .tour-frame { border-color: #141414; } .tour-pill, .tour-card { border: 2px solid #141414; box-shadow: 4px 4px 0 #141414; }
 .statusbar #st-stage b { color: #141414; text-decoration: underline; }
 #view { image-rendering: auto; }
+
+/* drone markings (solid · stripes · dots · ring) replace colour in the fleet list */
+.fleet td button::before { box-sizing: border-box; width: 13px; height: 13px; border: 1.5px solid #141414; box-shadow: none; background: #fff; }
+.fleet td button[data-mark="0"]::before { background: #fff; }
+.fleet td button[data-mark="1"]::before { background: repeating-linear-gradient(0deg, #141414 0 2px, #fff 2px 4px); }
+.fleet td button[data-mark="2"]::before { background: radial-gradient(#141414 28%, #fff 32%) 0 0 / 5px 5px; }
+.fleet td button[data-mark="3"]::before { background: radial-gradient(circle, #fff 0 22%, #141414 26% 58%, #fff 62%); }

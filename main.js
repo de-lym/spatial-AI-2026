@@ -13,7 +13,7 @@ import { installInspection } from './inspection-integration.js';
 import { waypointSpeed } from './inspection.js';
 import { installDroneView } from './drone-view.js?v=3';
 import { createInkPass } from './ink.js?v=12';
-import { buildStreetscape } from './streetscape.js?v=26';
+import { buildStreetscape } from './streetscape.js?v=28';
 import { installTutorial } from './tutorial.js?v=3';
 
 /* ====================================================================
@@ -676,6 +676,21 @@ for (const s of world.nsStreets.filter((q) => Math.abs(q.x) <= 40)) {
 }
 
 // ---- drones (couriers) ------------------------------------------------
+const markCache = [];
+/** four black-and-white canopy markings: solid · stripes · dots · ring */
+function droneMark(p) {
+  if (markCache[p]) return markCache[p];
+  const cv = document.createElement('canvas'); cv.width = cv.height = 128; const g = cv.getContext('2d');
+  g.fillStyle = '#0b0b0c'; g.fillRect(0, 0, 128, 128); g.fillStyle = '#fff'; g.strokeStyle = '#fff';
+  g.save(); g.beginPath(); g.arc(64, 64, 52, 0, 7); g.clip();
+  if (p === 0) g.fillRect(0, 0, 128, 128);
+  else if (p === 1) for (let y = 4; y < 128; y += 26) g.fillRect(0, y, 128, 13);
+  else if (p === 2) for (const [x, y] of [[40, 40], [88, 40], [64, 64], [40, 88], [88, 88]]) { g.beginPath(); g.arc(x, y, 11, 0, 7); g.fill(); }
+  else { g.lineWidth = 14; g.beginPath(); g.arc(64, 64, 30, 0, 7); g.stroke(); }
+  g.restore();
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; markCache[p] = t; return t;
+}
+
 function addCourier() {
   if (S.couriers.length >= MAX_COURIERS) return null;
   const idx = S.nextCourier++;
@@ -690,21 +705,23 @@ function addCourier() {
   S.homes[id] = new THREE.Vector3(-2.7 + slot * 1.8, 0, 5.3);
   c.prev.copy(c.pos);
   const g = new THREE.Group(), inner = new THREE.Group(); g.add(inner);
-  const body = box(inner, 1.5, 0.55, 1.5, c.tint, 0, 0.75, 0, 0.25);
-  box(inner, 0.7, 0.3, 0.5, CLR.navy, 0, 0.98, 0.65, 0.12).userData.solid = false;   // nose
+  c.pat = (idx - 1) % 4;
+  inner.scale.setScalar(1.45);
+  const body = box(inner, 1.5, 0.55, 1.5, 0x0b0b0c, 0, 0.75, 0, 0.25);
+  box(inner, 0.7, 0.3, 0.5, 0x0b0b0c, 0, 0.98, 0.65, 0.12).userData.solid = false;   // nose
   body.userData.solid = false; inner.children.forEach((m) => { m.userData.solid = false; });
-  const arm = (rz) => { const a = shade(new THREE.Mesh(new RoundedBoxGeometry(3.4, 0.1, 0.22, 2, 0.04), mat(0x8c857c))); a.position.y = 1.05; a.rotation.y = rz; inner.add(a); };
+  const arm = (rz) => { const a = shade(new THREE.Mesh(new RoundedBoxGeometry(3.4, 0.1, 0.22, 2, 0.04), mat(0x1a1a1c))); a.position.y = 1.05; a.rotation.y = rz; inner.add(a); };
   arm(Math.PI / 4); arm(-Math.PI / 4);
   c.rotors = [];
   for (const [rx, rz] of [[1.2, 1.2], [-1.2, 1.2], [1.2, -1.2], [-1.2, -1.2]]) {
-    const r = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.62, 0.05, 20), new THREE.MeshStandardMaterial({ color: c.tint, transparent: true, opacity: 0.5, roughness: 0.9 })));
+    const r = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.62, 0.05, 20), new THREE.MeshStandardMaterial({ color: 0x202022, transparent: true, opacity: 0.6, roughness: 0.9 })));
     r.position.set(rx, 1.15, rz); inner.add(r); c.rotors.push(r);
   }
   for (const [lx, lz] of [[-0.55, -0.55], [0.55, -0.55], [-0.55, 0.55], [0.55, 0.55]]) {
-    const l = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.6, 6), mat(0x8c857c))); l.position.set(lx, 0.3, lz); inner.add(l);
+    const l = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.6, 6), mat(0x1a1a1c))); l.position.set(lx, 0.3, lz); inner.add(l);
   }
-  const cap = shade(new THREE.Mesh(new THREE.SphereGeometry(0.34, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), mat(0xffffff))); // white canopy contrasts with the coloured body
-  cap.position.set(0, 1.03, 0); inner.add(cap);
+  const cap = new THREE.Mesh(new THREE.CircleGeometry(0.6, 32), new THREE.MeshBasicMaterial({ map: droneMark(c.pat) }));   // top marking tells the four drones apart without colour
+  cap.rotation.x = -Math.PI / 2; cap.position.set(0, 1.04, 0); inner.add(cap);
   const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 10), new THREE.MeshStandardMaterial({ color: 0x5fd38d, emissive: 0x5fd38d, emissiveIntensity: 0.6 }));
   lamp.position.set(0, 0.62, 0.75); inner.add(lamp);
   c.lamp = lamp;
@@ -713,6 +730,9 @@ function addCourier() {
   c.label = makeLabel(); scene.add(c.label);
   c.halo = new THREE.Mesh(new THREE.SphereGeometry(2.3, 20, 14), new THREE.MeshBasicMaterial({ color: 0x2f9be0, transparent: true, opacity: 0.22, depthWrite: false }));
   c.halo.visible = false; scene.add(c.halo);
+  // thick white backing disc (opaque, faces the camera, sits just behind the drone): keeps the black drone clear of dots, shadows and rooftops
+  c.disc = new THREE.Mesh(new THREE.CircleGeometry(2.7, 40), new THREE.MeshBasicMaterial({ color: 0xffffff })); c.disc.renderOrder = -1; scene.add(c.disc);
+  c.drop = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 1, 6), new THREE.MeshBasicMaterial({ color: 0x141414 })); c.drop.visible = false; scene.add(c.drop); hideInFollow.push(c.disc, c.drop);
   c.blockMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: PATH_COLOR.blocked, transparent: true, opacity: 0.28, depthWrite: false }));
   c.blockMesh.visible = false; scene.add(c.blockMesh);
   register(g, c);
@@ -722,8 +742,9 @@ function addCourier() {
 }
 
 // selection ring
-const selRing = new THREE.Mesh(new THREE.RingGeometry(2.2, 2.6, 40), new THREE.MeshBasicMaterial({ color: 0x3b3631, side: THREE.DoubleSide, transparent: true, opacity: 0.55 }));
-selRing.rotation.x = -Math.PI / 2; selRing.visible = false;
+const _camDir = new THREE.Vector3(), hideInFollow = [];   // overlays that must not show in the live follow camera
+const selRing = new THREE.Mesh(new THREE.RingGeometry(2.0, 2.6, 40), new THREE.MeshBasicMaterial({ color: 0x141414, side: THREE.DoubleSide, transparent: true, opacity: 1 }));
+selRing.rotation.x = -Math.PI / 2; selRing.visible = false; hideInFollow.push(selRing);
 scene.add(selRing);
 
 // relationship lines + flight lines (rebuilt every frame from the model)
@@ -1300,7 +1321,7 @@ const act = {
 };
 function removeCourier(c) {
   disposeViz(c.viz); c.viz = null;
-  scene.remove(c.mesh, c.label, c.halo, c.blockMesh);
+  scene.remove(c.mesh, c.label, c.halo, c.blockMesh, c.disc, c.drop);
   pickables.splice(pickables.indexOf(c.mesh), 1);
   S.couriers.splice(S.couriers.indexOf(c), 1);
   if (S.selected === c) S.selected = null;
@@ -1505,10 +1526,13 @@ function buildViz(plan) {
   });
   const pts = densify(plan.from, plan.best.pts, 0.9).map(sceneXYZ);
   const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
-  const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, Math.min(900, pts.length * 3), 0.11, 6, false), new THREE.MeshBasicMaterial({ color: AIR.cobalt, transparent: true, opacity: 0 }));
+  const segs = Math.min(900, pts.length * 3);
+  const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, segs, 0.04, 4, false), dashedMaterial(0x1b1b1d, Math.max(8, Math.round(plan.best.len / 0.9))));   // thin dashed: every drone's planned route
   tube.renderOrder = 6; tube.visible = false; group.add(tube);
+  const bold = new THREE.Mesh(new THREE.TubeGeometry(curve, segs, 0.13, 6, false), new THREE.MeshBasicMaterial({ color: 0x141414, transparent: true, opacity: 0 }));   // bold solid: only the inspected drone's route
+  bold.renderOrder = 7; bold.visible = false; group.add(bold);
   routeLayer.add(group);
-  return { group, lines, tube, plan, bi: plan.candidates.indexOf(plan.best) };
+  return { group, lines, tube, bold, plan, bi: plan.candidates.indexOf(plan.best) };
 }
 function disposeViz(v) {
   if (!v) return;
@@ -1523,12 +1547,13 @@ function fade(obj, target, k) {
   obj.visible = next > 0.01 || target > 0.01;
 }
 /** layers: which of the dashed candidates / the selected smooth curve are shown; emph (0–1) dims drones that are not inspected */
-function styleViz(v, showCand, showSel, emph, k) {
+function styleViz(v, showCand, showSel, emph, k, bold = false) {
   v.lines.forEach((l, i) => {
     const best = i === v.bi;
     fade(l, !showCand ? 0 : best ? (showSel ? 0 : 0.95 * emph) : (showSel ? 0.5 : 0.9) * emph * (emph < 1 ? 0.5 : 1), k);
   });
-  fade(v.tube, showSel ? 0.97 * emph : 0, k);
+  fade(v.tube, showSel ? (bold ? 0 : 0.85 * emph) : 0, k);
+  fade(v.bold, showSel && bold ? 1 : 0, k);
 }
 const previews = { ver: -1, items: [] };
 /** the four scripted missions, planned before anyone flies: hub → pickup station, pickup → delivery station */
@@ -1551,14 +1576,14 @@ function syncRoutes(dt) {
   for (const it of previews.items) {
     if (!it.viz) continue;
     const emph = cur && cur.id !== it.drone ? 0.22 : 1; // unselected routes are dimmed substantially
-    styleViz(it.viz, S.stage < 4 && S.layers.cand, S.stage < 4 && S.layers.sel, emph, k);
+    styleViz(it.viz, S.stage < 4 && S.layers.cand, S.stage < 4 && S.layers.sel, emph, k, !!cur && cur.id === it.drone);
   }
   for (const c of S.couriers) {
     const plan = c.task?.route.plan;
     if (plan?.ok) {
       if (!c.viz || c.viz.plan !== plan) { disposeViz(c.viz); c.viz = buildViz(plan); }
     } else if (c.viz && !c.task) { disposeViz(c.viz); c.viz = null; }
-    if (c.viz) styleViz(c.viz, S.stage === 4 && S.layers.cand && !!c.task, S.stage === 4 && S.layers.sel && !!c.task, cur && cur !== c ? 0.3 : 1, k);
+    if (c.viz) styleViz(c.viz, S.stage === 4 && S.layers.cand && !!c.task, S.stage === 4 && S.layers.sel && !!c.task, cur && cur !== c ? 0.3 : 1, k, cur === c);
   }
 }
 function styleVolumes(dt) {
@@ -1645,6 +1670,15 @@ function syncVisuals(dt) {
     if (c.label.visible) setLabel(c.label, [{ t: `${dispId(c.id)} · ${statusWord(c)}`, c: c.hold || c.sep?.state === 'waiting' ? '#c0392b' : dark(c.tint, 0.8), s: 36 },
       { t: `z ${alt} m · ${sepLabel(c)} · ${l}/${COURIER_CAPACITY} orders`, c: '#7a736b', s: 26 }]);
     c.halo.visible = live.has(c.id); c.halo.position.copy(c.mesh.position).y += 0.8;
+    {
+      const isSel = S.selected === c, anySel = S.selected?.type === 'courier', mp = c.mesh.position;
+      camera.getWorldDirection(_camDir);
+      c.disc.visible = !anySel || isSel;                                   // others lose their backing disc: dimmed; the inspected drone keeps a bigger one
+      c.disc.position.set(mp.x, mp.y + 1.2, mp.z).addScaledVector(_camDir, 3); c.disc.quaternion.copy(camera.quaternion);
+      c.disc.scale.setScalar(isSel ? 1.25 : 1);
+      c.drop.visible = isSel && mp.y > 0.8;
+      if (c.drop.visible) { const h = mp.y - SLAB; c.drop.scale.set(1, h, 1); c.drop.position.set(mp.x, SLAB + h / 2, mp.z); }
+    }
     // highlighted blocked obstacle (a few seconds after a conflict is detected)
     const b = c.blocked;
     if (b && S.time < b.until && b.obstacle) {
@@ -1664,7 +1698,7 @@ function syncVisuals(dt) {
   if (s) {
     const p = s.type === 'order' ? s.mesh.position : s.type === 'courier' ? new THREE.Vector3(s.pos.x, SLAB, s.pos.z) : s.pos;
     selRing.position.set(p.x, s.type === 'order' ? p.y + 0.05 : SLAB + 0.06, p.z);
-    selRing.scale.setScalar(s.type === 'restaurant' ? 2.4 : s.type === 'platform' ? 2.4 : s.type === 'customer' ? 1.9 : s.type === 'order' ? 0.7 : 0.9);
+    selRing.scale.setScalar(s.type === 'restaurant' ? 2.4 : s.type === 'platform' ? 2.4 : s.type === 'customer' ? 1.9 : s.type === 'order' ? 0.7 : s.type === 'courier' ? 1.5 : 0.9);
   }
   streetLabels.visible = S.showStreets;
   const bt = S.blockSel ? world.tiles.find((t) => t.id === S.blockSel) : null;
@@ -2007,7 +2041,7 @@ function renderFleet() {
       tr.innerHTML = '<td><button type="button"></button></td><td></td><td></td><td></td><td></td><td></td><td></td>';
       row = { tr, tds: [...tr.children], btn: tr.querySelector('button') };
       row.btn.addEventListener('click', (e) => selectDrone(c.id, e.currentTarget));
-      row.btn.style.setProperty('--dc', hex(c.tint));
+      row.btn.style.setProperty('--dc', hex(c.tint)); row.btn.dataset.mark = String(c.pat ?? 0);
       row.btn.dataset.select = c.id; row.btn.setAttribute('aria-label', `Inspect ${dispId(c.id)}`);
       body.append(tr); fleetRows.set(c.id, row);
     }
@@ -2449,7 +2483,7 @@ function frame() {
   requestAnimationFrame(frame);
 }
 let droneView = { render() {} };
-try { droneView = installDroneView({ scene, canvas: $('drone-live'), getDrone: () => selectedDrone(), hiddenWhileRendering: [selRing] }); } catch (e) { console.error('Live drone view unavailable', e); }
+try { droneView = installDroneView({ scene, canvas: $('drone-live'), getDrone: () => selectedDrone(), hiddenWhileRendering: hideInFollow }); } catch (e) { console.error('Live drone view unavailable', e); }
 const tutorial = installTutorial({ selectDrone, clearDroneSelection, S });
 $('btn-tour').addEventListener('click', () => tutorial.start(true));
 updatePanels(true);
