@@ -13,6 +13,7 @@ import { installInspection } from './inspection-integration.js';
 import { waypointSpeed } from './inspection.js';
 import { installDroneView } from './drone-view.js?v=3';
 import { createInkPass } from './ink.js?v=1';
+import { buildStreetscape } from './streetscape.js?v=2';
 import { installTutorial } from './tutorial.js?v=3';
 
 /* ====================================================================
@@ -294,7 +295,9 @@ const tileOf = (x, z) => world.tiles[(Math.round(x / 16) + 3) * 7 + Math.round(z
 function setLU(x, z, lu, name, extra = {}) { const t = tileOf(x, z); Object.assign(t, { landUse: lu, name, risk: LAND[lu].risk }, extra); return t; }
 
 /** footprint + height of every solid mesh of a building becomes a 3D obstacle volume */
+const buildingGroups = [];
 function registerBuilding(g, label, typo) {
+  buildingGroups.push({ g, typo });
   g.updateWorldMatrix(true, true);
   const b = new THREE.Box3(); let any = false;
   g.traverse((o) => { if (o.isMesh && o.userData.solid) { b.expandByObject(o); any = true; } });
@@ -500,6 +503,8 @@ addCustomer('C9', 48, -32, CLR.white, CLR.denim);
 addCustomer('C10', -16, -48, CLR.wood, CLR.sage);
 for (const [x, z] of parcels) if (!takenAt.has(key(x, z))) buildFiller(x, z);
 buildPlacementArchitecture({scene, world, setLU, slab: SLAB});
+let street = { update() {} };
+try { street = buildStreetscape({ scene, camera, world, buildingGroups, ROADS, parcels, takenAt, slab: SLAB }); } catch (e) { console.error('Streetscape unavailable', e); }
 
 // ---- finish the land-use records (the inspectable rule of every block) -------------------
 const LU_POLICY_NOTE = (t) => (t.landUse === 'sensitive' ? `Restricted 0–${Math.min(t.restrictedTopM ?? 300, cfg.maxAltM)} m over the block; permitted above, at high cost` : LAND[t.landUse].policy);
@@ -2397,6 +2402,7 @@ function frame() {
   if (S.running && S.stage === 4) { let t = dt * S.speed; while (t > 1e-6) { const s = Math.min(0.1, t); step(s); t -= s; } }
   controls.update();
   syncVisuals(dt);
+  street.update(dt);
   try { droneView.render(dt); } catch (e) { droneView = { render() {} }; console.error(e); }
   if ((panelClock += dt) > 0.25) updatePanels();
   ink.render(scene, camera);
