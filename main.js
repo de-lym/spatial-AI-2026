@@ -12,7 +12,7 @@ import { buildPlacementArchitecture, installPlacements } from './placement-integ
 import { installInspection } from './inspection-integration.js';
 import { waypointSpeed } from './inspection.js';
 import { installDroneView } from './drone-view.js?v=3';
-import { createInkPass } from './ink.js?v=3';
+import { createInkPass } from './ink.js?v=4';
 import { buildStreetscape } from './streetscape.js?v=7';
 import { installTutorial } from './tutorial.js?v=3';
 

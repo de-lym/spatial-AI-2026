@@ -57,7 +57,7 @@ void main(){
   gl_FragColor = vec4(mix(PAPER, INK, ink), 1.);
 }`;
 
-export function createInkPass(renderer, { cell = 3.4, edge = 1 } = {}) {
+export function createInkPass(renderer, { cell = 2.0, edge = 1 } = {}) {
   const target = new THREE.WebGLRenderTarget(4, 4, { samples: 4, depthTexture: new THREE.DepthTexture(4, 4), depthBuffer: true });
   target.depthTexture.type = THREE.UnsignedIntType;
   target.texture.minFilter = target.texture.magFilter = THREE.NearestFilter;
