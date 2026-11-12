@@ -1,11 +1,13 @@
 // Live follow-camera for the drone inspector: a second renderer draws the same scene from a chase camera
 // that trails the selected drone, so the inspector shows the drone actually moving instead of a static picture.
 import * as THREE from 'three';
+import { createInkPass } from './ink.js?v=1';
 
 export function installDroneView({ scene, canvas, getDrone, hiddenWhileRendering = [] }) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.shadowMap.enabled = true;
+  const ink = createInkPass(renderer, { cell: 3 });
   const cam = new THREE.PerspectiveCamera(48, 1, 0.3, 500);
   const pos = new THREE.Vector3(), look = new THREE.Vector3(), want = new THREE.Vector3(), wantLook = new THREE.Vector3();
   let lastId = null, t = 0, w = 0, h = 0;
@@ -35,7 +37,7 @@ export function installDroneView({ scene, canvas, getDrone, hiddenWhileRendering
     const saved = hiddenWhileRendering.map((o) => o.visible);        // screen-space labels / rings are sized for the main view
     hiddenWhileRendering.forEach((o) => { o.visible = false; });
     const lb = c.label.visible; c.label.visible = false;
-    renderer.render(scene, cam);
+    ink.render(scene, cam);
     c.label.visible = lb;
     hiddenWhileRendering.forEach((o, i) => { o.visible = saved[i]; });
   }

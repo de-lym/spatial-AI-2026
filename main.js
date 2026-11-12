@@ -12,6 +12,7 @@ import { buildPlacementArchitecture, installPlacements } from './placement-integ
 import { installInspection } from './inspection-integration.js';
 import { waypointSpeed } from './inspection.js';
 import { installDroneView } from './drone-view.js?v=3';
+import { createInkPass } from './ink.js?v=1';
 import { installTutorial } from './tutorial.js?v=3';
 
 /* ====================================================================
@@ -111,6 +112,7 @@ const canvas = $('view');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
+const ink = createInkPass(renderer);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(BG);
 const VIEW = 30; // half-height of the isometric view, in world units
@@ -179,6 +181,7 @@ function makeLabel() {
   const cv = document.createElement('canvas');
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ depthTest: false, transparent: true }));
   sprite.renderOrder = 10;
+  sprite.layers.set(1); // drawn after the ink pass so labels stay crisp
   sprite.userData = { cv, key: '' };
   return sprite;
 }
@@ -254,7 +257,7 @@ world.ewStreets = ROADS.map((z, i) => ({ name: EW_NAMES[i], z }));
 world.nsStreets = ROADS.map((x, i) => ({ name: NS_NAMES[i], x }));
 
 // ---- terrain: roads, lane marks, parcels -------------------------------
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshStandardMaterial({ color: 0xd5d1cd, roughness: 1 }));
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshStandardMaterial({ color: 0xe2dfdb, roughness: 1 }));
 ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
 scene.add(ground);
 {
@@ -2396,7 +2399,7 @@ function frame() {
   syncVisuals(dt);
   try { droneView.render(dt); } catch (e) { droneView = { render() {} }; console.error(e); }
   if ((panelClock += dt) > 0.25) updatePanels();
-  renderer.render(scene, camera);
+  ink.render(scene, camera);
   requestAnimationFrame(frame);
 }
 let droneView = { render() {} };
