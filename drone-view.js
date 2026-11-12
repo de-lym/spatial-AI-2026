@@ -1,7 +1,7 @@
 // Live follow-camera for the drone inspector: a second renderer draws the same scene from a chase camera
 // that trails the selected drone, so the inspector shows the drone actually moving instead of a static picture.
 import * as THREE from 'three';
-import { createInkPass } from './ink.js?v=4';
+import { createInkPass } from './ink.js?v=5';
 
 export function installDroneView({ scene, canvas, getDrone, hiddenWhileRendering = [] }) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });

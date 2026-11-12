@@ -12,8 +12,8 @@ import { buildPlacementArchitecture, installPlacements } from './placement-integ
 import { installInspection } from './inspection-integration.js';
 import { waypointSpeed } from './inspection.js';
 import { installDroneView } from './drone-view.js?v=3';
-import { createInkPass } from './ink.js?v=4';
-import { buildStreetscape } from './streetscape.js?v=8';
+import { createInkPass } from './ink.js?v=5';
+import { buildStreetscape } from './streetscape.js?v=9';
 import { installTutorial } from './tutorial.js?v=3';
 
 /* ====================================================================
@@ -258,7 +258,7 @@ world.ewStreets = ROADS.map((z, i) => ({ name: EW_NAMES[i], z }));
 world.nsStreets = ROADS.map((x, i) => ({ name: NS_NAMES[i], x }));
 
 // ---- terrain: roads, lane marks, parcels -------------------------------
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshStandardMaterial({ color: 0xb4b2af, roughness: 1 }));
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshStandardMaterial({ color: 0x9e9c99, roughness: 1 }));
 ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
 scene.add(ground);
 {
@@ -267,7 +267,7 @@ scene.add(ground);
     if (ROADS.some((q) => Math.abs(t - q) < 3.4)) continue;
     marks.push([t, r, 0], [r, t, 1]);
   }
-  const im = new THREE.InstancedMesh(new THREE.BoxGeometry(1.7, 0.02, 0.2), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 }), marks.length);
+  const im = new THREE.InstancedMesh(new THREE.BoxGeometry(1.7, 0.02, 0.2), new THREE.ShaderMaterial({ blending: THREE.NoBlending, vertexShader: 'void main(){ gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.); }', fragmentShader: 'void main(){ gl_FragColor = vec4(1., 1., 1., .5); }' }), marks.length);
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion();
   marks.forEach(([a, b, vert], i) => {
     q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), vert ? Math.PI / 2 : 0);
@@ -275,10 +275,6 @@ scene.add(ground);
     im.setMatrixAt(i, m4);
   });
   im.receiveShadow = true; scene.add(im);
-  // black outline under every lane dash: solid white mark with an ink border
-  const ol = new THREE.InstancedMesh(new THREE.BoxGeometry(1.74, 0.02, 0.24), new THREE.MeshBasicMaterial({ color: 0x141414 }), marks.length);
-  marks.forEach(([a, b, vert], i) => { q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), vert ? Math.PI / 2 : 0); ol.setMatrixAt(i, m4.compose(new THREE.Vector3(a, 0.014, b), q, new THREE.Vector3(1, 1, 1))); });
-  scene.add(ol);
 }
 
 // entity layout: parcel centres on a 16-unit pitch; the door faces +z; the landing pad sits at the lot front

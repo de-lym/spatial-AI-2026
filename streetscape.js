@@ -69,6 +69,8 @@ export function buildStreetscape({ scene, camera, world, buildingGroups, ROADS, 
   const root = new THREE.Group(); root.name = 'Streetscape (decor only)'; scene.add(root);
   const std = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 1, metalness: 0, ...extra });
   const M = { ink: std(0x1b1b1d), dark: std(0x3b3c3f), glass: std(0x2a2c30), mid: std(0x8d8e90), light: std(0xd3d3d1), white: std(0xf8f7f4), asphalt: new THREE.MeshBasicMaterial({ color: 0xf1efec }), bush: std(0x59605a, { flatShading: true }), bush2: std(0x2f352f, { flatShading: true }), wood: std(0xc9c6bf), skin: std(0xe8e4de) };
+  // road markings: unlit solid white that writes alpha .5 into the scene target, which the ink pass reads as "no outline"
+  const MARK = new THREE.ShaderMaterial({ blending: THREE.NoBlending, vertexShader: 'void main(){ gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }', fragmentShader: 'void main(){ gl_FragColor = vec4(1., 1., 1., .5); }' });
   const awning = std(0xffffff, { map: awningTex() });
   const stone = std(0xffffff, { map: speckleTex() });
   const B = new Batch(), glassB = new Batch();
@@ -111,7 +113,7 @@ export function buildStreetscape({ scene, camera, world, buildingGroups, ROADS, 
       for (let i = -3; i <= 3; i++) {
         const off = i * 0.56;
         // arm along x (ax≠0): carriageway runs along x, stripes along x spread in z
-        if (ax) bx(M.white, cx, 0.012, rz + off, 1.7, 0.022, 0.32); else bx(M.white, rx + off, 0.012, cz, 0.32, 0.022, 1.7);   // no outline on crossings
+        if (ax) bx(MARK, cx, 0.012, rz + off, 1.7, 0.022, 0.32); else bx(MARK, rx + off, 0.012, cz, 0.32, 0.022, 1.7);   // no outline on crossings
       }
       crossings.push({ x: cx, z: cz, ax, az });
     }

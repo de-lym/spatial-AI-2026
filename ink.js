@@ -17,6 +17,7 @@ uniform float uNear, uFar, uOrtho, uDpr, uCell, uEdge;
 const float DOTMIN = .26;
 const vec3 PAPER = vec3(.957,.949,.937), INK = vec3(.075,.075,.08);
 float luma(vec3 c){ return dot(c, vec3(.2126,.7152,.0722)); }
+float alphaAt(vec2 uv){ return texture2D(tColor, uv).a; }
 float tone(vec2 uv){ return pow(clamp(luma(texture2D(tColor, uv).rgb), 0., 1.), 1./2.2); }
 float lin(vec2 uv){
   float d = texture2D(tDepth, uv).x;
@@ -34,7 +35,10 @@ void main(){
   float depthEdge = max(max(abs(dd - dL), abs(dd - dR)), max(abs(dd - dU), abs(dd - dD)));
   float depthRef = uOrtho > .5 ? 0.9 : 0.02 * dd;
   float de = smoothstep(depthRef, depthRef * 2.2, depthEdge) * (d0 < .99999 ? 1. : 0.);
-  float lumEdge = max(max(lL, lR), max(lU, lD)) - l0;   // one-sided: only the darker pixel of an edge is inked, so lines stay hairline
+  float lumEdge = max(max(lL, lR), max(lU, lD)) - l0;
+  // road markings write alpha .5: no outline is drawn around (or on) them — they stay plain solid white
+  float flag = min(min(alphaAt(vUv), alphaAt(vUv - vec2(o.x, 0.))), min(min(alphaAt(vUv + vec2(o.x, 0.)), alphaAt(vUv + vec2(0., o.y))), alphaAt(vUv - vec2(0., o.y))));
+  if (flag < .9) lumEdge = 0.;   // one-sided: only the darker pixel of an edge is inked, so lines stay hairline
   float le = smoothstep(.07, .2, lumEdge) * (d0 < .99999 ? .0 : .0) + smoothstep(.07, .2, lumEdge) * .9;
   float edge = clamp(max(de, le) * uEdge, 0., 1.);
 
