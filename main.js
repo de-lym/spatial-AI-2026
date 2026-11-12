@@ -12,8 +12,8 @@ import { buildPlacementArchitecture, installPlacements } from './placement-integ
 import { installInspection } from './inspection-integration.js';
 import { waypointSpeed } from './inspection.js';
 import { installDroneView } from './drone-view.js?v=3';
-import { createInkPass } from './ink.js?v=5';
-import { buildStreetscape } from './streetscape.js?v=9';
+import { createInkPass } from './ink.js?v=7';
+import { buildStreetscape } from './streetscape.js?v=10';
 import { installTutorial } from './tutorial.js?v=3';
 
 /* ====================================================================
@@ -258,9 +258,14 @@ world.ewStreets = ROADS.map((z, i) => ({ name: EW_NAMES[i], z }));
 world.nsStreets = ROADS.map((x, i) => ({ name: NS_NAMES[i], x }));
 
 // ---- terrain: roads, lane marks, parcels -------------------------------
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshStandardMaterial({ color: 0x9e9c99, roughness: 1 }));
-ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
+// the whole map is one big lot: a solid slab (roads and parcels sit on its top face), its thick dark rim is the map border.
+// Everything outside the border is the patterned backdrop painted by the ink pass at the slab's base level.
+const BASE_H = 1.4, BASE_R = 62;
+const sideM = new THREE.MeshStandardMaterial({ color: 0x303030, roughness: 1 }), topM = new THREE.MeshStandardMaterial({ color: 0x9e9c99, roughness: 1 });
+const ground = new THREE.Mesh(new THREE.BoxGeometry(BASE_R * 2, BASE_H, BASE_R * 2), [sideM, sideM, topM, sideM, sideM, sideM]);
+ground.position.y = -BASE_H / 2; ground.receiveShadow = true; ground.castShadow = false;
 scene.add(ground);
+ink.setBackdrop({ y: -BASE_H, scale: 24 });
 {
   const marks = [];
   for (const r of ROADS) for (let t = -60; t <= 60; t += 3.2) {

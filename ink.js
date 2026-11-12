@@ -13,7 +13,9 @@ precision highp float;
 varying vec2 vUv;
 uniform sampler2D tColor, tDepth;
 uniform vec2 uRes;
-uniform float uNear, uFar, uOrtho, uDpr, uCell, uEdge;
+uniform float uNear, uFar, uOrtho, uDpr, uCell, uEdge, uPatY, uPatScale, uPatOn;
+uniform sampler2D tPattern;
+uniform mat4 uInvVP;
 const float DOTMIN = .26;
 const vec3 PAPER = vec3(.957,.949,.937), INK = vec3(.075,.075,.08);
 float luma(vec3 c){ return dot(c, vec3(.2126,.7152,.0722)); }
@@ -57,17 +59,29 @@ void main(){
   float solid = smoothstep(.72, .84, dark);             // deepest shadows fill solid
   float ink = max(max(dots, solid), edge);
   float sky = d0 >= .99999 ? 1. : 0.;
-  ink = mix(ink, max(edge * 0., 0.), sky);              // empty space is paper
-  gl_FragColor = vec4(mix(PAPER, INK, ink), 1.);
+  vec3 col = mix(PAPER, INK, ink);
+  if (sky > .5) {                                       // outside the map border: hand-drawn dash pattern on the water plane
+    vec2 ndc = vUv * 2. - 1.;
+    vec4 n = uInvVP * vec4(ndc, -1., 1.); n /= n.w; vec4 f = uInvVP * vec4(ndc, 1., 1.); f /= f.w;
+    vec3 dir = f.xyz - n.xyz; col = PAPER;
+    if (uPatOn > .5 && dir.y < -1e-4) {
+      float t = (uPatY - n.y) / dir.y; vec2 w = (n.xz + dir.xz * t) / uPatScale;
+      float pv = texture2D(tPattern, w).r;
+      col = mix(INK, PAPER, smoothstep(.3, .95, pv));
+    }
+  }
+  gl_FragColor = vec4(col, 1.);
 }`;
 
 export function createInkPass(renderer, { cell = 2.0, edge = 1 } = {}) {
   const target = new THREE.WebGLRenderTarget(4, 4, { samples: 4, depthTexture: new THREE.DepthTexture(4, 4), depthBuffer: true });
   target.depthTexture.type = THREE.UnsignedIntType;
   target.texture.minFilter = target.texture.magFilter = THREE.NearestFilter;
+  const pattern = new THREE.TextureLoader().load('./assets/pattern.png', (t) => { mat.uniforms.uPatOn.value = 1; });
+  pattern.wrapS = pattern.wrapT = THREE.RepeatWrapping; pattern.anisotropy = 8; pattern.minFilter = THREE.LinearMipmapLinearFilter;
   const mat = new THREE.ShaderMaterial({
     vertexShader: VERT, fragmentShader: FRAG, depthTest: false, depthWrite: false,
-    uniforms: { tColor: { value: target.texture }, tDepth: { value: target.depthTexture }, uRes: { value: new THREE.Vector2(1, 1) },
+    uniforms: { tPattern: { value: pattern }, uPatY: { value: -1.4 }, uPatScale: { value: 40 }, uPatOn: { value: 0 }, uInvVP: { value: new THREE.Matrix4() }, tColor: { value: target.texture }, tDepth: { value: target.depthTexture }, uRes: { value: new THREE.Vector2(1, 1) },
       uNear: { value: 0.1 }, uFar: { value: 100 }, uOrtho: { value: 1 }, uDpr: { value: 1 }, uCell: { value: cell }, uEdge: { value: edge } },
   });
   const quadScene = new THREE.Scene();
@@ -79,6 +93,7 @@ export function createInkPass(renderer, { cell = 2.0, edge = 1 } = {}) {
     renderer.getDrawingBufferSize(size);
     if (target.width !== size.x || target.height !== size.y) { target.setSize(size.x, size.y); mat.uniforms.uRes.value.copy(size); }
     mat.uniforms.uDpr.value = renderer.getPixelRatio();
+    camera.updateMatrixWorld(); mat.uniforms.uInvVP.value.multiplyMatrices(camera.matrixWorld, camera.projectionMatrixInverse);
     mat.uniforms.uNear.value = camera.near; mat.uniforms.uFar.value = camera.far;
     mat.uniforms.uOrtho.value = camera.isOrthographicCamera ? 1 : 0;
     const bg = scene.background, auto = renderer.autoClear, mask = camera.layers.mask;
@@ -94,5 +109,5 @@ export function createInkPass(renderer, { cell = 2.0, edge = 1 } = {}) {
     camera.layers.mask = mask;
     scene.background = bg; renderer.autoClear = auto;
   }
-  return { render };
+  return { render, setBackdrop({ y, scale }) { mat.uniforms.uPatY.value = y; mat.uniforms.uPatScale.value = scale; } };
 }
