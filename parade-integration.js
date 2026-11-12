@@ -6,7 +6,7 @@ import {CONFIG, createParade, distance} from './parade.js';
 import {METHODS} from './parade-methods.js';
 import {EVENT_IDS, EVENT_SCHEDULE} from './parade-events.js';
 import {CROWD_ZONES} from './parade-environment.js';
-import {createParadeVisual} from './parade-visual.js?v=4';
+import {createParadeVisual} from './parade-visual.js?v=5';
 import {createEventVisual} from './parade-event-visual.js?v=2';
 import {installObservability, TABS} from './parade-observability.js?v=4';
 

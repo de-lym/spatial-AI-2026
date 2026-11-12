@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {PARADE_ROUTE,PARADE} from './parade-environment.js';
-import {createCrowdKit} from './people.js?v=10';
+import {createCrowdKit} from './people.js?v=11';
 
 // Shared soft geometry and materials: lightweight crowd, editable 3D character.
 export function createParadeVisual(parent,initial,{avoid=[]}={}){
@@ -99,7 +99,7 @@ export function createParadeVisual(parent,initial,{avoid=[]}={}){
     const stamp=Math.floor(t*10+1e-7);if(stamp===crowdStamp)return;crowdStamp=stamp;stats.crowdUpdates++;
     const list=[...env.marchers,...env.handlers];
     list.forEach((p,i)=>{const it=people[initial.spectators.length+i];it.p=p;});
-    refresh(it=>Math.floor(t*4+it.k*.7)%8);
+    refresh(it=>Math.floor(t*(it.role==='spectator'?3:5)+it.k*.7)%it.group.set.frames);
     for(const b of batches.values())if(!b.static){b.parts.forEach((p,i)=>b.mesh.setMatrixAt(i,p.matrixWorld));b.mesh.instanceMatrix.needsUpdate=true;b.mesh.computeBoundingSphere();stats.movingWrites+=b.parts.length;}
     env.handlers.forEach((h,i)=>{const a=h.anchor,b=h.hand,slack=(1-h.tension)*1.7,positions=ropes[i].geometry.attributes.position;
       positions.setXYZ(0,a.x,a.y+.4,a.z);positions.setXYZ(1,(a.x+b.x)/2,(a.y+b.y)/2+.4-slack,(a.z+b.z)/2);positions.setXYZ(2,b.x,b.y+.4,b.z);positions.needsUpdate=true;ropes[i].geometry.computeBoundingSphere();
