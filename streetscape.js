@@ -68,7 +68,7 @@ export function buildStreetscape({ scene, camera, world, buildingGroups, ROADS, 
   const R = rngOf(20260);
   const root = new THREE.Group(); root.name = 'Streetscape (decor only)'; scene.add(root);
   const std = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 1, metalness: 0, ...extra });
-  const M = { ink: std(0x1b1b1d), dark: std(0x3b3c3f), glass: std(0x2a2c30), mid: std(0x8d8e90), light: std(0xd3d3d1), white: std(0xf8f7f4), asphalt: std(0x8c8a87), bush: std(0x59605a, { flatShading: true }), bush2: std(0x2f352f, { flatShading: true }), wood: std(0xc9c6bf), skin: std(0xe8e4de) };
+  const M = { ink: std(0x1b1b1d), dark: std(0x3b3c3f), glass: std(0x2a2c30), mid: std(0x8d8e90), light: std(0xd3d3d1), white: std(0xf8f7f4), asphalt: new THREE.MeshBasicMaterial({ color: 0xf1efec }), bush: std(0x59605a, { flatShading: true }), bush2: std(0x2f352f, { flatShading: true }), wood: std(0xc9c6bf), skin: std(0xe8e4de) };
   const awning = std(0xffffff, { map: awningTex() });
   const stone = std(0xffffff, { map: speckleTex() });
   const B = new Batch(), glassB = new Batch();
@@ -104,7 +104,7 @@ export function buildStreetscape({ scene, camera, world, buildingGroups, ROADS, 
   const asphalt = [];
   for (const r of ROADS) for (const vert of [0, 1]) {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(124, 4), M.asphalt);
-    m.rotation.x = -Math.PI / 2; m.rotation.z = vert ? Math.PI / 2 : 0; m.position.set(vert ? r : 0, 0.008, vert ? 0 : r); m.receiveShadow = true; root.add(m); asphalt.push(m);
+    m.rotation.x = -Math.PI / 2; m.rotation.z = vert ? Math.PI / 2 : 0; m.position.set(vert ? r : 0, 0.008, vert ? 0 : r); m.receiveShadow = false; root.add(m); asphalt.push(m);
   }
   const crossings = [];
   for (const rx of ROADS) for (const rz of ROADS) {
@@ -124,7 +124,7 @@ export function buildStreetscape({ scene, camera, world, buildingGroups, ROADS, 
   const gridMat = new THREE.MeshBasicMaterial({ map: gridTex(15), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
   const gridPlane = new THREE.PlaneGeometry(11.7, 11.7);
   const grids = new THREE.Group(); root.add(grids);
-  for (const [x, z] of parcels) { const m = new THREE.Mesh(gridPlane, gridMat); m.rotation.x = -Math.PI / 2; m.position.set(x, slab + 0.004, z); m.renderOrder = 1; grids.add(m); }
+  grids.visible = false; // pavement grid removed (kept off; geometry not built)
 
   // ---------- street furniture -------------------------------------------------------------------
   const lamp = (x, z) => {
@@ -340,7 +340,6 @@ export function buildStreetscape({ scene, camera, world, buildingGroups, ROADS, 
   let clock = 0;
   function update(dt) {
     clock += dt;
-    grids.visible = camera.zoom > 0.85;
     for (const p of people) {
       p.s += p.dir * p.speed * dt; if (p.s > p.L) { p.s = p.L; p.dir = -1; } else if (p.s < 0) { p.s = 0; p.dir = 1; }
       const t = p.s / p.L, [x, z] = loc(p, t); p.ph += p.speed * dt * 7;

@@ -13,7 +13,7 @@ import { installInspection } from './inspection-integration.js';
 import { waypointSpeed } from './inspection.js';
 import { installDroneView } from './drone-view.js?v=3';
 import { createInkPass } from './ink.js?v=1';
-import { buildStreetscape } from './streetscape.js?v=2';
+import { buildStreetscape } from './streetscape.js?v=3';
 import { installTutorial } from './tutorial.js?v=3';
 
 /* ====================================================================
@@ -701,6 +701,7 @@ function dynLines(max, opacity) {
   return api;
 }
 const relLines = dynLines(800, 0.9), flightLines = dynLines(600, 0.95);
+relLines.obj.visible = false; // network lines (tower ↔ restaurants / houses) are hidden in the ink style
 
 // ---------- logging / toast ------------------------------------------
 let toastTimer = 0;
