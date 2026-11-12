@@ -13,6 +13,7 @@ import { installInspection } from './inspection-integration.js';
 import { waypointSpeed } from './inspection.js';
 import { installDroneView } from './drone-view.js?v=3';
 import { createInkPass } from './ink.js?v=12';
+import { installParade } from './parade-integration.js?v=2';
 import { buildStreetscape } from './streetscape.js?v=26';
 import { installTutorial } from './tutorial.js?v=3';
 
@@ -92,6 +93,10 @@ const TYPO = {
 };
 const ROLE = { customer: CLR.forest, restaurant: CLR.coral, platform: CLR.navy, courier: CLR.mustard };
 const TREE = [0x8fbf6a, 0x6aa35a, 0x4f8a4f, 0x9ccb7a];
+
+// parade mode (default) replaces the delivery simulation; ?mode=legacy restores the original delivery simulator
+let parade = null;
+const PARADE_MODE = new URLSearchParams(location.search).get('mode') !== 'legacy';
 
 // ---------- helpers --------------------------------------------------
 const $ = (id) => document.getElementById(id);
@@ -1332,6 +1337,7 @@ function autoCourier(c) {
 }
 
 function step(dt) {
+  if (parade) { parade.advance(dt); return; }
   S.time += dt;
   // restaurants: preparation clocks run for orders being prepared (Rule 4)
   for (const o of S.orders) if (o.status === 'preparing' && o.prepRemaining > 0) o.prepRemaining = Math.max(0, o.prepRemaining - dt);
@@ -2100,6 +2106,7 @@ function triggerSelector(el) {
   return null;
 }
 function selectDrone(id, trigger) {
+  if (parade) { parade.select(id, trigger); return; }
   const c = S.couriers.find((d) => d.id === id);
   if (!c) { toast('That drone is no longer in the current simulation.'); return; }
   ui.lastTrigger = triggerSelector(trigger);
@@ -2109,6 +2116,7 @@ function selectDrone(id, trigger) {
   if (trigger) $('close-inspector').focus({ preventScroll: true });
 }
 function clearDroneSelection() {
+  if (parade) { parade.clearSelection(); return; }
   if (!selectedDrone()) return;
   S.selected = null;
   updatePanels(true);
@@ -2158,6 +2166,7 @@ function setStage(n) {
 
 let panelClock = 0;
 function updatePanels(force) {
+  if (parade) { parade.refresh(); return; }
   panelClock = 0;
   $('stats').innerHTML = statsHTML();
   $('info').innerHTML = infoHTML();
@@ -2376,6 +2385,15 @@ const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
 let down = null;
 canvas.addEventListener('pointerdown', (e) => { down = [e.clientX, e.clientY]; });
 canvas.addEventListener('pointercancel', () => { down = null; });
+canvas.addEventListener('pointermove', (e) => {   // parade mode: hover tooltip over drones
+  if (!parade) return;
+  const r = canvas.getBoundingClientRect();
+  ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const ref = ray.intersectObjects(pickables, true)[0]?.object.userData.ref;
+  parade.hover(ref?.type === 'courier' ? ref.id : null, e.clientX - r.left, e.clientY - r.top);
+});
+canvas.addEventListener('pointerleave', () => parade?.hover(null));
 canvas.addEventListener('pointerup', (e) => {
   if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5) { down = null; return; }   // a drag is a camera move, not a click
   down = null;
@@ -2386,8 +2404,10 @@ canvas.addEventListener('pointerup', (e) => {
   if (hit) {
     const ref = hit.object.userData.ref;
     if (ref?.type === 'courier') { selectDrone(ref.id, null); ui.lastTrigger = null; return; }
+    if (parade) return;
     if (selectedDrone()) { S.selected = null; }
     S.selected = ref;
+  } else if (parade) { parade.clearSelection(); return;
   } else {
     const had = !!selectedDrone();
     S.selected = null;
@@ -2441,19 +2461,20 @@ function frame() {
   const now = performance.now(), dt = Math.min((now - lastT) / 1000, 0.1); lastT = now;
   if (S.running && S.stage === 4) { let t = dt * S.speed; while (t > 1e-6) { const s = Math.min(0.1, t); step(s); t -= s; } }
   controls.update();
-  syncVisuals(dt);
+  if (parade) parade.render(dt); else syncVisuals(dt);
   street.update(dt);
   try { droneView.render(dt); } catch (e) { droneView = { render() {} }; console.error(e); }
-  if ((panelClock += dt) > 0.25) updatePanels();
+  if (!parade && (panelClock += dt) > 0.25) updatePanels();
   ink.render(scene, camera);
   requestAnimationFrame(frame);
 }
 let droneView = { render() {} };
 try { droneView = installDroneView({ scene, canvas: $('drone-live'), getDrone: () => selectedDrone(), hiddenWhileRendering: [selRing] }); } catch (e) { console.error('Live drone view unavailable', e); }
-const tutorial = installTutorial({ selectDrone, clearDroneSelection, S });
-$('btn-tour').addEventListener('click', () => tutorial.start(true));
-updatePanels(true);
+if (PARADE_MODE) parade = installParade({ S, scene, world, planRoute, segCheck, camera, controls, removeOrder, routeLayer, selRing, setAdvanced, toast, SLAB });
+const tutorial = parade ? null : installTutorial({ selectDrone, clearDroneSelection, S });
+if (tutorial) $('btn-tour').addEventListener('click', () => tutorial.start(true));
+if (!parade) updatePanels(true);
 frame();
-tutorial.maybeAutoStart();
+if (tutorial) tutorial.maybeAutoStart();
 // exposed for debugging / automated checks
-window.__sim = { inspection, placement, proximity, sepEvade, sepPlan, posAfter, prioCmp, scene, LAND, regenAirspace, segCheck, inPermitted, volumesAt, S, act, step, world, cfg, planRoute, planMission, getLocation, getAgentsAt, getAgentsInBox, setStage, previews, selectVolume, resetWorld, ui, ops, selectDrone, clearDroneSelection, renderEvents, camera, renderer, controls };
+window.__sim = { get parade() { return parade; }, inspection, placement, proximity, sepEvade, sepPlan, posAfter, prioCmp, scene, LAND, regenAirspace, segCheck, inPermitted, volumesAt, S, act, step, world, cfg, planRoute, planMission, getLocation, getAgentsAt, getAgentsInBox, setStage, previews, selectVolume, resetWorld, ui, ops, selectDrone, clearDroneSelection, renderEvents, camera, renderer, controls };
