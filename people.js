@@ -16,52 +16,67 @@ function limb(g, pts, ws) {
   for (let i = 0; i < pts.length; i++) { g.beginPath(); g.arc(pts[i][0], pts[i][1], ws[i] / 2, 0, TAU); g.fill(); }
 }
 
-/** one walking-person frame, facing right. v: {kind, hair, bag, lean, tall}; ph: 0..1 stride phase */
+// ---- angular "scale figure" drawing: slender tapered limbs, faceted clothing, small leaf-shaped head, tiny foot flags ----
+function seg(g, a, b, wa, wb) {            // flat-ended tapered limb segment
+  const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1, nx = -dy / L, ny = dx / L;
+  g.beginPath(); g.moveTo(a[0] + nx * wa / 2, a[1] + ny * wa / 2); g.lineTo(b[0] + nx * wb / 2, b[1] + ny * wb / 2); g.lineTo(b[0] - nx * wb / 2, b[1] - ny * wb / 2); g.lineTo(a[0] - nx * wa / 2, a[1] - ny * wa / 2); g.closePath(); g.fill();
+}
+function chain(g, pts, ws) { for (let i = 0; i < pts.length - 1; i++) seg(g, pts[i], pts[i + 1], ws[i], ws[i + 1]); for (let i = 1; i < pts.length - 1; i++) { g.beginPath(); g.arc(pts[i][0], pts[i][1], ws[i] * 0.42, 0, TAU); g.fill(); } }
+function poly(g, pts) { g.beginPath(); g.moveTo(pts[0][0], pts[0][1]); for (const q of pts.slice(1)) g.lineTo(q[0], q[1]); g.closePath(); g.fill(); }
+function head(g, x, y, tilt = 0.12) { g.beginPath(); g.ellipse(x, y, 5.4, 8.8, tilt, 0, TAU); g.fill(); poly(g, [[x + 3, y - 1], [x + 8.5, y + 2.5], [x + 3.5, y + 4.5]]); }   // profile: small nose wedge
+
+/** one figure frame, facing right. v: {kind, hair, hat, bag, arm, lean, tall, still}; ph: 0..1 stride phase */
 function drawWalker(g, v, ph) {
-  const cx = 44, ground = 186, hipY = ground - 82 * v.tall, L1 = 41 * v.tall, L2 = 41 * v.tall;
-  const a = ph * TAU, bob = Math.abs(Math.sin(a)) * 2.2 * (v.still ? 0 : 1), hy = hipY - bob;
-  g.fillStyle = '#000';
-  // legs
-  const stride = v.still ? 0.06 : 0.58;
-  const leg = (s) => {
-    const φ = a + s * Math.PI, al = stride * Math.sin(φ), flex = v.still ? 0 : 0.85 * Math.max(0, Math.cos(φ + 0.35));
-    const H = [cx, hy], K = [H[0] + L1 * Math.sin(al), H[1] + L1 * Math.cos(al)], be = al - flex, A = [K[0] + L2 * Math.sin(be), K[1] + L2 * Math.cos(be)];
-    const trousers = v.kind === 'trousers' || v.kind === 'shorts';
-    limb(g, [H, K, A], trousers ? [12, 9.5, 6.5] : [9.5, 7, 4.5]);
-    g.beginPath(); g.moveTo(A[0] - 3, A[1] - 2); g.lineTo(A[0] + 12, A[1] + 1); g.lineTo(A[0] + 12, A[1] + 4.5); g.lineTo(A[0] - 4, A[1] + 4.5); g.closePath(); g.fill();   // shoe
-  };
-  leg(0); leg(1);
-  // torso / clothing
-  const sh = [cx + 3 * v.lean, hy - 58], sway = v.still ? 0 : Math.sin(a) * 3;
-  const torso = (pts) => { g.beginPath(); g.moveTo(...pts[0]); for (const p of pts.slice(1)) g.lineTo(...p); g.closePath(); g.fill(); };
-  if (v.kind === 'dress') {
-    torso([[sh[0] - 8, sh[1]], [sh[0] + 8, sh[1] + 1], [cx + 8, hy - 20], [cx + 21 + sway, hy + 34], [cx - 21 + sway, hy + 38], [cx - 8, hy - 20]]);
-  } else if (v.kind === 'coat') {
-    torso([[sh[0] - 9, sh[1]], [sh[0] + 9, sh[1] + 1], [cx + 11, hy + 6], [cx + 17 + sway, hy + 52], [cx - 17 + sway, hy + 56], [cx - 11, hy + 6]]);
-  } else if (v.kind === 'skirt') {
-    torso([[sh[0] - 8, sh[1]], [sh[0] + 8, sh[1] + 1], [cx + 8, hy - 18], [cx + 15 + sway, hy + 16], [cx - 15 + sway, hy + 18], [cx - 8, hy - 18]]);
-  } else {
-    torso([[sh[0] - 9, sh[1]], [sh[0] + 9, sh[1] + 1], [cx + 8.5, hy + 8], [cx - 8.5, hy + 8]]);
+  const cx = 44, ground = 186, H = 176 * v.tall, leg = 0.5 * H, hy0 = ground - leg;
+  const a = ph * TAU, still = !!v.still, bob = still ? 0 : Math.abs(Math.sin(a)) * 2, hy = hy0 - bob;
+  g.fillStyle = '#000'; g.strokeStyle = '#000';
+  // legs: thin, slightly tapered, feet as small flags
+  const stride = still ? 0.05 : 0.6, longCoat = ['coat', 'dress', 'marcher'].includes(v.kind);
+  for (const s of [0, 1]) {
+    const φ = a + s * Math.PI, al = stride * Math.sin(φ), flex = still ? 0 : 0.8 * Math.max(0, Math.cos(φ + 0.35)), l1 = leg * 0.52, l2 = leg * 0.48;
+    const hip = [cx + (s ? 1.5 : -1.5), hy], K = [hip[0] + l1 * Math.sin(al), hip[1] + l1 * Math.cos(al)], be = al - flex, A = [K[0] + l2 * Math.sin(be), K[1] + l2 * Math.cos(be)];
+    chain(g, [hip, K, A], [v.kind === 'shorts' || v.kind === 'trousers' || v.kind === 'marcher' ? 9 : 7, 6.5, 4]);
+    poly(g, [[A[0] - 2, A[1] - 1], [A[0] + 11, A[1] + 1], [A[0] + 11, A[1] + 3.5], [A[0] - 3, A[1] + 3.5]]);
   }
-  // arms (swing against the legs)
-  const arm = (s, len) => {
-    const φ = a + (1 - s) * Math.PI, sw = (v.still ? 0.08 : 0.5) * Math.sin(φ), S = [sh[0], sh[1] + 4];
-    const E = [S[0] + 27 * Math.sin(sw), S[1] + 27 * Math.cos(sw)], fw = sw + 0.35 + 0.25 * (v.still ? 0 : Math.max(0, Math.sin(φ))), W = [E[0] + len * Math.sin(fw), E[1] + len * Math.cos(fw)];
-    limb(g, [S, E, W], [7, 5.5, 4]); g.beginPath(); g.arc(W[0], W[1], 3.2, 0, TAU); g.fill(); return W;
+  // torso + clothing (angular silhouettes)
+  const sh = [cx + 3 * v.lean, hy - 0.31 * H], sway = still ? 0 : Math.sin(a) * 3;
+  if (v.kind === 'dress') poly(g, [[sh[0] - 7, sh[1]], [sh[0] + 7, sh[1] + 1], [cx + 5, hy - 22], [cx + 19 + sway, hy + 40], [cx - 3 + sway, hy + 46], [cx - 19 + sway, hy + 38], [cx - 5, hy - 22]]);
+  else if (v.kind === 'coat') poly(g, [[sh[0] - 8, sh[1]], [sh[0] + 8, sh[1] + 1], [cx + 9, hy], [cx + 15 + sway, hy + 50], [cx - 15 + sway, hy + 53], [cx - 9, hy]]);
+  else if (v.kind === 'marcher') {                                // long double-breasted uniform coat, flared hem
+    poly(g, [[sh[0] - 9, sh[1]], [sh[0] + 9, sh[1] + 1], [cx + 8, hy - 4], [cx + 14 + sway, hy + 40], [cx - 14 + sway, hy + 42], [cx - 8, hy - 4]]);
+    poly(g, [[sh[0] + 7, sh[1] - 2], [sh[0] + 13, sh[1] + 1], [sh[0] + 8, sh[1] + 4]]); poly(g, [[sh[0] - 7, sh[1] - 2], [sh[0] - 13, sh[1] + 1], [sh[0] - 8, sh[1] + 4]]);   // epaulettes
+    g.save(); g.globalCompositeOperation = 'destination-out'; g.fillRect(cx - 12 + sway * 0.3, hy - 3, 24, 1.8); g.restore();   // belt gap
+  } else if (v.kind === 'handler') poly(g, [[sh[0] - 8, sh[1]], [sh[0] + 8, sh[1] + 1], [cx + 8, hy + 6], [cx + 10, hy + 20], [cx - 10, hy + 20], [cx - 8, hy + 6]]);
+  else if (v.kind === 'skirt') poly(g, [[sh[0] - 7, sh[1]], [sh[0] + 7, sh[1] + 1], [cx + 6, hy - 14], [cx + 14 + sway, hy + 18], [cx - 14 + sway, hy + 20], [cx - 6, hy - 14]]);
+  else poly(g, [[sh[0] - 8, sh[1]], [sh[0] + 8, sh[1] + 1], [cx + 6.5, hy + 4], [cx - 6.5, hy + 4]]);
+  // arms
+  const arm = (s) => {
+    const S = [sh[0] + (s ? 2 : -2), sh[1] + 4], φ = a + (1 - s) * Math.PI, sw = (still ? 0.08 : 0.55) * Math.sin(φ);
+    let E, W;
+    if (v.arm === 'wave' && s === 1) { const w = 0.35 * Math.sin(ph * TAU * 2); E = [S[0] + 13, S[1] - 20]; W = [E[0] + 9 * Math.sin(w), E[1] - 21]; }
+    else if (v.arm === 'phone' && s === 1) { E = [S[0] + 14, S[1] + 18]; W = [E[0] - 2, E[1] - 24]; }
+    else if (v.arm === 'rope') { E = [S[0] + 15, S[1] - 8]; W = [E[0] + 17, E[1] - 12]; }
+    else if (v.arm === 'baton' && s === 1) { E = [S[0] + 9, S[1] + 19]; W = [E[0] + 15, E[1] - 1]; }
+    else { E = [S[0] + 26 * Math.sin(sw), S[1] + 26 * Math.cos(sw)]; const fw = sw + 0.3 + 0.3 * (still ? 0 : Math.max(0, Math.sin(φ))); W = [E[0] + 24 * Math.sin(fw), E[1] + 24 * Math.cos(fw)]; }
+    chain(g, [S, E, W], [6.5, 5, 3.5]); g.beginPath(); g.arc(W[0], W[1], 2.6, 0, TAU); g.fill();
+    return W;
   };
-  const w1 = arm(0, 24); arm(1, 24);
-  if (v.bag === 'hand') { g.fillRect(w1[0] - 7, w1[1] + 2, 14, 17); g.fillRect(w1[0] - 0.8, w1[1], 1.6, 3); }
-  if (v.bag === 'shoulder') { g.beginPath(); g.moveTo(sh[0] - 3, sh[1] + 2); g.lineTo(cx + 10, hy + 4); g.lineWidth = 2.4; g.strokeStyle = '#000'; g.stroke(); g.fillRect(cx + 5, hy - 4, 15, 15); }
-  if (v.bag === 'pack') { g.beginPath(); g.roundRect(sh[0] - 22, sh[1] + 4, 14, 38, 5); g.fill(); }
-  // neck + head + hair
-  g.beginPath(); g.rect(sh[0] - 2.5, sh[1] - 12, 5.5, 14); g.fill();
-  const hx = sh[0] + 2.5, hyy = sh[1] - 22;
-  g.beginPath(); g.ellipse(hx, hyy, 7.6, 10, 0.1, 0, TAU); g.fill();
-  if (v.hair === 'bun') { g.beginPath(); g.arc(hx - 6, hyy - 8, 5.2, 0, TAU); g.fill(); }
-  else if (v.hair === 'pony') { const sw2 = v.still ? 0 : Math.sin(a * 2) * 4; limb(g, [[hx - 6, hyy - 3], [hx - 12 + sw2 * 0.4, hyy + 8], [hx - 15 + sw2, hyy + 22]], [6, 5, 1.5]); }
-  else if (v.hair === 'long') { limb(g, [[hx - 6, hyy - 4], [hx - 9, hyy + 12], [hx - 7 + (v.still ? 0 : Math.sin(a) * 3), hyy + 30]], [9, 8, 5]); }
-  else if (v.hair === 'cap') { g.beginPath(); g.rect(hx - 1, hyy - 8, 14, 3.4); g.fill(); }
-  else if (v.hair === 'tuft') { g.beginPath(); g.moveTo(hx - 1, hyy - 9); g.lineTo(hx + 4, hyy - 17); g.lineTo(hx + 6, hyy - 8); g.closePath(); g.fill(); }
+  const w0 = arm(0), w1 = arm(1);
+  if (v.arm === 'rope') { g.lineWidth = 1.6; g.beginPath(); g.moveTo(w1[0], w1[1]); g.lineTo(w1[0] + 22, w1[1] - 30); g.stroke(); }
+  if (v.arm === 'baton') { g.lineWidth = 2.4; g.beginPath(); g.moveTo(w1[0] - 3, w1[1] + 10); g.lineTo(w1[0] + 3, w1[1] - 22); g.stroke(); }
+  if (v.arm === 'flag') { g.lineWidth = 2; g.beginPath(); g.moveTo(w1[0], w1[1] + 22); g.lineTo(w1[0] + 2, w1[1] - 52); g.stroke(); poly(g, [[w1[0] + 2, w1[1] - 52], [w1[0] + 28, w1[1] - 44], [w1[0] + 2, w1[1] - 34]]); }
+  if (v.bag === 'hand') { g.fillRect(w0[0] - 6, w0[1] + 3, 12, 15); g.fillRect(w0[0] - 0.8, w0[1], 1.6, 4); }
+  if (v.bag === 'shoulder') { g.lineWidth = 2; g.beginPath(); g.moveTo(sh[0] - 4, sh[1] + 2); g.lineTo(cx + 9, hy + 6); g.stroke(); poly(g, [[cx + 4, hy - 2], [cx + 18, hy - 2], [cx + 18, hy + 13], [cx + 4, hy + 13]]); }
+  if (v.bag === 'pack') poly(g, [[sh[0] - 19, sh[1] + 2], [sh[0] - 8, sh[1] + 1], [sh[0] - 8, sh[1] + 36], [sh[0] - 17, sh[1] + 34]]);
+  // neck, head, hair / hats
+  poly(g, [[sh[0] - 2, sh[1] - 12], [sh[0] + 3, sh[1] - 12], [sh[0] + 4, sh[1] + 2], [sh[0] - 3, sh[1] + 2]]);
+  const hx = sh[0] + 2.5, hyy = sh[1] - 22; head(g, hx, hyy);
+  if (v.hair === 'bun') { g.beginPath(); g.arc(hx - 6, hyy - 8, 4.6, 0, TAU); g.fill(); }
+  else if (v.hair === 'pony') { const s2 = still ? 0 : Math.sin(a * 2) * 4; chain(g, [[hx - 5, hyy - 3], [hx - 11 + s2 * 0.4, hyy + 8], [hx - 14 + s2, hyy + 24]], [5, 4, 1]); }
+  else if (v.hair === 'long') chain(g, [[hx - 5, hyy - 4], [hx - 8, hyy + 14], [hx - 6 + (still ? 0 : Math.sin(a) * 3), hyy + 32]], [8, 7, 3]);
+  else if (v.hair === 'tuft') poly(g, [[hx - 2, hyy - 8], [hx + 3, hyy - 18], [hx + 6, hyy - 7]]);
+  if (v.hat === 'shako') { poly(g, [[hx - 6, hyy - 7], [hx + 6, hyy - 7], [hx + 5, hyy - 29], [hx - 5, hyy - 29]]); g.fillRect(hx - 7, hyy - 8, 14, 2.4); g.lineWidth = 1.6; g.beginPath(); g.moveTo(hx, hyy - 29); g.lineTo(hx + 3, hyy - 40); g.stroke(); }
+  else if (v.hat === 'cap') { poly(g, [[hx - 6, hyy - 6], [hx + 6, hyy - 8], [hx + 5, hyy - 14], [hx - 5, hyy - 14]]); poly(g, [[hx + 3, hyy - 8], [hx + 13, hyy - 6], [hx + 3, hyy - 5]]); }
 }
 
 function drawDog(g, ph) {
@@ -192,4 +207,26 @@ export function createPeopleKit(seed = 41) {
     else { const uv = u.flat.geometry.attributes.uv, u0 = f / set.frames, u1 = (f + 1) / set.frames; uv.setXY(0, u0, 1); uv.setXY(1, u1, 1); uv.setXY(2, u0, 0); uv.setXY(3, u1, 0); uv.needsUpdate = true; }
   };
   return kit;
+}
+
+/** flat silhouette atlases for the parade crowd (spectators, marchers, handlers): one canvas texture per variant */
+let crowdKit = null;
+export function createCrowdKit() {
+  if (crowdKit) return crowdKit;
+  const R = rngOf(77), pick = a => a[Math.floor(R() * a.length)];
+  const atlas = (n, v, fw = FW, fh = FH) => {
+    const cv = document.createElement('canvas'); cv.width = fw * n; cv.height = fh; const g = cv.getContext('2d');
+    for (let f = 0; f < n; f++) { g.save(); g.translate(f * fw, 0); g.beginPath(); g.rect(0, 0, fw, fh); g.clip(); drawWalker(g, v, n > 1 ? f / n : 0.3); g.restore(); }
+    const t = new THREE.CanvasTexture(cv); t.generateMipmaps = false; t.minFilter = t.magFilter = THREE.LinearFilter; return {tex: t, frames: n, aspect: fw / fh};
+  };
+  const S = (o) => ({kind: 'trousers', hair: 'none', bag: 'none', arm: 'swing', lean: R() * 0.8, tall: 0.95 + R() * 0.1, still: true, ...o});
+  const spectators = [
+    S({kind: 'coat', hair: 'long', arm: 'wave'}), S({kind: 'dress', hair: 'bun', arm: 'wave'}), S({kind: 'trousers', hair: 'tuft', arm: 'wave'}), S({kind: 'skirt', hair: 'pony', arm: 'phone'}),
+    S({kind: 'coat', hair: 'none', arm: 'swing', bag: 'shoulder'}), S({kind: 'trousers', hat: 'cap', arm: 'flag'}), S({kind: 'dress', hair: 'long', arm: 'swing'}), S({kind: 'shorts', hair: 'pony', arm: 'wave', bag: 'pack'}),
+    S({kind: 'trousers', hair: 'bun', arm: 'swing', bag: 'hand'}), S({kind: 'coat', hat: 'cap', arm: 'wave'}),
+  ].map(v => atlas(1, v));
+  const marchers = [{hat: 'shako'}, {hat: 'shako', bag: 'none'}].map(o => atlas(8, S({kind: 'marcher', arm: 'baton', still: false, tall: 1.02, lean: 0.2, ...o})));
+  const handlers = [{hat: 'cap'}, {hair: 'bun'}].map(o => atlas(1, S({kind: 'handler', arm: 'rope', lean: 1.4, ...o})));
+  crowdKit = {spectators, marchers, handlers, pick};
+  return crowdKit;
 }

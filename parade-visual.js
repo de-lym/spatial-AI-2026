@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {PARADE_ROUTE,PARADE} from './parade-environment.js';
+import {createCrowdKit} from './people.js?v=8';
 
 // Shared soft geometry and materials: lightweight crowd, editable 3D character.
 export function createParadeVisual(parent,initial){
@@ -27,26 +28,40 @@ export function createParadeVisual(parent,initial){
   const scarf=new THREE.Mesh(new THREE.TorusGeometry(1.23,.19,8,24),gold);scarf.rotation.x=Math.PI/2;scarf.position.y=-.05;balloon.add(scarf);
   ellipsoid(balloon,gold,1.2,-.65,.9,.25,.85,.12);
   const route=new THREE.Line(new THREE.BufferGeometry().setFromPoints(PARADE_ROUTE.map(p=>new THREE.Vector3(p.x,.055,p.z))),new THREE.LineDashedMaterial({color:0x3a3a3c,dashSize:.65,gapSize:.65,transparent:true,opacity:.7}));route.computeLineDistances();root.add(route);
-  const coats=[0x242426,0x2e2e30,0x1b1b1d,0x38383a,0x222224].map(material),skin=material(0x2a2a2c),trouser=material(0x1b1b1d);
-  const bodyGeo=new THREE.CylinderGeometry(.17,.22,.42,7),limbGeo=new THREE.CylinderGeometry(.055,.055,.29,5);
-  function human(p,i){
-    const g=new THREE.Group();g.name=p.id;
-    const coat=p.role==='handler'?gold:p.role==='marcher'?cream:coats[i%coats.length];
-    const torso=new THREE.Mesh(bodyGeo,coat);torso.position.y=.48;g.add(torso);
-    ellipsoid(g,skin,0,.83,0,.15,.17,.15);
-    const legs=[],arms=[];
-    for(const side of [-1,1]){
-      const leg=new THREE.Mesh(limbGeo,trouser);leg.position.set(side*.09,.17,0);g.add(leg);legs.push(leg);
-      const arm=new THREE.Mesh(limbGeo,coat);arm.position.set(side*.23,.5,.03);arm.rotation.z=side*.18;g.add(arm);arms.push(arm);
-    }
-    // Face direction is visible even in the abstract, small crowd models.
-    ellipsoid(g,ink,0,.84,.145,.09,.035,.025);
-    if(p.role!=='spectator')ellipsoid(g,coat,0,.98,0,.17,.06,.17);
-    g.position.set(p.pos.x,.4,p.pos.z);g.rotation.y=p.heading;g.userData.staticCrowd=p.role==='spectator';
-    if(p.role==='handler')arms.forEach(a=>a.rotation.x=-1);
-    return {g,legs,arms};
+  // The crowd is drawn as flat silhouette figures (scale-figure style) batched per variant; they turn to the camera and mirror toward their facing direction.
+  const kit=createCrowdKit(),H=1.1,Y0=.4;
+  const people=[...initial.spectators.map((p,i)=>({p,role:'spectator',v:i%kit.spectators.length})),...initial.marchers.map((p,i)=>({p,role:'marcher',v:i%kit.marchers.length})),...initial.handlers.map((p,i)=>({p,role:'handler',v:i%kit.handlers.length}))];
+  const groups=new Map();
+  for(const item of people){
+    const set=item.role==='spectator'?kit.spectators[item.v]:item.role==='marcher'?kit.marchers[item.v]:kit.handlers[item.v],key=item.role+item.v;
+    if(!groups.has(key))groups.set(key,{set,items:[],role:item.role});groups.get(key).items.push(item);
   }
-  const people=[...initial.spectators,...initial.marchers,...initial.handlers].map(human);
+  const quad=new THREE.PlaneGeometry(1,1);quad.translate(0,.5,0);
+  for(const gr of groups.values()){
+    const n=gr.items.length,geo=new THREE.InstancedBufferGeometry();geo.index=quad.index;geo.attributes.position=quad.attributes.position;geo.attributes.uv=quad.attributes.uv;geo.attributes.normal=quad.attributes.normal;
+    gr.frame=new THREE.InstancedBufferAttribute(new Float32Array(n),1);geo.setAttribute('frame',gr.frame);
+    const mat=new THREE.ShaderMaterial({side:THREE.DoubleSide,uniforms:{map:{value:gr.set.tex},uFrames:{value:gr.set.frames}},
+      vertexShader:'attribute float frame; uniform float uFrames; varying vec2 vUv; void main(){ vUv = vec2((uv.x + frame) / uFrames, uv.y); gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0); }',
+      fragmentShader:'uniform sampler2D map; varying vec2 vUv; void main(){ if (texture2D(map, vUv).a < .4) discard; gl_FragColor = vec4(vec3(.04), 1.0); }'});
+    gr.mesh=new THREE.InstancedMesh(geo,mat,n);gr.mesh.frustumCulled=false;gr.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);root.add(gr.mesh);
+    gr.items.forEach((it,k)=>{it.group=gr;it.k=k;it.frame=0;});
+  }
+  const _m=new THREE.Matrix4(),_q=new THREE.Quaternion(),_p=new THREE.Vector3(),_s=new THREE.Vector3(),_up=new THREE.Vector3(0,1,0);
+  let facing=0,rightX=1,rightZ=0,camStamp='';
+  function place(it){
+    const p=it.p,sc=H*(it.role==='marcher'?1.04:1),dirX=Math.sin(p.heading),dirZ=Math.cos(p.heading),flip=(dirX*rightX+dirZ*rightZ)>=0?1:-1;
+    _q.setFromAxisAngle(_up,facing);_p.set(p.pos.x,Y0,p.pos.z);_s.set(sc*it.group.set.aspect*flip,sc,1);
+    it.group.mesh.setMatrixAt(it.k,_m.compose(_p,_q,_s));
+  }
+  function refresh(frames){
+    for(const it of people){place(it);if(frames!==undefined&&it.group.set.frames>1)it.group.frame.setX(it.k,frames(it));}
+    for(const gr of groups.values()){gr.mesh.instanceMatrix.needsUpdate=true;gr.frame.needsUpdate=true;}
+  }
+  /** turn every figure to the given camera (called each frame; cheap, only re-uploads when the view yaw changes) */
+  function face(camera){
+    const d=new THREE.Vector3();camera.getWorldDirection(d);const yaw=Math.atan2(-d.x,-d.z),stamp=yaw.toFixed(3);if(stamp===camStamp)return;camStamp=stamp;
+    facing=yaw;rightX=Math.cos(facing);rightZ=-Math.sin(facing);refresh();
+  }
   const ropeMaterial=new THREE.LineBasicMaterial({color:0x2a2a2c});
   const ropes=initial.handlers.map(()=>{
     const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.BufferAttribute(new Float32Array(9),3));
@@ -61,7 +76,7 @@ export function createParadeVisual(parent,initial){
   });
   // Render the crowd and barriers in material/geometry batches, rather than
   // several thousand separate draw calls. Detached groups remain animation rigs.
-  const batches=new Map(),rigs=[...people.map(p=>p.g),...barriers];
+  const batches=new Map(),rigs=[...barriers];
   for(const g of rigs)for(const mesh of g.children){
     const key=mesh.geometry.uuid+mesh.material.uuid+(g.userData.staticCrowd?'static':'moving');
     if(!batches.has(key))batches.set(key,{geometry:mesh.geometry,material:mesh.material,parts:[],static:!!g.userData.staticCrowd});
@@ -81,11 +96,12 @@ export function createParadeVisual(parent,initial){
     // no spectator waving, turning, walking rigs or per-frame static buffer writes.
     const stamp=Math.floor(t*10+1e-7);if(stamp===crowdStamp)return;crowdStamp=stamp;stats.crowdUpdates++;
     const list=[...env.marchers,...env.handlers];
-    list.forEach((p,i)=>{const {g}=people[initial.spectators.length+i];g.position.set(p.pos.x,.4,p.pos.z);g.rotation.y=p.heading;g.rotation.x=p.lean??0;g.updateMatrixWorld(true);});
+    list.forEach((p,i)=>{const it=people[initial.spectators.length+i];it.p=p;});
+    refresh(it=>Math.floor(t*4+it.k*.7)%8);
     for(const b of batches.values())if(!b.static){b.parts.forEach((p,i)=>b.mesh.setMatrixAt(i,p.matrixWorld));b.mesh.instanceMatrix.needsUpdate=true;b.mesh.computeBoundingSphere();stats.movingWrites+=b.parts.length;}
     env.handlers.forEach((h,i)=>{const a=h.anchor,b=h.hand,slack=(1-h.tension)*1.7,positions=ropes[i].geometry.attributes.position;
       positions.setXYZ(0,a.x,a.y+.4,a.z);positions.setXYZ(1,(a.x+b.x)/2,(a.y+b.y)/2+.4-slack,(a.z+b.z)/2);positions.setXYZ(2,b.x,b.y+.4,b.z);positions.needsUpdate=true;ropes[i].geometry.computeBoundingSphere();
     });
   }
-  update(initial,0);return {root,balloon,people,ropes,route,update,stats,radius:PARADE.balloonRadius};
+  update(initial,0);return {root,balloon,people,ropes,route,update,face,stats,radius:PARADE.balloonRadius};
 }

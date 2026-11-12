@@ -2,7 +2,7 @@
 // shell: Incident Queue card (log), Fleet Monitoring (event axis column) and an Event Inspector that uses the same
 // floating inspector card as the drone inspector. Read-only: it never advances or modifies the simulation.
 import * as THREE from 'three';
-import {createReplayView} from './parade-replay-view.js';
+import {createReplayView} from './parade-replay-view.js?v=2';
 import {buildIncidents, ANNOUNCEMENT_LEVELS} from './parade-incidents.js';
 const esc = s => String(s ?? '—').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export const TABS = {urgent: 3, conflict: 2, notice: 1};

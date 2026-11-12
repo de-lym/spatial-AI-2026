@@ -6,9 +6,9 @@ import {CONFIG, createParade, distance} from './parade.js';
 import {METHODS} from './parade-methods.js';
 import {EVENT_IDS, EVENT_SCHEDULE} from './parade-events.js';
 import {CROWD_ZONES} from './parade-environment.js';
-import {createParadeVisual} from './parade-visual.js';
+import {createParadeVisual} from './parade-visual.js?v=2';
 import {createEventVisual} from './parade-event-visual.js';
-import {installObservability, TABS} from './parade-observability.js';
+import {installObservability, TABS} from './parade-observability.js?v=2';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '—').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -278,6 +278,6 @@ export function installParade({S, scene, world, planRoute, segCheck, camera, con
       if (a) { tip.textContent = `${a.id} · ${a.kind} · ${a.state}`; tip.style.left = `${Math.max(8, Math.min(map.clientWidth - 220, x + 12))}px`; tip.style.top = `${Math.max(8, y - 35)}px`; }
     },
     advance(seconds) { accumulator += seconds; while (accumulator + 1e-9 >= CONFIG.dt) { engine.tick(); accumulator -= CONFIG.dt; } if (engine.state.finished) S.running = false; mirror(); },
-    render(dt) { obs.render(dt); mirror(); uiClock += dt; if (uiClock > .25) { uiClock = 0; renderUI(); draw(); } },
+    render(dt) { paradeVisual.face(camera); obs.render(dt); mirror(); uiClock += dt; if (uiClock > .25) { uiClock = 0; renderUI(); draw(); } },
   };
 }

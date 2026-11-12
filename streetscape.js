@@ -5,7 +5,7 @@
 // Everything here is DECOR: nothing is registered as an obstacle, so routing / airspace / picking are unaffected.
 // Static pieces are merged into one mesh per material; only the people / cyclists / dogs are animated.
 import * as THREE from 'three';
-import { createPeopleKit } from './people.js?v=7';
+import { createPeopleKit } from './people.js?v=8';
 
 const TAU = Math.PI * 2;
 const rngOf = (seed) => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };

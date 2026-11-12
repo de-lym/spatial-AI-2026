@@ -13,8 +13,8 @@ import { installInspection } from './inspection-integration.js';
 import { waypointSpeed } from './inspection.js';
 import { installDroneView } from './drone-view.js?v=3';
 import { createInkPass } from './ink.js?v=12';
-import { installParade } from './parade-integration.js?v=4';
-import { buildStreetscape } from './streetscape.js?v=26';
+import { installParade } from './parade-integration.js?v=6';
+import { buildStreetscape } from './streetscape.js?v=32';
 import { installTutorial } from './tutorial.js?v=3';
 
 /* ====================================================================
