@@ -5,14 +5,24 @@ export const EVENT_SCHEDULE=Object.freeze({
  confetti:{name:'Confetti',start:38,end:62},
  wind:{name:'Wind Gust',start:68,end:86}
 });
+// Pigeon flocks: 4 flocks of 1–3 birds with pseudo-random (fixed-seed) crossing points, headings, altitudes and start times inside the 26–54 s window.
+// The seed is fixed so every run and replay is identical; nothing depends on drones, method or selection.
+function seeded(seed){return()=>{seed|=0;seed=(seed+0x6d2b79f5)|0;let t=Math.imul(seed^(seed>>>15),1|seed);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296;};}
+export const PIGEON_FLOCKS=(()=>{
+ const R=seeded(2025),flocks=[];let n=0;
+ for(let k=0;k<4;k++){
+  const size=1+Math.floor(R()*3),dur=12+R()*4,start=k===0?26:+(28+k*5+R()*4).toFixed(2),end=Math.min(54,start+dur),speed=2.4+R()*.8;
+  const a=R()*Math.PI*2,dx=Math.cos(a),dz=Math.sin(a),cx=-40+R()*80,cz=-40+R()*80,half=speed*(end-start)/2;   // crosses (cx,cz) at mid-flight
+  flocks.push({id:k+1,size,start,end,speed,dx,dz,x0:cx-dx*half,z0:cz-dz*half,y:9+R()*7,
+   birds:Array.from({length:size},()=>({id:`PIGEON-${++n}`,px:(R()-.5)*1.4,py:(R()-.5)*1.2,pz:(R()-.5)*1.4}))});
+ }
+ return Object.freeze(flocks);
+})();
 export const EVENT_IDS=Object.keys(EVENT_SCHEDULE);
 export function eventsAt(t,enabled=[]){
  const has=id=>enabled.includes(id)&&t>=EVENT_SCHEDULE[id].start&&t<EVENT_SCHEDULE[id].end;
  const pigeons=[];
- if(has('pigeons'))for(let i=0;i<3;i++){
-  const u=(t-26)/28,phase=i*2.399963;
-  pigeons.push({id:`PIGEON-${i+1}`,pos:{x:-40+80*u+(i%4-1.5)*.65,y:14+Math.sin(phase)*.7,z:-8+(Math.floor(i/4)-1)*.7},v:{x:80/28,y:0,z:0},radius:.45});
- }
+ if(has('pigeons'))for(const f of PIGEON_FLOCKS){if(t<f.start||t>=f.end)continue;f.birds.forEach((b,i)=>{const u=t-f.start;pigeons.push({id:b.id,pos:{x:f.x0+f.dx*f.speed*u+b.px,y:f.y+b.py,z:f.z0+f.dz*f.speed*u+b.pz},v:{x:f.dx*f.speed,y:0,z:f.dz*f.speed},radius:.45});});}
  const confetti=has('confetti')?{pos:{x:8+(t-38)*.22,y:14,z:-8},radius:8,density:.75}:null;
  const strength=has('wind')?Math.sin((t-68)/18*Math.PI)**2:0;
  return {pigeons,confetti,wind:{x:.65*strength,y:0,z:-.35*strength},active:EVENT_IDS.filter(has)};
