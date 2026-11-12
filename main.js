@@ -13,7 +13,7 @@ import { installInspection } from './inspection-integration.js';
 import { waypointSpeed } from './inspection.js';
 import { installDroneView } from './drone-view.js?v=3';
 import { createInkPass } from './ink.js?v=1';
-import { buildStreetscape } from './streetscape.js?v=5';
+import { buildStreetscape } from './streetscape.js?v=6';
 import { installTutorial } from './tutorial.js?v=3';
 
 /* ====================================================================
@@ -276,7 +276,7 @@ scene.add(ground);
   });
   im.receiveShadow = true; scene.add(im);
   // black outline under every lane dash: solid white mark with an ink border
-  const ol = new THREE.InstancedMesh(new THREE.BoxGeometry(1.78, 0.02, 0.19), new THREE.MeshBasicMaterial({ color: 0x141414 }), marks.length);
+  const ol = new THREE.InstancedMesh(new THREE.BoxGeometry(1.72, 0.02, 0.125), new THREE.MeshBasicMaterial({ color: 0x141414 }), marks.length);
   marks.forEach(([a, b, vert], i) => { q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), vert ? Math.PI / 2 : 0); ol.setMatrixAt(i, m4.compose(new THREE.Vector3(a, 0.014, b), q, new THREE.Vector3(1, 1, 1))); });
   scene.add(ol);
 }
