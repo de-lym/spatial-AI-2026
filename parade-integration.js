@@ -136,7 +136,7 @@ export function installParade({S, scene, world, planRoute, segCheck, camera, con
   $('cfg-discard').addEventListener('click', () => { pendingConfig = {method: engine.config.method, events: [...engine.config.events]}; syncControls(); renderUI(); });
   play.addEventListener('click', () => { if (engine.state.finished) return; S.running = !S.running; renderUI(); });
   reset.addEventListener('click', () => doReset());
-  locate.addEventListener('click', () => { const p = engine.state.balloon; controls.target.set(p.x, 6, p.z); camera.position.set(p.x + 65, 58, p.z + 65); camera.zoom = .9; camera.updateProjectionMatrix(); controls.update(); });
+  locate.addEventListener('click', () => { const p = engine.state.balloon; controls.target.set(p.x, 6, p.z); camera.position.set(p.x + 65, 58, p.z + 65); camera.zoom = 1.5; camera.updateProjectionMatrix(); controls.update(); });
   city.addEventListener('click', () => { camera.position.copy(initialView.position); controls.target.copy(initialView.target); camera.zoom = initialView.zoom; camera.updateProjectionMatrix(); controls.update(); });
   $('lay-rest').addEventListener('change', e => { crowdLayer.visible = e.target.checked; });
   crowdLayer.visible = false;
