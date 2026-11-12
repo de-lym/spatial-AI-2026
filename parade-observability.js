@@ -2,7 +2,7 @@
 // shell: Incident Queue card (log), Fleet Monitoring (event axis column) and an Event Inspector that uses the same
 // floating inspector card as the drone inspector. Read-only: it never advances or modifies the simulation.
 import * as THREE from 'three';
-import {createReplayView} from './parade-replay-view.js?v=2';
+import {createReplayView} from './parade-replay-view.js?v=3';
 import {buildIncidents, ANNOUNCEMENT_LEVELS} from './parade-incidents.js';
 const esc = s => String(s ?? '—').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export const TABS = {urgent: 3, conflict: 2, notice: 1};
@@ -70,10 +70,10 @@ export function installObservability({engine,S,map,camera,controls,scene,refresh
   function syncCards(){
     if(held)return;
     const sig=`${incidents.map(i=>i.id+':'+i.lastTime+':'+i.severity+':'+(i.outcome?1:0)).join('|')}#${tab}#${chosen?.id}#${inspector.hidden}`;
-    const cn=document.getElementById('event-log-count');if(cn)cn.textContent=incidents.length;
+    const c=counts();for(const [k,id] of [['urgent','cnt-critical'],['conflict','cnt-battery'],['notice','cnt-updates']]){const n=document.getElementById(id);if(n)n.textContent=c[k];}
     if(sig===lastSig)return;lastSig=sig;
     // Incident Queue card: newest first, filtered by tab. One entry per encounter.
-    const rows=incidents.filter(i=>tab==='all'||i.severity===TABS[tab]).sort((a,b)=>b.lastTime-a.lastTime),valid=new Set();
+    const rows=incidents.filter(i=>i.severity===TABS[tab]).sort((a,b)=>b.lastTime-a.lastTime),valid=new Set();
     logHost.querySelector('.empty')?.remove();
     for(const i of rows){
       valid.add(i.id);let b=logNodes.get(i.id);
@@ -84,7 +84,7 @@ export function installObservability({engine,S,map,camera,controls,scene,refresh
     }
     for(const [key,b] of logNodes)if(!valid.has(key)){b.remove();logNodes.delete(key);}
     let prev=null;for(const i of rows){const b=logNodes.get(i.id);if(prev?prev.nextSibling!==b:logHost.firstChild!==b)logHost.insertBefore(b,prev?prev.nextSibling:logHost.firstChild);prev=b;}
-    if(!rows.length&&!logHost.querySelector('.empty')){const p=document.createElement('div');p.className='empty';p.textContent='No important encounters yet. Events will appear here as drones respond.';logHost.append(p);}
+    if(!rows.length&&!logHost.querySelector('.empty')){const p=document.createElement('div');p.className='empty';p.textContent=tab==='urgent'?'No urgent encounters.':tab==='conflict'?'No conflict encounters.':'No notices yet.';logHost.append(p);}
     // Per-drone event axes (shared 0–150 s scale), grouped when markers would overlap.
     const used=new Set();
     for(const agent of engine.state.agents){

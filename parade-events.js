@@ -9,7 +9,7 @@ export const EVENT_IDS=Object.keys(EVENT_SCHEDULE);
 export function eventsAt(t,enabled=[]){
  const has=id=>enabled.includes(id)&&t>=EVENT_SCHEDULE[id].start&&t<EVENT_SCHEDULE[id].end;
  const pigeons=[];
- if(has('pigeons'))for(let i=0;i<12;i++){
+ if(has('pigeons'))for(let i=0;i<3;i++){
   const u=(t-26)/28,phase=i*2.399963;
   pigeons.push({id:`PIGEON-${i+1}`,pos:{x:-40+80*u+(i%4-1.5)*.65,y:14+Math.sin(phase)*.7,z:-8+(Math.floor(i/4)-1)*.7},v:{x:80/28,y:0,z:0},radius:.45});
  }

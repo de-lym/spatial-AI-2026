@@ -13,7 +13,7 @@ import { installInspection } from './inspection-integration.js';
 import { waypointSpeed } from './inspection.js';
 import { installDroneView } from './drone-view.js?v=3';
 import { createInkPass } from './ink.js?v=12';
-import { installParade } from './parade-integration.js?v=6';
+import { installParade } from './parade-integration.js?v=10';
 import { buildStreetscape } from './streetscape.js?v=32';
 import { installTutorial } from './tutorial.js?v=3';
 
@@ -2461,7 +2461,7 @@ function frame() {
   const now = performance.now(), dt = Math.min((now - lastT) / 1000, 0.1); lastT = now;
   if (S.running && S.stage === 4) { let t = dt * S.speed; while (t > 1e-6) { const s = Math.min(0.1, t); step(s); t -= s; } }
   controls.update();
-  if (parade) parade.render(dt); else syncVisuals(dt);
+  if (parade) { parade.render(dt); streetLabels.visible = S.showStreets; } else syncVisuals(dt);
   street.update(dt);
   try { droneView.render(dt); } catch (e) { droneView = { render() {} }; console.error(e); }
   if (!parade && (panelClock += dt) > 0.25) updatePanels();
@@ -2470,7 +2470,7 @@ function frame() {
 }
 let droneView = { render() {} };
 try { droneView = installDroneView({ scene, canvas: $('drone-live'), getDrone: () => selectedDrone(), hiddenWhileRendering: [selRing] }); } catch (e) { console.error('Live drone view unavailable', e); }
-if (PARADE_MODE) parade = installParade({ S, scene, world, planRoute, segCheck, camera, controls, removeOrder, routeLayer, selRing, setAdvanced, toast, SLAB });
+if (PARADE_MODE) parade = installParade({ S, scene, world, planRoute, segCheck, camera, controls, removeOrder, routeLayer, selRing, setAdvanced, toast, SLAB, streetLabels });
 const tutorial = parade ? null : installTutorial({ selectDrone, clearDroneSelection, S });
 if (tutorial) $('btn-tour').addEventListener('click', () => tutorial.start(true));
 if (!parade) updatePanels(true);

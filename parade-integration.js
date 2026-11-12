@@ -7,8 +7,8 @@ import {METHODS} from './parade-methods.js';
 import {EVENT_IDS, EVENT_SCHEDULE} from './parade-events.js';
 import {CROWD_ZONES} from './parade-environment.js';
 import {createParadeVisual} from './parade-visual.js?v=2';
-import {createEventVisual} from './parade-event-visual.js';
-import {installObservability, TABS} from './parade-observability.js?v=2';
+import {createEventVisual} from './parade-event-visual.js?v=2';
+import {installObservability, TABS} from './parade-observability.js?v=4';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '—').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -16,11 +16,12 @@ const fresh = id => { const el = $(id); const c = el.cloneNode(true); el.replace
 const SCALE_M = 5;                                                                                    // one scene unit = 5 m
 const f1 = (n, s = '') => (n === null || n === undefined ? '—' : `${n.toFixed(1)}${s}`);
 
-export function installParade({S, scene, world, planRoute, segCheck, camera, controls, removeOrder, routeLayer, selRing, setAdvanced, toast, SLAB}) {
+export function installParade({S, scene, world, planRoute, segCheck, camera, controls, removeOrder, routeLayer, selRing, setAdvanced, toast, SLAB, streetLabels}) {
   document.body.classList.add('parade-mode');
   for (const o of [...S.orders]) removeOrder(o);
   S.intake = false; S.selected = null; S.track = null; routeLayer.visible = false; S.running = false; S.stage = 4; S.speed = 1;
 
+  scene.traverse(o => { if (o.isSprite && !streetLabels?.children.includes(o)) o.visible = false; });   // station / drone labels belong to the delivery view
   // ---- engine: four rooftop pads (statically validated, mutually reachable) ----
   const candidates = world.obstacles.filter(o => o.y0 === undefined && o.h > 2 && o.h < 15)
     .map(o => ({id: `PAD-${o.id}`, name: o.name, pos: {x: (o.x0 + o.x1) / 2, y: o.h + 1.3, z: (o.z0 + o.z1) / 2}, roof: o.h})).filter(p => !segCheck(p.pos, p.pos));
@@ -76,7 +77,7 @@ export function installParade({S, scene, world, planRoute, segCheck, camera, con
     <p class="small" id="config-note" role="status"></p>
     <div id="pending-actions" hidden><button id="cfg-apply" disabled>Apply &amp; Restart</button><button id="cfg-discard">Discard</button></div>`;
   logCard.className = 'incidents eventlogcard'; logCard.setAttribute('aria-label', 'Event log');
-  logCard.innerHTML = `<div class="incidenthead"><h2>Event Log <span class="count" id="event-log-count">0</span></h2></div><div class="eventlist" id="events" role="list" tabindex="0"></div>`;
+  logCard.innerHTML = `<div class="incidenthead"><h2>Event Log</h2></div><div class="tabs" role="tablist" aria-label="Encounter severity"><button role="tab" id="tab-critical" data-category="urgent" aria-controls="events">Urgent <span class="count" id="cnt-critical">0</span></button><button role="tab" id="tab-battery" data-category="conflict" aria-controls="events">Conflict <span class="count" id="cnt-battery">0</span></button><button role="tab" id="tab-updates" data-category="notice" aria-controls="events">Notice <span class="count" id="cnt-updates">0</span></button></div><div class="eventlist" id="events" role="list" tabindex="0"></div>`;
   // Top bar: Start / speed / Reset stay; the status strip and Advanced drawer button are removed.
   $('statusbar').hidden = true; $('btn-advanced').hidden = true; document.body.style.setProperty('--top', '88px');
   // Fleet Monitoring: same table; the last column becomes the shared 0–150 s event axis.
@@ -110,7 +111,10 @@ export function installParade({S, scene, world, planRoute, segCheck, camera, con
   // ============================================================== behaviour ==============================================================
   const obs = installObservability({engine, S, map, camera, controls, scene, refresh: () => renderUI(), closePanels: () => { selected = null; S.selected = null; inspectorEl.hidden = true; draw(); },
     excludeReplay: [group, routeLayer, selRing, ...S.couriers.flatMap(c => [c.mesh, c.halo, c.blockMesh, c.label])].filter(Boolean), logHost: $('events'), fleetRoot: $('fleet-body')});
-  obs.setTab('all');
+  const tabIds = [['tab-critical', 'urgent'], ['tab-battery', 'conflict'], ['tab-updates', 'notice']];
+  function setTab(key) { for (const [id, k] of tabIds) $(id).setAttribute('aria-selected', String(k === key)); obs.setTab(key); }
+  for (const [id, key] of tabIds) $(id).addEventListener('click', () => setTab(key));
+  setTab('urgent');
 
   function doReset(config = {method: engine.config.method, events: engine.config.events}) {
     obs.reset(); engine.reset(config); mirroredTick = -1; S.time = 0; S.running = false; accumulator = 0; selectedLandmark = null; mirror(); renderUI(); draw();
@@ -278,6 +282,6 @@ export function installParade({S, scene, world, planRoute, segCheck, camera, con
       if (a) { tip.textContent = `${a.id} · ${a.kind} · ${a.state}`; tip.style.left = `${Math.max(8, Math.min(map.clientWidth - 220, x + 12))}px`; tip.style.top = `${Math.max(8, y - 35)}px`; }
     },
     advance(seconds) { accumulator += seconds; while (accumulator + 1e-9 >= CONFIG.dt) { engine.tick(); accumulator -= CONFIG.dt; } if (engine.state.finished) S.running = false; mirror(); },
-    render(dt) { paradeVisual.face(camera); obs.render(dt); mirror(); uiClock += dt; if (uiClock > .25) { uiClock = 0; renderUI(); draw(); } },
+    render(dt) { paradeVisual.face(camera); eventVisual.face(camera); obs.render(dt); mirror(); uiClock += dt; if (uiClock > .25) { uiClock = 0; renderUI(); draw(); } },
   };
 }

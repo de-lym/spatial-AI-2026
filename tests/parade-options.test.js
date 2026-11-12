@@ -9,7 +9,7 @@ const make=options=>createParade({pads,plan:(a,b)=>({ok:true,pts:[b]}),blocked:(
 const finish=e=>{for(let i=0;i<3000;i++)e.tick();return e.snapshot();};
 test('all event combinations are order-independent and isolate each trajectory',()=>{
  for(let mask=0;mask<16;mask++){const events=EVENT_IDS.filter((_,i)=>mask&(1<<i));for(const t of [0,26,38,45,54,62,68,76,86,150]){const env=eventsAt(t,events);assert.deepEqual(env,eventsAt(t,[...events].reverse()));for(const id of events){const single=eventsAt(t,[id]);if(id==='pigeons')assert.deepEqual(env.pigeons,single.pigeons);if(id==='confetti')assert.deepEqual(env.confetti,single.confetti);if(id==='wind')assert.deepEqual(env.wind,single.wind);}}}
- assert.equal(eventsAt(26,['pigeons']).pigeons.length,12);assert.equal(eventsAt(54,['pigeons']).pigeons.length,0);assert.equal(eventsAt(38,['confetti']).confetti.radius,8);assert.ok(eventsAt(77,['wind']).wind.x>.6);
+ assert.equal(eventsAt(26,['pigeons']).pigeons.length,3);assert.equal(eventsAt(54,['pigeons']).pigeons.length,0);assert.equal(eventsAt(38,['confetti']).confetti.radius,8);assert.ok(eventsAt(77,['wind']).wind.x>.6);
 });
 test('cloud affects only intersecting sightlines',()=>{const cloud={pos:p(0),radius:3};assert.ok(segmentInCloud(p(-8),p(8),cloud));assert.ok(!segmentInCloud(p(-8,14,6),p(8,14,6),cloud));});
 test('cost negotiation can reverse fixed rank and exposes reproducible counterfactual costs',()=>{

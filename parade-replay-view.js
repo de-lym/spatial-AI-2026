@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {OrbitControls} from './vendor/OrbitControls.js';
 import {createParadeVisual} from './parade-visual.js';
-import {createEventVisual} from './parade-event-visual.js';
+import {createEventVisual} from './parade-event-visual.js?v=2';
 import {createInkPass} from './ink.js?v=12';
 
 // Independent scene graph, transforms, instance buffers and camera. Static geometry/materials
@@ -59,7 +59,7 @@ export function createReplayView({canvas,sourceScene,exclude=[],couriers,initial
   update(initial);
   return {scene,camera,controls,parade,get time(){return lastTime;},get frames(){return renderedFrames;},
     update,lock,free(){controls.enabled=true;dirty=true;},
-    render(){controls.update();parade.face(camera);if(dirty){ink.render(scene,camera);dirty=false;renderedFrames++;}},
+    render(){controls.update();parade.face(camera);effects.face(camera);if(dirty){ink.render(scene,camera);dirty=false;renderedFrames++;}},
     dispose(){controls.dispose();const geometries=new Set(),materials=new Set();dynamic.traverse(o=>{if(o.geometry)geometries.add(o.geometry);for(const m of Array.isArray(o.material)?o.material:o.material?[o.material]:[])materials.add(m);});for(const g of geometries)g.dispose();for(const m of materials)m.dispose();renderer.dispose();renderer.forceContextLoss();}
   };
 }
