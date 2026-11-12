@@ -320,3 +320,19 @@ body.parade-mode #btn-tour { display: none; }
 .fleet td .agent-event { position: absolute; border: 1.5px solid #141414; background: #fff; color: #141414; min-height: 0; height: 20px; padding: 0 3px; font-weight: 700; }
 .fleet td .agent-event::before { display: none; }
 .fleet td .agent-event.severity-2 { border-width: 3px; } .fleet td .agent-event.severity-3, .fleet td .agent-event.selected { background: #141414; color: #fff; }
+
+/* ---- Event Setup + Event Log cards (left column) ---- */
+.left > .eventsetup { border-radius: var(--radius); padding: 14px 18px 12px; flex-shrink: 0; display: grid; gap: 4px; }
+.eventsetup h2 { font-size: 18px; margin-bottom: 2px; }
+.eventsetup fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 2px; }
+.eventsetup legend { padding: 0; margin: 4px 0 2px; font-size: 12px; font-weight: 600; letter-spacing: .02em; } .eventsetup legend span { color: var(--muted); margin-right: 6px; }
+.setup-choice { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: center; padding: 5px 8px; border-radius: 12px; cursor: pointer; }
+.setup-choice:has(input:checked) { background: var(--fill); }
+.setup-choice input { accent-color: #141414; width: 15px; height: 15px; margin: 0; }
+.setup-choice b { display: block; font-size: 13px; font-weight: 600; line-height: 1.2; } .setup-choice small { display: block; font-size: 11px; line-height: 1.25; }
+#pending-actions { display: flex; gap: 6px; } #pending-actions button { flex: 1; min-height: 30px; font-size: 12px; padding: 2px 8px; }
+#config-note { margin: 2px 0 0; font-size: 11px; line-height: 15px; }
+.eventlogcard .incidenthead h2 { display: flex; justify-content: space-between; align-items: center; }
+.left .event { border: 1.5px solid #141414; border-left-width: 6px; min-height: 0; }
+.left .event.severity-2 { border-left-width: 6px; border-left-style: double; } .left .event.severity-1 { border-left-width: 3px; }
+.left .event strong { font-size: 12px; line-height: 1.3; } .left .event span { font-size: 12px; }

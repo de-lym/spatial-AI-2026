@@ -65,17 +65,20 @@ export function installParade({S, scene, world, planRoute, segCheck, camera, con
   reset.title = 'Restart with the active conditions (pending edits are kept)';
   // Status bar: same strip, parade measurements.
   $('statusbar').innerHTML = '<span>Time <b id="st-time">0 s</b></span><span>Fleet <b id="st-fleet">—</b></span><span>Delivered <b id="st-first">0 / 3</b></span><span>Method <b id="st-method">—</b></span><span>Encounters <b id="st-alerts">0</b></span><span>Simulation <b id="st-sim">READY</b></span><span id="st-stage"><b id="map-sub">—</b></span>';
-  // Left cards: Operations card now sets the experiment conditions (same switch and stepper controls).
-  $('intake-label').textContent = 'Event conditions'; $('allocation-label').textContent = 'Method';
-  const eventsSwitch = fresh('intake-toggle'), minus = fresh('fleet-minus'), plus = fresh('fleet-plus');
-  eventsSwitch.title = 'Switch the selected events on / off (off = normal parade)'; minus.setAttribute('aria-label', 'Previous coordination method'); plus.setAttribute('aria-label', 'Next coordination method');
-  minus.title = 'Previous method'; plus.title = 'Next method';
-  $('fleet-target').setAttribute('aria-label', 'Coordination method');
-  // Incident Queue → encounter log (severity tabs).
-  document.querySelector('.incidenthead small').textContent = 'Encounters across all drones · newest first.';
-  const tabButtons = [['tab-critical', 'urgent', 'Urgent', 'cnt-critical'], ['tab-battery', 'conflict', 'Conflict', 'cnt-battery'], ['tab-updates', 'notice', 'Notice', 'cnt-updates']];
-  for (const [id, key, label, cnt] of tabButtons) { const b = fresh(id); b.dataset.category = key; b.innerHTML = `${label} <span class="count" id="${cnt}">0</span>`; }
-  $('new-events').hidden = true; $('events').innerHTML = '';
+  // Left column: the two top cards become Event Setup (method + events) and Event Log; the separate Incident Queue card is folded into the log.
+  const left = document.querySelector('.left'), cards = [...left.children];
+  const setupCard = cards[0], logCard = cards[1], oldQueue = cards[2];
+  oldQueue.remove();
+  setupCard.className = 'eventsetup'; setupCard.setAttribute('aria-label', 'Event setup');
+  setupCard.innerHTML = `<h2>Event Setup</h2>
+    <fieldset><legend><span>01</span> Coordination Method</legend>${Object.entries(METHODS).map(([id, n]) => `<label class="setup-choice"><input type="radio" name="method" value="${id}"><span><b>Method ${id}</b><small>${n}</small></span></label>`).join('')}</fieldset>
+    <fieldset><legend><span>02</span> Event Conditions</legend>${EVENT_IDS.map(id => `<label class="setup-choice"><input type="checkbox" data-event="${id}"><span><b>${EVENT_SCHEDULE[id].name}</b><small>${EVENT_SCHEDULE[id].start}–${EVENT_SCHEDULE[id].end} s · deterministic</small></span></label>`).join('')}</fieldset>
+    <p class="small" id="config-note" role="status"></p>
+    <div id="pending-actions" hidden><button id="cfg-apply" disabled>Apply &amp; Restart</button><button id="cfg-discard">Discard</button></div>`;
+  logCard.className = 'incidents eventlogcard'; logCard.setAttribute('aria-label', 'Event log');
+  logCard.innerHTML = `<div class="incidenthead"><h2>Event Log <span class="count" id="event-log-count">0</span></h2><small>Important encounters, newest first. Click one to replay it.</small></div><div class="eventlist" id="events" role="list" tabindex="0"></div>`;
+  // Top bar: Start / speed / Reset stay; the status strip and Advanced drawer button are removed.
+  $('statusbar').hidden = true; $('btn-advanced').hidden = true; document.body.style.setProperty('--top', '88px');
   // Fleet Monitoring: same table; the last column becomes the shared 0–150 s event axis.
   document.querySelector('#fleet-table thead th:last-child').textContent = 'Events · 0–150 s';
   $('fleet-count').textContent = '4 drones'; document.querySelector('.fleethead > small').textContent = 'Select a drone to inspect; encounters sit on its time axis.';
@@ -94,14 +97,7 @@ export function installParade({S, scene, world, planRoute, segCheck, camera, con
   $('legend').innerHTML = '<section><b>Encounters</b><div><i style="background:#fff;border:1.5px solid #141414;border-radius:50%"></i>○ Notice</div><div><i style="background:#fff;border:3px solid #141414;border-radius:50%"></i>! Conflict</div><div><i style="background:#141414;border-radius:50%"></i>!! Urgent</div></section><section><b>Scene</b><div><i style="background:#f6f4f0;border:1.5px solid #141414"></i>Parade balloon</div><div><i style="background:#1b1b1d"></i>Crowd / marchers</div><div><i style="border:1.5px dashed #141414"></i>Crowd zone (&lt; 22.5 m)</div><div><i style="border:1.5px solid #141414;border-radius:50%"></i>Rooftop pad</div></section>';
   // Advanced drawer: setup, results, decision trace, model info — same section styling.
   document.querySelector('#advanced .advbody').innerHTML = `
-    <p class="small">Conditions, results, decision trace and model notes for the parade experiment. The original delivery simulator is available at <code>?mode=legacy</code>.</p>
-    <details open class="sec"><summary>Experiment setup <small id="setup-note"></small></summary>
-      <div class="group"><span class="gtitle">Coordination method</span>${Object.entries(METHODS).map(([id, n]) => `<label class="auto"><input type="radio" name="method" value="${id}"> Method ${id} · ${n}</label>`).join('')}</div>
-      <div class="group"><span class="gtitle">Event conditions</span>${EVENT_IDS.map(id => `<label class="auto"><input type="checkbox" data-event="${id}"> ${EVENT_SCHEDULE[id].name} <small>${EVENT_SCHEDULE[id].start}–${EVENT_SCHEDULE[id].end} s</small></label>`).join('')}</div>
-      <p class="small" id="config-note" role="status"></p>
-      <div id="pending-actions" hidden><button id="cfg-apply" disabled>Apply &amp; Restart</button> <button id="cfg-discard">Discard pending edits</button></div>
-      <p class="small">No events = normal parade. Before the first tick edits apply immediately; after that they are staged until Apply &amp; Restart. Schedules never depend on method or drone state.</p>
-    </details>
+    <p class="small">Results, decision trace and model notes for the parade experiment. The original delivery simulator is available at <code>?mode=legacy</code>.</p>
     <details class="sec"><summary>Results <small id="results-state"></small></summary><dl id="metrics"></dl><button id="export-json">Export JSON</button><p class="small" id="export-status" role="status"></p></details>
     <details class="sec"><summary>Decision trace <small>latest 100 · export has all</small></summary><label class="auto">Agent <select id="trace-filter"><option value="all">All agents</option>${engine.state.agents.map(a => `<option>${a.id}</option>`).join('')}</select></label><div id="trace-log"></div></details>
     <details class="sec"><summary>Model info</summary><div class="info small">
@@ -114,16 +110,14 @@ export function installParade({S, scene, world, planRoute, segCheck, camera, con
   // ============================================================== behaviour ==============================================================
   const obs = installObservability({engine, S, map, camera, controls, scene, refresh: () => renderUI(), closePanels: () => { selected = null; S.selected = null; inspectorEl.hidden = true; draw(); },
     excludeReplay: [group, routeLayer, selRing, ...S.couriers.flatMap(c => [c.mesh, c.halo, c.blockMesh, c.label])].filter(Boolean), logHost: $('events'), fleetRoot: $('fleet-body')});
-  function setTab(key) { for (const [id, k] of tabButtons) { const b = $(id); b.setAttribute('aria-selected', String(k === key)); b.setAttribute('aria-controls', 'events'); } obs.setTab(key); }
-  for (const [id, key] of tabButtons) $(id).addEventListener('click', () => setTab(key));
-  setTab('urgent');
+  obs.setTab('all');
 
   function doReset(config = {method: engine.config.method, events: engine.config.events}) {
     obs.reset(); engine.reset(config); mirroredTick = -1; S.time = 0; S.running = false; accumulator = 0; selectedLandmark = null; mirror(); renderUI(); draw();
   }
   function syncControls() {
-    document.querySelectorAll('#advanced input[name=method]').forEach(i => { i.checked = +i.value === pendingConfig.method; });
-    document.querySelectorAll('#advanced input[data-event]').forEach(i => { i.checked = pendingConfig.events.includes(i.dataset.event); });
+    document.querySelectorAll('.eventsetup input[name=method]').forEach(i => { i.checked = +i.value === pendingConfig.method; });
+    document.querySelectorAll('.eventsetup input[data-event]').forEach(i => { i.checked = pendingConfig.events.includes(i.dataset.event); });
   }
   function setPending(next) {
     pendingConfig = {method: next.method, events: EVENT_IDS.filter(id => next.events.includes(id))};
@@ -131,12 +125,9 @@ export function installParade({S, scene, world, planRoute, segCheck, camera, con
     syncControls();
     if (engine.state.tick === 0) doReset(pendingConfig); else renderUI();
   }
-  document.querySelectorAll('#advanced input[name=method], #advanced input[data-event]').forEach(i => i.addEventListener('change', () => setPending({
-    method: +document.querySelector('#advanced input[name=method]:checked').value,
-    events: [...document.querySelectorAll('#advanced input[data-event]')].filter(x => x.checked).map(x => x.dataset.event)})));
-  eventsSwitch.addEventListener('click', () => setPending({method: pendingConfig.method, events: pendingConfig.events.length ? [] : lastEvents}));
-  minus.addEventListener('click', () => setPending({method: ((pendingConfig.method + 1) % 3) + 1, events: pendingConfig.events}));
-  plus.addEventListener('click', () => setPending({method: (pendingConfig.method % 3) + 1, events: pendingConfig.events}));
+  document.querySelectorAll('input[name=method], .eventsetup input[data-event]').forEach(i => i.addEventListener('change', () => setPending({
+    method: +document.querySelector('input[name=method]:checked').value,
+    events: [...document.querySelectorAll('.eventsetup input[data-event]')].filter(x => x.checked).map(x => x.dataset.event)})));
   $('cfg-apply').addEventListener('click', () => doReset(pendingConfig));
   $('cfg-discard').addEventListener('click', () => { pendingConfig = {method: engine.config.method, events: [...engine.config.events]}; syncControls(); renderUI(); });
   play.addEventListener('click', () => { if (engine.state.finished) return; S.running = !S.running; renderUI(); });
@@ -240,13 +231,7 @@ export function installParade({S, scene, world, planRoute, segCheck, camera, con
     $('st-method').textContent = `${engine.config.method} · ${METHODS[engine.config.method]}`; $('st-alerts').textContent = String(obs.incidents.length);
     $('st-sim').textContent = s.finished ? 'COMPLETE' : S.running ? 'RUNNING' : s.tick ? 'PAUSED' : 'READY';
     $('map-sub').textContent = active.length ? active.join(' + ') : next ? `${next.name} · ${next.start} s` : 'Normal parade'; $('map-sub').title = 'Environment schedule (viewer). Agent detections appear in the decision trace.';
-    // In Progress
-    $('ip-flight').textContent = `${flying} active`; $('ip-hub').textContent = `${s.agents.filter(x => x.done || !x.route.length).length} at pad`;
-    // Operations card
-    $('intake-toggle').setAttribute('aria-checked', String(pendingConfig.events.length > 0)); $('intake-state').textContent = pendingConfig.events.length ? 'On' : 'Off';
-    $('fleet-target').textContent = `${pendingConfig.method} / 3`; $('fleet-target').title = METHODS[pendingConfig.method];
-    const note = `Active: Method ${engine.config.method} · ${engine.config.events.map(id => EVENT_SCHEDULE[id].name).join(' + ') || 'baseline'}.${dirty ? ' Pending edits — Apply & Restart in Advanced.' : ''}`;
-    $('ops-feedback').textContent = note; $('emergency-target').textContent = a ? a.id : 'Select a drone';
+    const note = `Active: Method ${engine.config.method} · ${engine.config.events.map(id => EVENT_SCHEDULE[id].name).join(' + ') || 'baseline'}.`;
     // play button
     play.textContent = s.finished ? 'Complete' : S.running ? 'Pause' : s.tick ? 'Resume' : 'Start'; play.disabled = s.finished; play.setAttribute('aria-pressed', String(S.running));
     // Advanced setup
