@@ -13,7 +13,7 @@ import { installInspection } from './inspection-integration.js';
 import { waypointSpeed } from './inspection.js';
 import { installDroneView } from './drone-view.js?v=3';
 import { createInkPass } from './ink.js?v=1';
-import { buildStreetscape } from './streetscape.js?v=4';
+import { buildStreetscape } from './streetscape.js?v=5';
 import { installTutorial } from './tutorial.js?v=3';
 
 /* ====================================================================
@@ -258,7 +258,7 @@ world.ewStreets = ROADS.map((z, i) => ({ name: EW_NAMES[i], z }));
 world.nsStreets = ROADS.map((x, i) => ({ name: NS_NAMES[i], x }));
 
 // ---- terrain: roads, lane marks, parcels -------------------------------
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshStandardMaterial({ color: 0xe2dfdb, roughness: 1 }));
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshStandardMaterial({ color: 0xf8f6f3, roughness: 1 }));
 ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
 scene.add(ground);
 {
@@ -267,7 +267,7 @@ scene.add(ground);
     if (ROADS.some((q) => Math.abs(t - q) < 3.4)) continue;
     marks.push([t, r, 0], [r, t, 1]);
   }
-  const im = new THREE.InstancedMesh(new THREE.BoxGeometry(1.7, 0.02, 0.2), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 }), marks.length);
+  const im = new THREE.InstancedMesh(new THREE.BoxGeometry(1.7, 0.02, 0.1), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 }), marks.length);
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion();
   marks.forEach(([a, b, vert], i) => {
     q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), vert ? Math.PI / 2 : 0);
@@ -276,7 +276,7 @@ scene.add(ground);
   });
   im.receiveShadow = true; scene.add(im);
   // black outline under every lane dash: solid white mark with an ink border
-  const ol = new THREE.InstancedMesh(new THREE.BoxGeometry(1.84, 0.02, 0.34), new THREE.MeshBasicMaterial({ color: 0x141414 }), marks.length);
+  const ol = new THREE.InstancedMesh(new THREE.BoxGeometry(1.78, 0.02, 0.19), new THREE.MeshBasicMaterial({ color: 0x141414 }), marks.length);
   marks.forEach(([a, b, vert], i) => { q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), vert ? Math.PI / 2 : 0); ol.setMatrixAt(i, m4.compose(new THREE.Vector3(a, 0.014, b), q, new THREE.Vector3(1, 1, 1))); });
   scene.add(ol);
 }

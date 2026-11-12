@@ -111,8 +111,8 @@ export function buildStreetscape({ scene, camera, world, buildingGroups, ROADS, 
       for (let i = -3; i <= 3; i++) {
         const off = i * 0.56;
         // arm along x (ax≠0): carriageway runs along x, stripes along x spread in z
-        if (ax) { bx(M.ink, cx, 0.009, rz + off, 1.82, 0.02, 0.44); bx(M.white, cx, 0.012, rz + off, 1.7, 0.022, 0.32); }
-        else { bx(M.ink, rx + off, 0.009, cz, 0.44, 0.02, 1.82); bx(M.white, rx + off, 0.012, cz, 0.32, 0.022, 1.7); }
+        if (ax) { bx(M.ink, cx, 0.009, rz + off, 1.78, 0.02, 0.23); bx(M.white, cx, 0.012, rz + off, 1.7, 0.022, 0.15); }
+        else { bx(M.ink, rx + off, 0.009, cz, 0.23, 0.02, 1.78); bx(M.white, rx + off, 0.012, cz, 0.15, 0.022, 1.7); }
       }
       crossings.push({ x: cx, z: cz, ax, az });
     }
@@ -287,7 +287,7 @@ export function buildStreetscape({ scene, camera, world, buildingGroups, ROADS, 
   B.build(root); glassB.build(root, false);
 
   // ---------- street life ---------------------------------------------------------------------------
-  const H = 1.1;                                                // person height in world units (1 unit ≈ 2 m)
+  const H = 1.75;                                                // person height in world units (1 unit ≈ 2 m)
   const geo = { leg: new THREE.CylinderGeometry(0.05, 0.04, 0.44, 6), torso: new THREE.CylinderGeometry(0.11, 0.09, 0.4, 8), arm: new THREE.CylinderGeometry(0.035, 0.03, 0.34, 5), head: new THREE.SphereGeometry(0.085, 10, 8), hair: new THREE.SphereGeometry(0.092, 10, 8, 0, TAU, 0, Math.PI * 0.62), skirt: new THREE.CylinderGeometry(0.1, 0.17, 0.26, 10), bag: new THREE.BoxGeometry(0.1, 0.13, 0.05) };
   const cloth = [M.ink, M.white, M.mid, M.dark, M.light, std(0xffffff, { map: dotTex('#f4f3f0', '#1b1b1d') }), std(0xffffff, { map: dotTex('#2b2b2d', '#f4f3f0') }), std(0xffffff, { map: awningTex() })];
   const pick = (a) => a[Math.floor(R() * a.length)];
