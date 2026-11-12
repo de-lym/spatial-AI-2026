@@ -13,7 +13,7 @@ import { installInspection } from './inspection-integration.js';
 import { waypointSpeed } from './inspection.js';
 import { installDroneView } from './drone-view.js?v=3';
 import { createInkPass } from './ink.js?v=12';
-import { buildStreetscape } from './streetscape.js?v=22';
+import { buildStreetscape } from './streetscape.js?v=23';
 import { installTutorial } from './tutorial.js?v=3';
 
 /* ====================================================================
@@ -455,10 +455,15 @@ function buildFiller(x, z) {
     registerBuilding(g, 'Stepped building', 'stack');
     setLU(x, z, LU, `Residential block ${BLOCK_ID(x / 16, z / 16)}`);
   } else if (kind === 'park') {
-    const lawn = flat(shade(new THREE.Mesh(new THREE.CylinderGeometry(5.3, 5.3, 0.14, 48), mat(0xb6c9a8))));
+    const lawn = flat(shade(new THREE.Mesh(new THREE.CylinderGeometry(5.9, 5.9, 0.14, 48), mat(0xb6c9a8))));
     lawn.position.y = 0.07; g.add(lawn);
-    const n = 5 + Math.floor(srand() * 3);
-    for (let i = 0; i < n; i++) { const a = i * 2.4 + srand(), r = 1 + srand() * 3.2; tree(g, Math.cos(a) * r, Math.sin(a) * r, 0.14, 0.8 + srand() * 0.5); }
+    // forest: dense scatter of mixed trees across the whole lot (rows back-to-front look natural in the isometric view)
+    const pts = [];
+    for (let tries = 0; tries < 400 && pts.length < 46; tries++) {
+      const x = (srand() - 0.5) * 11, z = (srand() - 0.5) * 11;
+      if (pts.every(([px, pz]) => Math.hypot(px - x, pz - z) > 1.25)) pts.push([x, z]);
+    }
+    for (const [x, z] of pts) tree(g, x, z, 0.14, 0.75 + srand() * 0.65);
     const pn = PARKS[parkN++ % PARKS.length]; addLandmark(pn); setLU(x, z, LU, pn);
   } else if (kind === 'pond') {
     const lawn = flat(shade(new THREE.Mesh(new THREE.CylinderGeometry(5.6, 5.6, 0.1, 48), mat(0xb6c9a8)))); lawn.position.y = 0.05; g.add(lawn);
