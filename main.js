@@ -317,15 +317,17 @@ const tileOf = (x, z) => world.tiles[(Math.round(x / 16) + 3) * 7 + Math.round(z
 function setLU(x, z, lu, name, extra = {}) { const t = tileOf(x, z); Object.assign(t, { landUse: lu, name, risk: LAND[lu].risk }, extra); return t; }
 
 /** footprint + height of every solid mesh of a building becomes a 3D obstacle volume */
+let buildingFiller = false;           // true while a filler parcel is being built, so a city preset can later remove exactly those buildings
 const buildingGroups = [];
 function registerBuilding(g, label, typo) {
-  buildingGroups.push({ g, typo });
+  buildingGroups.push({ g, typo, filler: buildingFiller });
   g.updateWorldMatrix(true, true);
   const b = new THREE.Box3(); let any = false;
   g.traverse((o) => { if (o.isMesh && o.userData.solid) { b.expandByObject(o); any = true; } });
   if (!any) return null;
   const id = 'B-' + String(world.obstacles.length + 1).padStart(3, '0');
   const o = { id, name: label, typo, x0: b.min.x, x1: b.max.x, z0: b.min.z, z1: b.max.z, h: b.max.y - SLAB };
+  if (buildingFiller) o.filler = true;
   world.obstacles.push(o);
   return o;
 }
@@ -423,14 +425,19 @@ const PARKS = ['Linden Park', 'Maple Green', 'Cedar Court', 'Birch Green', 'Aspe
 const FIXED = { '0,-16': 'tb1', '16,0': 'civic', '-16,0': 'care' }; // deterministic lots: the 95 m tower and the two Sensitive Facilities
 let parkN = 0, pondN = 0;
 const greenAt = new Set();
-function buildFiller(x, z) {
+function buildFiller(x, z, preset = null) {
   const g = new THREE.Group(); g.position.set(x, SLAB, z); g.userData.fillerParcel = key(x,z); scene.add(g);
   // dense (taller) lots are scattered through the whole city by a fixed pattern, not clustered in one district
-  const mid = ((Math.round(x / 16) + 3) * 5 + (Math.round(z / 16) + 3) * 3) % 7 < 3;
+  let mid = ((Math.round(x / 16) + 3) * 5 + (Math.round(z / 16) + 3) * 3) % 7 < 3;
+  if (preset === 'high') mid = true; else if (preset === 'low') mid = false; else if (preset === 'mixed') mid = (Math.round(x / 16) + Math.round(z / 16)) % 2 === 0;   // mixed: tall and low lots interleave like a chessboard
   let kind = FIXED[key(x, z)];
+  if (kind === 'tb1' && preset === 'low') kind = 'house';
   if (!kind) {
     const t = srand();
-    kind = mid ? (t < 0.5 ? 'tower' : t < 0.68 ? 'block' : t < 0.8 ? 'stack' : t < 0.9 ? 'park' : t < 0.95 ? 'pond' : 'dome')
+    if (preset === 'high') kind = t < 0.52 ? 'tower' : t < 0.68 ? 'block' : t < 0.77 ? 'stack' : t < 0.87 ? 'park' : t < 0.91 ? 'pond' : 'dome';
+    else if (preset === 'low') kind = t < 0.5 ? 'house' : t < 0.66 ? 'stack' : t < 0.77 ? 'park' : t < 0.83 ? 'pond' : t < 0.89 ? 'tank' : t < 0.94 ? 'dome' : 'block';
+    else if (preset === 'mixed') kind = mid ? (t < 0.62 ? 'tower' : t < 0.82 ? 'block' : t < 0.92 ? 'stack' : 'dome') : (t < 0.58 ? 'house' : t < 0.78 ? 'stack' : t < 0.88 ? 'park' : t < 0.93 ? 'pond' : 'tank');
+    else kind = mid ? (t < 0.5 ? 'tower' : t < 0.68 ? 'block' : t < 0.8 ? 'stack' : t < 0.9 ? 'park' : t < 0.95 ? 'pond' : 'dome')
       : (t < 0.14 ? 'tower' : t < 0.28 ? 'block' : t < 0.5 ? 'house' : t < 0.62 ? 'stack' : t < 0.78 ? 'park' : t < 0.88 ? 'pond' : t < 0.95 ? 'tank' : 'dome');
   }
   // green blocks (forest / pond) are never edge-adjacent (diagonal is allowed) to another green block: swap in a built lot instead
@@ -439,7 +446,7 @@ function buildFiller(x, z) {
     if (touching) kind = mid ? 'block' : 'house';
     else greenAt.add(key(x, z));
   }
-  const addLandmark = (name) => world.landmarks.push({ name, x, z });
+  const addLandmark = (name) => world.landmarks.push({ name, x, z, filler: true });
   const LU = { tb1: 'cbd', tower: 'cbd', block: 'cbd', house: 'housing', stack: 'housing', park: 'park', pond: 'park', tank: 'logistics', dome: 'logistics', civic: 'sensitive', care: 'sensitive' }[kind];
   if (kind === 'tb1') { // the guaranteed tall obstacle used by the test scenario (95 m)
     ledged(g, 5.2, 19, 6.4, 0, 2.4, TYPO.tower);
@@ -548,7 +555,7 @@ addCustomer('C7', -48, 32, CLR.cream, CLR.forest);
 addCustomer('C8', 48, 48, CLR.wood, CLR.teal);
 addCustomer('C9', 48, -32, CLR.white, CLR.denim);
 addCustomer('C10', -16, -48, CLR.wood, CLR.sage);
-for (const [x, z] of parcels) if (!takenAt.has(key(x, z))) buildFiller(x, z);
+for (const [x, z] of parcels) if (!takenAt.has(key(x, z))) { buildingFiller = true; buildFiller(x, z); buildingFiller = false; }
 buildPlacementArchitecture({scene, world, setLU, slab: SLAB});
 let street = { update() {} };
 try { street = buildStreetscape({ scene, camera, world, buildingGroups, ROADS, parcels, takenAt, slab: SLAB }); } catch (e) { console.error('Streetscape unavailable', e); }
@@ -2459,6 +2466,33 @@ const placement = installPlacements({S, cfg, world, ops, planRoute, segCheck, re
 const inspection = installInspection({S, cfg, world, ops, scene, planRoute, segCheck, scale: SCALE_M, toast, resetWorld, setStage, selectDrone, setAdvanced, camera, controls, updatePanels});
 controls.update(); controls.saveState();
 finishBlocks(); regenAirspace();
+/** Last 10m city generator: regenerates the filler lots of the city for a preset ('high' | 'low' | 'mixed') and a seed.
+ *  Stations, customers, the Dispatch Tower, the skybridge, the roads, the parade street and the crowd zone are never touched. */
+function rebuildCity({ preset = 'mixed', seed: sd = 11 } = {}) {
+  for (const c of [...scene.children]) if (c.userData.fillerParcel !== undefined) scene.remove(c);
+  world.obstacles = world.obstacles.filter((o) => !o.filler);
+  world.landmarks = world.landmarks.filter((l) => !l.filler);
+  buildingGroups.splice(0, buildingGroups.length, ...buildingGroups.filter((b) => !b.filler));
+  greenAt.clear(); parkN = 0; pondN = 0;
+  seed = ((Math.imul((sd >>> 0) + 1, 2654435761) >>> 0) % 2147483646) + 1;
+  const reserved = new Set(['-32,-32', '-16,-32']);             // the skybridge towers stand here
+  for (const [x, z] of parcels) {
+    if (takenAt.has(key(x, z)) || reserved.has(key(x, z))) continue;
+    const t = tileOf(x, z); Object.assign(t, { landUse: 'cbd', name: '', risk: LAND.cbd.risk, restrictedTopM: null, buildingM: 0 });
+    buildingFiller = true; buildFiller(x, z, preset); buildingFiller = false;
+  }
+  world.obstacles.forEach((o, i) => { o.id = 'B-' + String(i + 1).padStart(3, '0'); });
+  finishBlocks(); try { regenAirspace(); } catch (e) { /* airspace is not used by Last 10m */ }
+  if (street.root) scene.remove(street.root);
+  try { street = buildStreetscape({ scene, camera, world, buildingGroups, ROADS, parcels, takenAt, slab: SLAB }); } catch (e) { console.error('Streetscape unavailable', e); }
+  return world.obstacles.length;
+}
+/** obstacle list + land-use tiles in the form the node simulation reads (tests/fixtures/city-<preset>.json) */
+function exportCity() {
+  const r = (n) => +n.toFixed(2);
+  return { obstacles: world.obstacles.map((o) => ({ id: o.id, name: o.name, x0: r(o.x0), x1: r(o.x1), z0: r(o.z0), z1: r(o.z1), h: r(o.h) })),
+    tiles: world.tiles.map((t) => ({ id: t.id, cx: t.cx, cz: t.cz, landUse: t.landUse, name: t.name })) };
+}
 resetWorld(true);
 applyLayers();
 log('AIRSPACE ready — step through the four stages, or press Start flight. All geometry and parameters are synthetic.');
@@ -2485,4 +2519,4 @@ if (!parade) updatePanels(true);
 frame();
 if (tutorial) tutorial.maybeAutoStart();
 // exposed for debugging / automated checks
-window.__sim = { get parade() { return parade; }, ink, SLAB, street, BG, inspection, placement, proximity, sepEvade, sepPlan, posAfter, prioCmp, scene, LAND, regenAirspace, segCheck, inPermitted, volumesAt, S, act, step, world, cfg, planRoute, planMission, getLocation, getAgentsAt, getAgentsInBox, setStage, previews, selectVolume, resetWorld, ui, ops, selectDrone, clearDroneSelection, renderEvents, camera, renderer, controls };
+window.__sim = { get parade() { return parade; }, rebuildCity, exportCity, ink, SLAB, street, BG, inspection, placement, proximity, sepEvade, sepPlan, posAfter, prioCmp, scene, LAND, regenAirspace, segCheck, inPermitted, volumesAt, S, act, step, world, cfg, planRoute, planMission, getLocation, getAgentsAt, getAgentsInBox, setStage, previews, selectVolume, resetWorld, ui, ops, selectDrone, clearDroneSelection, renderEvents, camera, renderer, controls };
