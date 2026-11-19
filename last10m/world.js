@@ -45,7 +45,7 @@ export const EVENT_TYPES = Object.keys(TIER);
 
 // ------------------------------------------------------------------ constants (formerly board parameters)
 const V = 4, VZ = 1.6, LOWER = 0.28, REEL = 0.7;           // 20 m/s cruise, 1.4 m/s tether pay-out
-const HOVER_BUDGET = 75, TIME_CAP = 900, DEPART_GAP = 5, LAND_GAP = 5, HOLD_Y = 2.4, BAL_CORE = 5.0, BAL_HOLD = 7.5, MAX_TRIES = 2, BACKUP_DX = -3.2, PAD_DZ = 5.1;
+const HOVER_BUDGET = 75, TIME_CAP = 900, DEPART_GAP = 5, LAND_GAP = 5, HOLD_Y = 2.4, BAL_CORE = 5.8, BAL_HOLD = 8, MAX_TRIES = 2, BACKUP_DX = -3.2, PAD_DZ = 5.1;
 const PED_ZONE = 2.6, DOG_ZONE = 2.2, FRESH_S = 2, BATTERY_RESERVE = 20, N_DRONES = 9, GRID = 13;
 const HOVER_PHASES = new Set(['pickup', 'locate', 'confirm', 'descend', 'scan', 'verify', 'lower', 'wait', 'reel', 'shift', 'climb', 'release']);
 const FLIGHT = new Set(['enter', 'leave', 'return']);

@@ -181,7 +181,7 @@ runs again.
 
 ## 10. Decisions made while building v2
 
-* **Parade.** The balloon (a moving obstacle at 70 m) is avoided automatically: within 37 m a drone backs off and holds until
+* **Parade.** The balloon (a moving obstacle at 70 m) is avoided automatically: within 40 m a drone backs off and holds until
   the balloon has passed (logged as `PARADE`, not an operator event). The crowd reservation zones are not drawn.
 * **Orders count** was reinterpreted as an arrival rate (per 10 minutes) so that the model can run non-stop *and* the setting
   still changes the load; at the top of the range the nine drones are saturated and a queue builds up.
