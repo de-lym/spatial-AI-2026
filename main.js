@@ -14,7 +14,7 @@ import { waypointSpeed } from './inspection.js';
 import { installDroneView } from './drone-view.js?v=3';
 import { createInkPass } from './ink.js?v=17';
 import { installParade } from './parade-integration.js?v=18';
-import { buildStreetscape } from './streetscape.js?v=34';
+import { buildStreetscape } from './streetscape.js?v=35';
 import { installTutorial } from './tutorial.js?v=3';
 
 /* ====================================================================
@@ -173,14 +173,14 @@ function tree(parent, x, z, y = SLAB, s = 1) {
   else if (kind < 0.65) { stem(0.7); ball(0.8, 1.5, c); ball(0.5, 2.35, c2); }
   else if (kind < 0.85) { stem(0.8); ball(0.62, 1.4, c); }
   else { stem(0.4); const b = shade(new THREE.Mesh(ballGeo, mat(c))); b.scale.set(0.7, 1.9, 0.7); b.position.y = 1.5; g.add(b); }
-  g.position.set(x, y, z); g.scale.setScalar(s); parent.add(g);
+  g.userData.lowObs = 'tree'; g.position.set(x, y, z); g.scale.setScalar(s); parent.add(g);
 }
 /** conifer: a visible trunk (pillar) under a tall cone crown */
 function conifer(parent, x, z, y = SLAB, s = 1) {
   const g = new THREE.Group(), c = pick(TREE);
   const trunk = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.13, 0.9, 8), mat(0xc2863f))); trunk.position.y = 0.45; g.add(trunk);
   const crown = shade(new THREE.Mesh(new THREE.ConeGeometry(0.85, 2.3, 24), mat(c))); crown.position.y = 0.9 + 1.15; g.add(crown);
-  g.position.set(x, y, z); g.scale.setScalar(s); parent.add(g);
+  g.userData.lowObs = 'tree'; g.position.set(x, y, z); g.scale.setScalar(s); parent.add(g);
 }
 function prism(parent, w, h, d, color, x, y, z, ry = 0) { // pitched roof: triangle (w wide, h high) extruded along d
   const sh = new THREE.Shape(); sh.moveTo(-w / 2, 0); sh.lineTo(w / 2, 0); sh.lineTo(0, h); sh.closePath();
@@ -2492,9 +2492,22 @@ function rebuildCity({ preset = 'mixed', seed: sd = 11 } = {}) {
   return world.obstacles.length;
 }
 /** obstacle list + land-use tiles in the form the node simulation reads (tests/fixtures/city-<preset>.json) */
+/** low obstacles (trees, lamp posts, signals): not buildings, but a drone hovering at 7 m or a walker must not pass through them */
+function lowObstacles() {
+  const r = (n) => +n.toFixed(2), out = [], b = new THREE.Box3();
+  scene.updateMatrixWorld(true);
+  scene.traverse((o) => {
+    if (o.userData.lowObs !== 'tree' || !o.visible) return;
+    let p = o.parent; while (p) { if (p.visible === false) return; p = p.parent; }
+    b.setFromObject(o); if (b.isEmpty()) return;
+    out.push({ kind: 'tree', x: r((b.min.x + b.max.x) / 2), z: r((b.min.z + b.max.z) / 2), r: r(Math.max(b.max.x - b.min.x, b.max.z - b.min.z) / 2), h: r(b.max.y - SLAB) });
+  });
+  for (const q of street?.lowObstacles ?? []) out.push({ kind: q.kind, x: r(q.x), z: r(q.z), r: r(q.r), h: r(q.h) });
+  return out;
+}
 function exportCity() {
   const r = (n) => +n.toFixed(2);
-  return { obstacles: world.obstacles.map((o) => ({ id: o.id, name: o.name, x0: r(o.x0), x1: r(o.x1), z0: r(o.z0), z1: r(o.z1), h: r(o.h) })),
+  return { roads: ROADS, low: lowObstacles(), obstacles: world.obstacles.map((o) => ({ id: o.id, name: o.name, x0: r(o.x0), x1: r(o.x1), z0: r(o.z0), z1: r(o.z1), h: r(o.h) })),
     tiles: world.tiles.map((t) => ({ id: t.id, cx: t.cx, cz: t.cz, landUse: t.landUse, name: t.name })) };
 }
 resetWorld(true);

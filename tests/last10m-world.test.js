@@ -1,12 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { createWorld, DEFAULT_SETTINGS, TIER, WINDOW, EVENT_TYPES, BOARD } from '../last10m/world.js';
+import { createWorld, DEFAULT_SETTINGS, TIER, EVENT_TYPES, BOARD } from '../last10m/world.js';
 
 const city = (p) => JSON.parse(readFileSync(new URL(`./fixtures/city-${p}.json`, import.meta.url)));
 const CITY = { high: city('high'), low: city('low'), mixed: city('mixed') };
-const make = (over = {}, memory = {}) => { const p = over.preset ?? 'mixed'; return createWorld({ ...DEFAULT_SETTINGS, ...over }, { obstacles: CITY[p].obstacles, tiles: CITY[p].tiles, memory }); };
-const run = (over = {}, memory = {}, secs = 900) => { const w = make(over, memory); w.run(secs); return w; };
+const make = (over = {}, memory = {}) => { const p = over.preset ?? 'mixed'; return createWorld({ ...DEFAULT_SETTINGS, ...over }, { obstacles: CITY[p].obstacles, low: CITY[p].low, roads: CITY[p].roads, tiles: CITY[p].tiles, memory }); };
+// a simulated operator: answers every event that is on hold with its first (recommended) option after `delay` seconds
+const operate = (w, delay = 3) => { for (const e of w.onHold()) if (w.state.t - e.opened >= delay) w.resolve(e.id, (e.options.find((o) => o.primary) ?? e.options[0]).id); };
+const runOp = (w, secs, delay = 3) => { for (let t = 0; t < secs - 1e-9; t += 0.1) { w.step(0.1); operate(w, delay); } return w; };
+const run = (over = {}, memory = {}, secs = 900) => runOp(make(over, memory), secs);
 const count = (w, type) => w.state.events.filter((e) => e.type === type).length;
 
 test('one fixture per city preset; high-rise lots are taller than low-rise lots', () => {
@@ -38,13 +41,13 @@ test('the world never stops: drones keep circulating and orders keep being compl
   for (const preset of ['high', 'low', 'mixed']) {
     const w = make({ preset, orders: 24 }); let last = 0;
     for (let k = 1; k <= 5; k++) {
-      w.run(300);
+      runOp(w, 300);
       const done = w.state.completed; assert.ok(done - last >= 3, `${preset}: only ${done - last} orders completed in minute ${k * 5 - 5}–${k * 5}`); last = done;
       assert.equal(w.state.done, false);
       assert.ok(w.state.drones.some((d) => d.phase !== 'idle'), 'somebody is always working');
     }
   }
-  const quiet = make({ flocks: 0, pedestrians: 0, dogs: 0, gustPerMin: 0, replyPct: 100 }); quiet.run(1200);
+  const quiet = make({ flocks: 0, pedestrians: 0, dogs: 0, gustPerMin: 0, replyPct: 100 }); runOp(quiet, 1200);
   assert.equal(quiet.state.done, false); assert.ok(quiet.state.completed > 15);
 });
 
@@ -54,7 +57,7 @@ test('drones leave and land one at a time, from slots on the plaza land around t
   for (let a = 0; a < w.state.drones.length; a++) for (let b = a + 1; b < w.state.drones.length; b++) assert.ok(Math.hypot(w.state.drones[a].home.x - w.state.drones[b].home.x, w.state.drones[a].home.z - w.state.drones[b].home.z) >= 2.7, 'homes too close');
   const phase = new Map();
   for (let i = 0; i < 6000; i++) {
-    w.step(0.1);
+    w.step(0.1); operate(w);
     for (const d of w.state.drones) { const p = phase.get(d.id); if (p === 'idle' && d.phase !== 'idle') departures.push(w.state.t); if (p && p !== 'idle' && p !== 'land' && d.phase === 'land') landings.push(w.state.t); phase.set(d.id, d.phase); }
   }
   const gaps = (a) => a.slice(1).map((x, i) => x - a[i]);
@@ -62,7 +65,7 @@ test('drones leave and land one at a time, from slots on the plaza land around t
   assert.ok(Math.min(...gaps(departures)) >= 4.9 - 0.11, `two drones left within ${Math.min(...gaps(departures)).toFixed(1)} s`);
   // touch-downs are spaced by the landing lock
   const touch = []; const was = new Map(); const w2 = make({ orders: 24 });
-  for (let i = 0; i < 6000; i++) { w2.step(0.1); for (const d of w2.state.drones) { if (was.get(d.id) === 'land' && d.phase === 'idle') touch.push(w2.state.t); was.set(d.id, d.phase); } }
+  for (let i = 0; i < 6000; i++) { w2.step(0.1); operate(w2); for (const d of w2.state.drones) { if (was.get(d.id) === 'land' && d.phase === 'idle') touch.push(w2.state.t); was.set(d.id, d.phase); } }
   assert.ok(touch.length > 8 && Math.min(...gaps(touch.sort((a, b) => a - b))) >= 4);
 });
 
@@ -70,7 +73,7 @@ test('delivery model: a drone first collects the order at a shop (restaurant), t
   const w = make({ orders: 12 }); const shops = new Set(w.state.shops.map((s) => `${s.x},${s.z}`)); assert.ok(shops.size >= 3);
   let picked = 0, order = new Map();
   for (let i = 0; i < 5000; i++) {
-    w.step(0.1);
+    w.step(0.1); operate(w);
     for (const d of w.state.drones) {
       if (!d.order) continue;
       if (d.leg === 'toShop' && d.phase !== 'pickup') { assert.equal(d.carrying, false, 'carrying before the pick-up'); assert.ok(shops.has(`${d.target.x},${d.target.z}`), 'first leg does not go to a shop'); }
@@ -100,7 +103,6 @@ test('every event has the tier of its type; an urgent order raises it by one (3�
   for (const e of w.state.events) {
     assert.equal(e.base, TIER[e.type]);
     assert.equal(e.tier, e.urgent ? Math.max(1, e.base - 1) : e.base, `${e.type} urgent=${e.urgent}`);
-    const [lo, hi] = WINDOW[e.tier]; assert.ok(e.window >= lo - 1e-6 && e.window <= hi + 1e-6, `${e.type} window ${e.window}`);
     if (e.urgent && e.tier < e.base) bumped++;
   }
   assert.ok(bumped > 0, 'expected at least one urgent event that was bumped up a tier');
@@ -118,28 +120,37 @@ test('urgent orders are handed to drones first', () => {
   assert.ok(!(urgentLeft > 0 && normalTaken > 0), 'a normal order left the hub while an urgent one waited');
 });
 
-test('tier ① events: the drone takes the safe action first (automatically), then asks the human', () => {
-  const w = run({ pedestrians: 8, dogs: 5, gustPerMin: 4, urgentPct: 40 });
+test('tier ① events: the drone protects people by itself and carries on when it is safe — it never waits for the operator', () => {
+  const w = make({ pedestrians: 8, dogs: 5, gustPerMin: 4, urgentPct: 40 }); w.run(900);       // nobody at the console
   const t1 = w.state.events.filter((e) => e.tier === 1);
   assert.ok(t1.length >= 5, `tier 1 events: ${t1.length}`);
-  for (const e of t1) { assert.equal(e.autoSafe, true); assert.ok(e.safeAction && e.safeAction.length > 3, e.type); }
+  for (const e of t1) { assert.equal(e.autoSafe, true); assert.ok(e.safeAction && e.safeAction.length > 3, e.type); assert.notEqual(e.status, 'open', 'a critical event is never left waiting for a human'); }
+  assert.ok(t1.filter((e) => e.status === 'cleared').length >= 3, 'critical events close by themselves once the danger is gone');
   // nobody is ever closer than 2 m to the parcel / drone during a person or animal event
   for (const e of t1.filter((x) => x.type === 'ped' || x.type === 'dog')) assert.ok(e.closestM == null || e.closestM >= 2, `closest ${e.closestM} m`);
-  // when nobody answers, the fixed rule fires and counts as a missed decision (bigger penalty for tier 1)
-  const auto = w.state.events.filter((e) => e.resolvedBy === 'auto');
-  assert.ok(auto.length > 0 && auto.every((e) => e.missed));
-  const sc = w.scorecard(); assert.equal(sc.missed, auto.length); assert.ok(sc.missedByTier[1] >= 1);
+  assert.ok(!w.state.events.some((e) => e.resolvedBy === 'auto'), 'no decision is ever taken for the operator');
+});
+
+test('tier ② / ③ events stay on hold until the operator decides: nothing is decided for them, however long it takes', () => {
+  const w = make({ dogs: 8, replyPct: 0, urgentPct: 0 });
+  let ev = null; for (let i = 0; i < 9000 && !ev; i++) { w.step(0.1); ev = w.onHold()[0]; }
+  assert.ok(ev, 'no event went on hold');
+  const d = w.droneOf(ev.drone), order = d.order.id;
+  w.run(200);                                                                                      // well past any old countdown
+  assert.equal(ev.status, 'open'); assert.equal(ev.option, null); assert.equal(d.order?.id, order, 'the drone gave up on its own');
+  assert.ok(!['lower', 'release', 'return'].includes(d.phase), `drone went on to ${d.phase} without an answer`);
+  assert.ok(w.scorecard().longestWaitS >= 200 && w.scorecard().unanswered >= 1, 'waiting time is what the delay costs');
+  assert.equal(w.resolve(ev.id, 'return'), true); assert.equal(ev.resolvedBy, 'operator'); assert.ok(ev.reaction >= 200);
+  w.run(1); assert.equal(d.phase, 'return');
 });
 
 test('the safe action happens at the moment the tier ① event opens, before any operator input', () => {
   const w = make({ pedestrians: 10, gustPerMin: 5 });
   let seen = null;
-  for (let i = 0; i < 9000 && !seen; i++) { w.step(0.1); seen = w.state.events.find((e) => e.tier === 1 && e.status === 'open'); }
+  for (let i = 0; i < 9000 && !seen; i++) { w.step(0.1); seen = w.state.events.find((e) => e.tier === 1 && e.status === 'auto' && e.type !== 'conflict'); }
   assert.ok(seen);
   const d = w.droneOf(seen.drone);
-  assert.equal(seen.opened, w.state.t - 0 > seen.opened ? seen.opened : seen.opened);   // opened this very tick or earlier
-  assert.ok(d.held || ['reel', 'wait', 'climb', 'reelup'].includes(d.phase) || seen.safeAction, 'drone is not in a safe state');
-  assert.equal(d.level, 'H');
+  assert.ok(d.held || ['reel', 'wait', 'climb', 'reelup'].includes(d.phase), `drone is not in a safe state (${d.phase})`);
 });
 
 test('conflict rule: the urgent order goes first, on equal priority the lower drone ID goes first; the other yields', () => {
@@ -157,26 +168,27 @@ test('conflict rule: the urgent order goes first, on equal priority the lower dr
   assert.ok(n >= 5, `conflicts seen: ${n}`);
 });
 
-test('operator override: "swap" makes the other drone yield; answering in time is not a missed decision', () => {
+test('conflicts apply the priority rule at once; the operator can override with "swap" and the other drone yields', () => {
   const w = make({ orders: 40 });
   let ev = null;
-  for (let i = 0; i < 9000 && !ev; i++) { w.step(0.1); ev = w.queue().find((e) => e.type === 'conflict'); }
+  for (let i = 0; i < 9000 && !ev; i++) { w.step(0.1); ev = w.queue().find((e) => e.type === 'conflict' && !e.urgent); }
   assert.ok(ev, 'no conflict event');
   const y = w.droneOf(ev.drone), g = w.droneOf(ev.with);
+  assert.equal(ev.status, 'auto'); assert.equal(y.yieldFor, g.id, 'the rule was not applied automatically');
   assert.equal(w.resolve(ev.id, 'swap'), true);
-  assert.equal(ev.resolvedBy, 'operator'); assert.equal(ev.missed, false); assert.ok(ev.reaction >= 0);
+  assert.equal(ev.resolvedBy, 'operator'); assert.ok(ev.reaction >= 0); assert.equal(y.yieldFor, null);
   assert.equal(g.yieldFor, y.id);
   assert.ok(g.held);
   assert.equal(w.resolve(ev.id, 'rule'), false, 'an event can only be resolved once');
 });
 
-test('"To resolve" queue is sorted by tier, then by time left', () => {
+test('"To resolve" queue is sorted by tier, then longest waiting first', () => {
   const w = make({ pedestrians: 8, dogs: 6, gustPerMin: 5, urgentPct: 30 });
   let multi = 0;
   for (let i = 0; i < 9000; i++) {
-    w.step(0.1); const q = w.queue();
+    w.step(0.1); if (i % 20 === 0) operate(w, 8); const q = w.queue();
     if (q.length >= 2) multi++;
-    for (let k = 1; k < q.length; k++) assert.ok(q[k - 1].tier < q[k].tier || (q[k - 1].tier === q[k].tier && q[k - 1].deadline <= q[k].deadline + 1e-9));
+    for (let k = 1; k < q.length; k++) { const a = q[k - 1], b = q[k]; assert.ok(a.tier < b.tier || (a.tier === b.tier && (a.status === 'auto') >= (b.status === 'auto') && (a.status !== b.status || a.opened <= b.opened + 1e-9))); }
   }
   assert.ok(multi > 20, 'events should overlap so the operator has to triage');
 });
@@ -216,17 +228,18 @@ test('Retained memory speeds up repeat deliveries; Fresh forgets', () => {
   assert.ok(Math.abs(f - one) < 0.5, 'a fresh run behaves like a first run');
 });
 
-test('scorecard: reaction by tier, missed decisions, outcome shares, redeliveries, closest approach, load', () => {
-  const w = make({ orders: 30 });
-  for (let i = 0; i < 9000; i++) { w.step(0.1); const q = w.queue()[0]; if (q && w.state.t - q.opened > 1.2) w.resolve(q.id, q.options[0].id); }   // a (fairly quick) operator
+test('scorecard: waiting time by tier, fleet time on hold, outcome shares, redeliveries, closest approach, load', () => {
+  const w = runOp(make({ orders: 30 }), 900, 1.2);                                             // a quick operator
   const sc = w.scorecard();
-  for (const k of ['reaction', 'missed', 'missedByTier', 'delivered', 'deliveredAlt', 'aborted', 'redelivered', 'closestTier1M', 'eventsPerMin', 'peakQueue']) assert.ok(k in sc, k);
+  for (const k of ['wait', 'longestWaitS', 'holdSharePct', 'unanswered', 'autoHandled', 'delivered', 'deliveredAlt', 'aborted', 'redelivered', 'closestTier1M', 'eventsPerMin', 'peakQueue']) assert.ok(k in sc, k);
   assert.ok(Math.abs(sc.delivered + sc.deliveredAlt + sc.aborted - 100) <= 2);
   assert.ok(sc.eventsPerMin > 0 && sc.peakQueue >= 1);
-  assert.ok(Object.values(sc.reaction).some((x) => x != null), 'an attentive operator should have reaction times');
-  const idle = run({ orders: 30 }).scorecard();
-  assert.ok(sc.missed < idle.missed, `attentive ${sc.missed} vs idle ${idle.missed}`);
-  assert.ok(sc.score > idle.score);
+  assert.ok(sc.wait[2] != null || sc.wait[3] != null);
+  const slow = runOp(make({ orders: 30 }), 900, 25).scorecard(), idle = make({ orders: 30 }); idle.run(900);
+  const ic = idle.scorecard();
+  assert.ok(sc.holdSharePct < slow.holdSharePct && slow.holdSharePct < ic.holdSharePct, `${sc.holdSharePct} < ${slow.holdSharePct} < ${ic.holdSharePct}`);
+  assert.ok(sc.score > slow.score && slow.score > ic.score, `${sc.score} > ${slow.score} > ${ic.score}`);
+  assert.ok(w.state.completed > idle.state.completed * 2, 'an idle console stalls the fleet');
 });
 
 test('the board only exposes the v2 controls', () => {
@@ -253,4 +266,36 @@ test('drones follow planned polylines: a leg is up, over, down — never a diago
   const w = make({ orders: 12 }); let maxLow = 0;
   for (let i = 0; i < 4000; i++) { w.step(0.1); for (const d of w.state.drones) if (d.phase === 'enter' && d.y - 0.4 < 3) maxLow = Math.max(maxLow, Math.hypot(d.x - d.home.x, d.z - d.home.z)); }
   assert.ok(maxLow < 3, `a departing drone travelled ${maxLow.toFixed(1)} u horizontally below 15 m`);
+});
+
+test('drones never pass through a tree, lamp post or signal (low obstacles), and every drop / backup spot is clear of them', () => {
+  for (const preset of ['high', 'low', 'mixed']) {
+    const low = CITY[preset].low; assert.ok(low.length > 100, 'trees and lamps are exported with the city');
+    const w = make({ preset, orders: 40, pedestrians: 8, dogs: 6 }); let steps = 0;
+    for (const a of w.state.addresses) for (const p of [a, a.backup].filter(Boolean)) assert.ok(!low.some((t) => Math.hypot(t.x - p.x, t.z - p.z) < t.r + 0.75), `${preset}: spot at ${p.x},${p.z} under a tree`);
+    for (let i = 0; i < 9000; i++) {
+      w.step(0.1); operate(w, 2);
+      for (const d of w.state.drones) {
+        if (d.phase === 'idle' || (d.phase === 'land' && d.y - 0.4 < 0.3)) continue; steps++;
+        for (const t of low) assert.ok(!(Math.hypot(t.x - d.x, t.z - d.z) < t.r + 0.35 && d.y - 0.4 < t.h), `${preset}: ${d.id} in a ${t.kind} at t=${w.state.t.toFixed(1)} (${d.phase})`);
+      }
+    }
+    assert.ok(steps > 2000);
+  }
+});
+
+test('people and dogs never walk through buildings: walkers keep to the street lanes and only step into a front yard to reach a pad', () => {
+  for (const preset of ['high', 'low', 'mixed']) {
+    const obs = CITY[preset].obstacles, roads = CITY[preset].roads;
+    const w = make({ preset, pedestrians: 12, dogs: 8 }); let moved = 0;
+    const onLane = (p) => roads.some((r) => Math.abs(Math.abs(p.x - r) - 1.7) < 0.05 || Math.abs(Math.abs(p.z - r) - 1.7) < 0.05);
+    const inYard = (p) => w.state.addresses.some((a) => Math.abs(p.x - a.x) < 0.05 && p.z >= a.z - 0.05 && p.z <= a.z + 3.6);
+    const last = new Map();
+    for (let i = 0; i < 6000; i++) {
+      w.step(0.1); operate(w, 2);
+      for (const a of [...w.state.agents.peds, ...w.state.agents.dogs]) assert.ok(!obs.some((o) => a.x > o.x0 && a.x < o.x1 && a.z > o.z0 && a.z < o.z1), `${preset}: ${a.id} inside a building at ${a.x.toFixed(1)},${a.z.toFixed(1)}`);
+      for (const p of w.state.agents.peds) { const q = last.get(p.id); if (q && Math.hypot(q.x - p.x, q.z - p.z) > 1e-3) { moved++; assert.ok(onLane(p) || inYard(p), `${preset}: ${p.id} off the street at ${p.x.toFixed(2)},${p.z.toFixed(2)}`); } last.set(p.id, { x: p.x, z: p.z }); }
+    }
+    assert.ok(moved > 1000);
+  }
 });

@@ -2,8 +2,8 @@
 
 A spatial-AI simulation of the **last ten metres of drone delivery**. v2 is **one shared miniature city with nine fixed
 drones (D-01 … D-09) running a stream of orders**. Nine kinds of trouble (the old nine scenes) happen at the drop spots,
-at a rate that depends on the environment you set. They are ranked into three urgency tiers with countdowns, so you —
-the operator — are overloaded and have to triage. At the end a scorecard shows how you did, and the last two runs are
+at a rate that depends on the environment you set. They are ranked into three urgency tiers: critical ones the drones handle
+by themselves, the rest wait on hold for you — the operator — so you are overloaded and have to triage. At the end a scorecard shows how you did, and the last two runs are
 compared side by side: running twice in two environments is how you *design* an environment.
 
 *Your package is only ten metres away. That doesn't mean you're getting it.*
@@ -23,7 +23,7 @@ The original AIRSPACE operations app is still available at <http://localhost:800
 |---|---|---|
 | **Map** | *Where* is trouble? A thin 3D trail of every flight (solid on the way out, dashed on the way home; the **Trails** button switches it on and off), a **dot where each incident happened** (colour = tier), and a colour-coded **!** bubble above a drone that has an open event. | Default view, or **Map** in the top switch |
 | **Monitor · 9** | *What* is happening? A 3 × 3 wall of nine **drone cameras**, each welded to its own drone (the drone is always the centre of the picture). A cell with an event shows its tier badge; tier ① cells flash. The **⟳** button of a cell (and **View ⟳** in Scene) changes the view angle; nothing rotates by itself. | **Monitor · 9** |
-| **Scene** | *What do we do?* One drone: camera, five checks, FOUND / WHY NOT / TRIED / PROPOSES, the answer options with a countdown, commands, timeline and Distance to You. | Click a cell, a map marker or a row in **To resolve** |
+| **Scene** | *What do we do?* One drone: camera, and a console that says only what happened, what the drone did and what you can do (the answer buttons); timeline and Distance to You. | Click a cell, a map marker or a row in **To resolve** |
 
 ## The Simulation board (right column, same place on every page)
 
@@ -49,21 +49,22 @@ the simulation runs — it only stops when you press **Pause**.
 
 ## Event hierarchy
 
-| Tier | Events | Countdown | If nobody acts |
+| Tier | Events | What the drone does | What it waits for |
 |---|---|---|---|
-| **① Critical** (red, flashing) | pedestrian in the descent zone · two-drone conflict · sudden no-fly zone · gust toward a building | 5–8 s | the fixed rule applies; a **missed decision** with a bigger penalty |
-| **② Urgent** (orange) | dog on the drop zone · pigeon flock in the path · sensor occluded | 15–20 s | keep waiting; abort and return after the hover limit |
-| **③ Can wait** (yellow) | car parked on the pad · customer silent | 45–60 s | on timeout abort; the order goes back to the queue |
+| **① Critical** (red, flashing) | pedestrian in the descent zone · two-drone conflict · sudden no-fly zone · gust toward a building | protects people **by itself** (stops, reels up, holds, yields by the priority rule) and **carries on by itself** when it is safe | nothing — you are told, and you may override (backup spot, send home, swap the conflict rule) |
+| **② Urgent** (orange) | dog on the drop zone · pigeon flock in the path · sensor occluded | stops in a safe hover | **you**: it stays on hold until you decide |
+| **③ Can wait** (yellow) | car parked on the pad · customer silent | stops in a safe hover | **you**: it stays on hold until you decide |
 
-An **urgent order raises an event by one tier**. **Safety is never left to the human:** in a tier ① event the drone
-first stops, reels up, hovers or yields on its own, *then* asks you what to do next. A slow operator costs time and
-score, never a person or a dog. **To resolve** is sorted by tier, then time left. Conflict rule: urgent first, then the
-lower drone ID; the other yields and you can override.
+There are **no countdowns and no decisions taken for you**. A ② / ③ drone waits as long as you leave it; when the spot
+clears by itself, the console says so and offers **Continue**. What a slow answer costs is waiting time: the drone is
+stuck, the fleet delivers less and the score drops (only the battery reserve can still send a forgotten drone home).
+An **urgent order raises an event by one tier**. **To resolve** lists the critical events the drones are handling first,
+then everything on hold, longest waiting first. Conflict rule: urgent first, then the lower drone ID; the other yields.
 
 ## Scorecard and comparison
 
-The **Scorecard** (status bar) is live, because the simulation never ends. It shows: average reaction time by tier, missed
-decisions, delivered / backup / aborted %, redelivered orders, closest approach during tier ① events, events per minute and
+The **Scorecard** (status bar) is live, because the simulation never ends. It shows: average wait for you by tier, longest wait,
+share of fleet time on hold, unanswered events, critical events the drones handled, delivered / backup / aborted %, redelivered orders, closest approach during tier ① events, events per minute and
 peak queue length. The run that was going before the last **Apply & restart / Reset** is kept and shown next to the live one (the better value is
 highlighted). Variants are never generated for you: change the board, **Apply & restart**, and compare.
 

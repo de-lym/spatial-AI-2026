@@ -64,7 +64,7 @@ export function createStage({ scene, couriers, obstacles = () => [] }) {
     });
     // delivered parcels stay where they were left
     for (const o of S.orders) if (o.outcome === 'delivered' || o.outcome === 'delivered-alt') {
-      if (!parcels.has(o.id)) { const m = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.26, 0.34), M.parcel); m.position.set(o.addr.x + (o.outcome === 'delivered-alt' ? -3.2 : 0), SLAB + 0.13, o.addr.z); m.castShadow = true; root.add(m); parcels.set(o.id, m); }
+      if (!parcels.has(o.id)) { const m = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.26, 0.34), M.parcel); const at = o.dropAt ?? o.addr; m.position.set(at.x, SLAB + 0.13, at.z); m.castShadow = true; root.add(m); parcels.set(o.id, m); }
     }
     // parked cars (only where a car is actually blocking a pad a drone is serving)
     for (const o of S.orders) { const on = o.car && S.t < o.carUntil && o.status === 'active'; let c = cars.get(o.id); if (on && !c) { c = carMesh(); c.position.set(o.addr.x + 0.2, SLAB, o.addr.z); cars.set(o.id, c); } if (c) c.visible = !!on; }
@@ -87,10 +87,10 @@ export function createStage({ scene, couriers, obstacles = () => [] }) {
     }
     // selected drone: target, backup, sensor disc
     const d = selId ? world.droneOf(selId) : null;
-    target.visible = !!(d?.order && d.target); backup.visible = !!(d?.order); sensorRing.visible = !!(d?.order && d.phase !== 'idle');
+    target.visible = !!(d?.order && d.target); backup.visible = !!(d?.order?.addr.backup); sensorRing.visible = !!(d?.order && d.phase !== 'idle');
     if (d?.order) {
       target.position.set(d.order.addr.x, SLAB + 0.03, d.order.addr.z); target.material = d.target?.backup ? ringM.backup : ringM.target;
-      backup.position.set(d.order.addr.x - 3.2, SLAB + 0.03, d.order.addr.z); backup.material = d.target?.backup ? ringM.target : ringM.backup;
+      if (d.order.addr.backup) backup.position.set(d.order.addr.backup.x, SLAB + 0.03, d.order.addr.backup.z); backup.material = d.target?.backup ? ringM.target : ringM.backup;
       const r = Math.max(0.5, Math.min(6, Math.max(3, 2.6 + (d.y - SLAB) * 0.3))); sensorRing.scale.setScalar(r); sensorRing.position.set(d.x, SLAB + 0.04, d.z);
     }
   }

@@ -5,7 +5,7 @@ how events are ranked, and how environments are designed and compared. Implement
 
 **v2 in one paragraph.** v1 had nine independent, scripted scenes. v2 is **one shared city with nine fixed drones
 (D-01 … D-09) running a stream of orders.** The nine old scenes became **nine event types**. How often each one happens
-depends on the environment the user sets. Events are sorted into **three urgency tiers** with countdowns, so the human
+depends on the environment the user sets. Events are sorted into **three urgency tiers** (critical: the drone acts alone; urgent / can wait: on hold for the human), so the human
 operator is overloaded and has to triage. When a run ends a **scorecard** shows how the operator did, and the last two
 runs are compared side by side — running twice in two environments is how the user *designs* an environment.
 
@@ -24,7 +24,7 @@ other drones, a parade with confetti, a customer who does not answer. v2 puts al
 | Observability | **Partial** — a drone senses only within a range that grows with height and shrinks to 3 m in confetti | `world.js` `sensorRadius`, `sense` |
 | Agents | **Multi-agent** — nine drones, pedestrians, dogs, pigeon flocks, customers, and the human operator | `world.js` `S.drones`, `S.agents`, `flocks` |
 | Dynamics | **Dynamic** — people walk, dogs roam and run, flocks cross, gusts blow, confetti and no-fly zones appear and vanish | `world.js` `updateAgents`, schedules |
-| Determinism | **Deterministic** — separate seeded streams for orders, pedestrians, dogs, flocks, gusts, zones, confetti and event windows. Same settings + seed = same run; changing one board value never reshuffles an unrelated stream | `world.js` `seedOf` |
+| Determinism | **Deterministic** — separate seeded streams for orders, pedestrians, dogs, flocks, gusts, zones, confetti. Same settings + seed = same run; changing one board value never reshuffles an unrelated stream | `world.js` `seedOf` |
 
 ### Building clusters (city presets)
 
@@ -41,7 +41,7 @@ in node (`tests/fixtures/city-high.json`, `city-low.json`, `city-mixed.json`, ea
 
 | Class | Instances | Role |
 |---|---|---|
-| **Obstacle** (blocks traversal) | buildings, parked cars, pigeons, other drones, no-fly zones | hard constraint: never crossed |
+| **Obstacle** (blocks traversal) | buildings, trees, lamp posts and signals (drones climb over them; drop and backup spots are kept clear of them), parked cars, pigeons, other drones, no-fly zones | hard constraint: never crossed |
 | **Hindrance** (penalty) | pedestrians, dogs, gusts, confetti, hover time, a silent customer | slower, more battery, longer waits |
 | **Affordance** (bonus) | the delivery pad, a pre-authorized backup spot, known landmarks, retained memory | faster verify, no waiting for approval, shorter locate / scan |
 
@@ -75,11 +75,11 @@ tests) a conservative fallback is used: straight up, over the tallest building o
 | Agent | Goal | Knowledge / sensing | Plans ahead by | Performance measure |
 |---|---|---|---|---|
 | **Delivery drone ×9** | put the parcel down safely at the requested (or an authorized) spot, then fly home | starts with **no knowledge** of any address; sensor disc 3–6 u, 0.6 u in confetti; own knowledge grid | cruise height over known buildings; 2.5 s look-ahead for other drones, pigeons and no-fly zones; wait → backup → human → abort | outcome, time, hover seconds, highest response level, closest approach |
-| **Pedestrian** | walk to an address (often one a drone is serving) | sees only its own path | straight path | times it entered a descent zone |
+| **Pedestrian** | walk to an address (often one a drone is serving) | sees only its own path | street lanes (1.7 u off each road centre line), then straight in across the front yard | times it entered a descent zone |
 | **Dog** | roam its yard; run to the drop spot when a parcel comes down | none modelled | approach–stay–leave | times it blocked a drop |
 | **Pigeon flock** | cross the city on a fixed line | none modelled | straight flight | times it entered a drone's buffer |
 | **Customer** | receive the parcel where they asked | remote; answers by message with the board's reply rate | — | spot confirmed / not |
-| **Operator** (user) | keep everyone safe and deliveries flowing | sees all nine feeds | answers events, issues commands | reaction time by tier, missed decisions |
+| **Operator** (user) | keep everyone safe and deliveries flowing | sees all nine feeds | answers events, issues commands | waiting time by tier, fleet time on hold |
 
 ### Spatial memory
 
@@ -124,18 +124,21 @@ The nine event types, the old scene they came from, and what drives them:
 
 ### Tiers
 
-| Tier | Events | Window | If nobody acts |
+| Tier | Events | Drone | Operator |
 |---|---|---|---|
-| **① Critical** (red, flashing) — people safety or collision | pedestrian · two-drone conflict · no-fly zone · gust toward building | **5–8 s** | the fixed rule applies (yield / hold / reel up); counted as a **missed decision** with a bigger score penalty |
-| **② Urgent** (orange) — short window or the delivery fails | dog · pigeon flock · sensor occluded | **15–20 s** | keep waiting; abort and return after the 75 s hover limit |
-| **③ Can wait** (yellow) — not dangerous, just stuck | car on pad · customer silent | **45–60 s** | on timeout abort and return; the order goes back to the queue |
+| **① Critical** (red, flashing) — people safety or collision | pedestrian · two-drone conflict · no-fly zone · gust toward building | takes the safe action **and continues by itself** once it is safe (conflict: the priority rule applies at once) | informed; may override (backup, send home, swap) |
+| **② Urgent** (orange) | dog · pigeon flock · sensor occluded | safe hover, **on hold** | must decide; no timeout |
+| **③ Can wait** (yellow) — not dangerous, just stuck | car on pad · customer silent | safe hover, **on hold** | must decide; no timeout |
 
 Rules (all tested in `tests/last10m-world.test.js`):
 
 1. **An urgent order raises an event by one tier** (③ → ②, ② → ①).
-2. **Safety is never left to the human.** The drone takes the safe action first (stop, reel up, hover, climb, yield) and
-   *then* asks what to do next. A slow operator costs time and score, never a person or a dog getting hit.
-3. **To resolve** is sorted by tier, then by time left. Events overlap on purpose, so the operator has to triage.
+2. **Safety is never left to the human.** The drone takes the safe action first (stop, reel up, hover, climb, yield). In a
+   critical event it also carries on by itself once it is safe; in an urgent / can-wait event it stays on hold until the
+   operator decides — **nothing is ever decided for the operator** and there are no countdowns. A slow operator costs
+   waiting time and score, never a person or a dog getting hit. (The battery reserve is the only limit left.)
+3. **To resolve** lists the critical events being handled first, then everything on hold by tier, longest waiting first.
+   Events overlap on purpose, so the operator has to triage.
 4. **Conflict rule:** an urgent order has priority; with equal priority the lower drone ID goes first; the other yields.
    The operator can override (*swap*).
 5. A last-resort **separation guard** (independent of events and the operator) stops the lower-priority drone when two get
@@ -162,7 +165,7 @@ The **Simulation board** (right column, same place on every page):
 
 Battery, hover budget, timeouts, backup spots and all per-scene parameters are code constants (`world.js`).
 
-**Comparison.** The scorecard (average reaction time by tier, missed decisions, delivered / backup / aborted %,
+**Comparison.** The scorecard (average wait for the operator by tier, longest wait, fleet time on hold, delivered / backup / aborted %,
 redeliveries, closest approach in tier ① events, events per minute, peak queue length) is kept for the last two runs with
 their settings and shown side by side. Variants are never generated automatically: the user changes the environment and
 runs again.
@@ -177,7 +180,7 @@ runs again.
 | Delivery hover + tether | 7 m | Wing: ~7 m (23 ft) hover, package lowered on a tether |
 | People clearance | detect within 13 m of the drop, 2 m safe | Wing asks customers to stay ~2 m (6 ft) away |
 | Hover budget | 75 s | Wing ~30 s, Zipline ~75 s over the home |
-| Event windows, drone separation, pigeon buffer, gust limits | simulation assumptions | no public standard found |
+| Drone separation, pigeon buffer, gust limits | simulation assumptions | no public standard found |
 
 ## 10. Decisions made while building v2
 
@@ -198,5 +201,5 @@ runs again.
   scheduled clouds along the route.
 * **One event per drone at a time.** A drone that already handles an event yields to a higher-priority drone silently.
 * **Silent customer.** A customer that does not reply at the first attempt gets a fresh chance on redelivery.
-* **Score.** A single number is shown for quick comparison (100 − penalties for missed decisions, weighted by tier, and for
-  aborted orders); every component is shown next to it.
+* **Score.** A single number is shown for quick comparison (100 − a penalty for time drones spent on hold waiting for the
+  operator, ② weighted double, and for aborted orders); every component is shown next to it.

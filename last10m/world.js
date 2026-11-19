@@ -7,7 +7,11 @@
 // The nine v1 scenes became nine event types:
 //   A1 dog on drop zone · A2 car on pad · A3 pedestrian in descent zone · B1 pigeon flock · B2 two-drone conflict
 //   B3 gust toward building · C1 sensor occluded · C2 customer silent · C3 sudden no-fly zone
-// and they are sorted into three urgency tiers (see TIER / WINDOW) with fixed-rule defaults when nobody acts.
+// and they are sorted into three urgency tiers (see TIER):
+//   ① Critical  — the drone protects people on its own (stops, reels up, holds, yields) and carries on when the danger has gone.
+//                 The operator is told and may override (backup spot, send home, swap the conflict rule), but nothing waits for them.
+//   ② Urgent / ③ Can wait — the drone stops in a safe hover and STAYS ON HOLD until the operator decides. Nothing is decided for
+//                 them; waiting time is what it costs. (Only the battery reserve can still send a forgotten drone home.)
 
 import { SCALE_M, HUB } from './scenes.js';
 import { CONST, levelRank, LEVEL_TEXT } from './sim.js';
@@ -36,7 +40,6 @@ export const DEFAULT_SETTINGS = { ...Object.fromEntries(BOARD.map((b) => [b.key,
 
 // ------------------------------------------------------------------ event hierarchy
 export const TIER = { ped: 1, conflict: 1, nofly: 1, gust: 1, dog: 2, pigeon: 2, occluded: 2, car: 3, silent: 3 };
-export const WINDOW = { 1: [5, 8], 2: [15, 20], 3: [45, 60] };          // seconds the operator has
 export const TIER_NAME = { 1: 'Critical', 2: 'Urgent', 3: 'Can wait' };
 export const TITLE = { ped: 'Pedestrian in descent zone', conflict: 'Two-drone conflict', nofly: 'Sudden no-fly zone', gust: 'Gust toward building',
   dog: 'Dog on drop zone', pigeon: 'Pigeon flock in path', occluded: 'Sensor occluded', car: 'Car parked on pad', silent: 'Customer silent' };
@@ -62,12 +65,13 @@ const routePoint = (u) => { const L = ROUTE.length - 1, f = u * L, i = Math.min(
 
 /**
  * createWorld(settings, { obstacles, tiles, memory })
- *   obstacles: [{x0,x1,z0,z1,h}]   tiles: [{cx,cz,landUse,name}]   memory: { landmarks: {addressKey: true} } (mutated)
+ *   obstacles: [{x0,x1,z0,z1,h}] buildings   low: [{x,z,r,h}] trees, lamp posts, signals   roads: road centre lines (both axes)
+ *   tiles: [{cx,cz,landUse,name}]   memory: { landmarks: {addressKey: true} } (mutated)
  */
-export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {}, plan = null } = {}) {
+export function createWorld(input = {}, { obstacles = [], low = [], roads = null, tiles = [], memory = {}, plan = null } = {}) {
   const P = { ...DEFAULT_SETTINGS, ...input };
   const seedOf = (k) => rng(((P.seed >>> 0) * 31 + k * 7919) >>> 0);
-  const Rord = seedOf(1), Rped = seedOf(2), Rdog = seedOf(3), Rfl = seedOf(4), Rgust = seedOf(5), Rzone = seedOf(6), Rconf = seedOf(7), Revt = seedOf(8);
+  const Rord = seedOf(1), Rped = seedOf(2), Rdog = seedOf(3), Rfl = seedOf(4), Rgust = seedOf(5), Rzone = seedOf(6), Rconf = seedOf(7);
   if (P.memory === 'fresh') memory.landmarks = {};
   memory.landmarks ??= {};
 
@@ -80,10 +84,18 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
     return { lowShare: n ? low / n : 0, tallShare: n ? tall / n : 0, paradeNear: clamp(1 - paradeDistance(a) / 12, 0, 1) };
   };
   const clearPad = (x, z) => !obstacles.some((o) => x > o.x0 - 1.3 && x < o.x1 + 1.3 && z > o.z0 - 1.3 && z < o.z1 + 1.3);   // a pad (and its backup spot) is never inside or hard against a building
+  // ---- low obstacles: trees, lamp posts, signals. Lower than any cruise level, but taller than a drone hovering at 7 m
+  const DRONE_R = 0.75;                                   // half span of the drone + the most a gust can push it sideways
+  const lowNear = (x, z, pad) => low.some((t) => Math.hypot(t.x - x, t.z - z) < t.r + pad);
+  const clearSpot = (x, z) => clearPad(x, z) && !lowNear(x, z, DRONE_R + 0.15);   // a drone can hover right above it and lower a parcel
+  /** height (u above ground) a drone must keep on the straight move a → b so that it passes over every tree / lamp near that line */
+  const lowNeed = (ax, az, bx, bz) => { let n = 0; for (const t of low) if (t.h + 0.45 > n && segDist(t, { x: ax, z: az }, { x: bx, z: bz }) < t.r + DRONE_R) n = t.h + 0.45; return n; };
+  const BACKUP_TRY = [[BACKUP_DX, 0], [-BACKUP_DX, 0], [-2.4, -1.4], [2.4, -1.4], [0, -2.6], [-2, 0], [2, 0]];
+  const backupSpot = (x, z) => { for (const [dx, dz] of BACKUP_TRY) if (clearSpot(x + dx, z + dz)) return { x: x + dx, z: z + dz }; return null; };
   const isShop = (t) => /commercial block/i.test(t.name || '');
   const shops = tiles.filter(isShop).map((t) => ({ id: String(t.name).match(/^(R\d+)/)?.[1] ?? t.id, name: String(t.name).replace(/\s*\(commercial block\)/i, ''), key: `${t.cx},${t.cz}`, x: t.cx, z: t.cz + PAD_DZ }));   // restaurants / shops: where the goods are picked up
-  let all = tiles.filter((t) => !(t.cx === 0 && t.cz === 0) && t.landUse !== 'sensitive' && !isShop(t) && !/pond/i.test(t.name || '') && clearPad(t.cx, t.cz + PAD_DZ) && clearPad(t.cx + BACKUP_DX, t.cz + PAD_DZ))
-    .map((t) => ({ key: `${t.cx},${t.cz}`, x: t.cx, z: t.cz + PAD_DZ, tile: t, name: t.name || t.id, id: t.id }));
+  let all = tiles.filter((t) => !(t.cx === 0 && t.cz === 0) && t.landUse !== 'sensitive' && !isShop(t) && !/pond/i.test(t.name || '') && clearSpot(t.cx, t.cz + PAD_DZ))
+    .map((t) => ({ key: `${t.cx},${t.cz}`, x: t.cx, z: t.cz + PAD_DZ, tile: t, name: t.name || t.id, id: t.id, backup: backupSpot(t.cx, t.cz + PAD_DZ) }));
   all.sort((a, b) => hyp(a, HUB) - hyp(b, HUB));
   let addresses = all.filter((a) => hyp(a, HUB) <= radiusU);
   if (addresses.length < 4) addresses = all.slice(0, 4);   // the parcel grid is 80 m apart: with a very small radius the four nearest addresses are used
@@ -97,7 +109,7 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
     const i = orderNo++, rr = rng(((P.seed >>> 0) * 13 + i * 97 + 5) >>> 0), a = addresses[Math.floor(rr() * addresses.length)];
     const urgent = rr() < P.urgentPct / 100, shop = shops.length ? shops[Math.floor(rr() * shops.length)] : null;
     const o = { id: i + 1, addr: a, shop, prepS: 2 + rr() * 4, urgent, confettiRoll: rr(), confettiDur: 20 + rr() * 10, status: 'queued', tries: 0, drone: null, tAssigned: null, tDone: null, outcome: null, redelivered: false,
-      car: rr() < 0.02 + 0.45 * a.ctx.lowShare, carUntil: S0.t + 60 + rr() * 110, needConfirm: rr() < 0.6, replyRoll: rr(), replyRoll2: rr(), replyDelay: 4 + rr() * 22, dogAttn: rr() < 0.1 + 0.85 * a.ctx.lowShare, backupOK: rr() < 0.3 };
+      car: rr() < 0.02 + 0.45 * a.ctx.lowShare, carUntil: S0.t + 60 + rr() * 110, needConfirm: rr() < 0.6, replyRoll: rr(), replyRoll2: rr(), replyDelay: 4 + rr() * 22, dogAttn: rr() < 0.1 + 0.85 * a.ctx.lowShare, backupOK: !!a.backup && rr() < 0.3 };
     orders.push(o); return o;
   }
   const S0 = { t: 0 };
@@ -107,8 +119,30 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
 
   // ---- ground and air agents (they have their own simple behaviour; they are not scenery)
   const pickAddr = (R, weight) => { const w = addresses.map(weight), s = w.reduce((x, y) => x + y, 0); let u = R() * s; for (let i = 0; i < w.length; i++) { u -= w[i]; if (u <= 0) return addresses[i]; } return addresses.at(-1); };
-  const peds = Array.from({ length: P.pedestrians }, (_, k) => { const a = pickAddr(Rped, (x) => 0.4 + x.ctx.paradeNear + 0.6 * x.ctx.tallShare); return { id: `P${k + 1}`, kind: 'person', x: a.x + (Rped() - 0.5) * 3, z: a.z + (Rped() - 0.5) * 3, goal: a, wait: Rped() * 4, phase: Rped() * 6, heading: 0, speed: 0.7 + Rped() * 0.3 }; });
-  const dogs = Array.from({ length: P.dogs }, (_, k) => { const a = pickAddr(Rdog, (x) => 0.5 + x.ctx.lowShare * 2); return { id: `G${k + 1}`, kind: 'dog', home: a, x: a.x + BACKUP_DX, z: a.z + 0.4, state: 'roam', t0: 0, stay: 0, heading: 0, k, forOrder: null }; });
+  // walkers use the street network: road centre lines on both axes (from the city, or derived from the parcel grid: roads run 8 u off
+  // every parcel centre). They keep to a lane 1.7 u off the centre line — on the road, clear of every lot — and only leave it to
+  // walk the last few metres straight in to a pad, across the front strip that is kept clear of buildings and trees.
+  const LANE = 1.7;
+  const uniq = (a) => [...new Set(a.map((v) => Math.round(v * 100) / 100))].sort((x, y) => x - y);
+  const ROADS_X = uniq(roads ?? tiles.flatMap((t) => [t.cx - 8, t.cx + 8])), ROADS_Z = uniq(roads ?? tiles.flatMap((t) => [t.cz - 8, t.cz + 8]));
+  const nearest = (arr, v) => arr.reduce((b, r) => (Math.abs(r - v) < Math.abs(b - v) ? r : b), arr[0] ?? 0);
+  const laneFront = (a) => ({ x: a.x, z: nearest(ROADS_Z.filter((r) => r > a.z), a.z + 2.9) - LANE });   // the pavement lane in front of a pad
+  function walkPath(from, a) {
+    const g = laneFront(a), pts = [];
+    const rx = nearest(ROADS_X, from.x), rz = nearest(ROADS_Z, from.z);
+    if (Math.abs(from.x - rx) < Math.abs(from.z - rz)) {               // nearer a north–south road: step onto it, walk to the goal's row
+      const lx = rx + Math.sign(from.x - rx || 1) * LANE;
+      pts.push({ x: lx, z: from.z }, { x: lx, z: g.z });
+    } else {                                                            // nearer an east–west road: step onto it, go to a north–south road near the goal
+      const lz = rz + Math.sign(from.z - rz || 1) * LANE; pts.push({ x: from.x, z: lz });
+      if (Math.abs(lz - g.z) > 0.05) { const vx = nearest(ROADS_X, a.x), lx = vx + Math.sign(from.x - vx || 1) * LANE; pts.push({ x: lx, z: lz }, { x: lx, z: g.z }); }
+    }
+    pts.push(g, { x: a.x, z: a.z });
+    return pts.filter((p, i) => i === 0 ? Math.hypot(p.x - from.x, p.z - from.z) > 0.02 : Math.hypot(p.x - pts[i - 1].x, p.z - pts[i - 1].z) > 0.02);
+  }
+  const peds = Array.from({ length: P.pedestrians }, (_, k) => { const a = pickAddr(Rped, (x) => 0.4 + x.ctx.paradeNear + 0.6 * x.ctx.tallShare), f = laneFront(a), off = (Rped() - 0.5) * 6; return { id: `P${k + 1}`, kind: 'person', x: f.x + off, z: f.z, goal: a, path: null, wait: Rped() * 4, phase: Rped() * 6, heading: 0, speed: 0.7 + Rped() * 0.3 }; });
+  const dogYard = (a) => a.backup ?? { x: a.x, z: a.z - 1.6 };            // a dog lives in the yard next to the drop spot
+  const dogs = Array.from({ length: P.dogs }, (_, k) => { const a = pickAddr(Rdog, (x) => 0.5 + x.ctx.lowShare * 2), y = dogYard(a); return { id: `G${k + 1}`, kind: 'dog', home: a, x: y.x, z: y.z + 0.4, state: 'roam', t0: 0, stay: 0, heading: 0, k, forOrder: null }; });
   const flocks = Array.from({ length: P.flocks }, (_, k) => { const th = Math.floor(Rfl() * 4) * Math.PI / 2 + (Rfl() - 0.5) * 0.5; return { id: `F${k + 1}`, n: 4 + Math.floor(Rfl() * 3), dx: Math.cos(th), dz: Math.sin(th), lat: (Rfl() - 0.5) * 2 * Math.min(44, radiusU * 0.85), off: Rfl() * 120, speed: 2.2 + Rfl() * 0.8, y: SLAB + 9 + Rfl() * 7 }; });
   const flockBirds = (t) => { const out = []; for (const f of flocks) { const s = ((t * f.speed + f.off) % 120) - 60; for (let i = 0; i < f.n; i++) out.push({ id: `${f.id}b${i}`, flock: f.id, x: f.dx * s - f.dz * f.lat + (i % 3 - 1) * 1.6, z: f.dz * s + f.dx * f.lat + (Math.floor(i / 3) - 0.5) * 1.6, y: f.y + Math.sin(t * 5 + i) * 0.15, flap: t * 14 + i }); } return out; };
 
@@ -183,7 +217,8 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
     const sp = V * d.speedK; if (sp < 1e-6) return false;
     const dx = p.x - d.x, dz = p.z - d.z, dy = SLAB + p.y - d.y, t = Math.max(Math.hypot(dx, dz) / sp, Math.abs(dy) / (VZ * 1.6));
     if (t < 1e-6) { d.path.shift(); return d.path.length === 0; }
-    const k = Math.min(1, dt / t); d.x += dx * k; d.z += dz * k; d.y += dy * k;
+    if (lowGuard(d, p, dt)) return false;                      // a tree or lamp post ahead at this height: rise above it first
+    const k = Math.min(1, dt / t); d.x += dx * k; d.z += dz * k; d.y = Math.max(d.y + dy * k, Math.min(d.y, SLAB + lowNeed(d.x, d.z, d.x, d.z)));
     if (k >= 1) d.path.shift();
     return d.path.length === 0;
   }
@@ -192,7 +227,7 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
   const sensorRadius = (d) => (cloudOver(d, d.y - SLAB) ? 0.6 : clamp(2.6 + (d.y - SLAB) * 0.3, 3, 6));
   const zoneAt = (p, margin = 0) => zones.find((z) => S.t >= z.t0 && S.t < z.t1 && hyp(p, z) < z.r + margin) ?? null;
   const watchedBy = (d, a) => hyp(a, d) <= sensorRadius(d);
-  const backupOf = (o) => ({ x: o.addr.x + BACKUP_DX, z: o.addr.z, name: 'Backup spot', backup: true });
+  const backupOf = (o) => (o.addr.backup ? { x: o.addr.backup.x, z: o.addr.backup.z, name: 'Backup spot', backup: true } : null);
 
   // ---------------------------------------------------------------- the five checks (read only what the drone can sense)
   function checks(d) {
@@ -227,23 +262,29 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
     silent: [['assume', 'Deliver to the instructed spot', 1], ['wait', 'Keep waiting'], ['return', 'Return to hub']],
   };
   function optionsFor(ev, d) {
-    if (ev.type === 'conflict') { const other = droneOf(ev.with); return [{ id: 'rule', label: `${d.id} yields (priority rule)`, primary: true }, { id: 'swap', label: `Override: ${other.id} yields` }]; }
-    return OPTIONS[ev.type].map(([id, label, primary]) => ({ id, label, primary: !!primary }));
+    if (ev.type === 'conflict') { const other = droneOf(ev.with); return [{ id: 'rule', label: `${d.id} yields (priority rule)`, primary: true }, { id: 'swap', label: `${other.id} yields instead` }]; }
+    return OPTIONS[ev.type].filter(([id]) => id !== 'backup' || backupOf(d.order)).map(([id, label, primary]) => ({ id, label, primary: !!primary }));
   }
-  const defaultFor = (ev) => (ev.type === 'conflict' ? 'rule' : ev.tier === 3 ? 'return' : 'wait');   // the fixed rule when nobody acts
 
   function openEvent(d, type, extra = {}) {
     if (d.event || !d.order || d.delivered || d.abortedOrder) return null;   // a drone that has handed over (or is going home) has nothing left to decide
     const base = TIER[type], urgent = d.order.urgent, tier = urgent ? Math.max(1, base - 1) : base;      // an urgent order raises the tier by one
-    const [lo, hi] = WINDOW[tier], win = lo + Revt() * (hi - lo);
-    const ev = { id: `E${S.events.length + 1}`, type, base, tier, urgent, drone: d.id, order: d.order.id, opened: S.t, window: +win.toFixed(1), deadline: S.t + win, status: 'open',
-      resolvedBy: null, resolvedAt: null, reaction: null, missed: false, option: null, pos: { x: d.x, z: d.z }, closestM: null, autoSafe: false, safeAction: null, ...extra };
-    ev.options = optionsFor(ev, d); ev.defaultId = defaultFor(ev);
+    // status: 'auto' = critical, handled by the drone itself (it carries on when the danger has gone; the operator may override)
+    //         'open' = urgent / can wait: the drone holds in a safe hover until the operator decides — nothing is decided for them
+    const ev = { id: `E${S.events.length + 1}`, type, base, tier, urgent, drone: d.id, order: d.order.id, opened: S.t, status: tier === 1 ? 'auto' : 'open',
+      resolvedBy: null, resolvedAt: null, reaction: null, option: null, pos: { x: d.x, z: d.z }, closestM: null, autoSafe: tier === 1, safeAction: null, clearNow: false, ...extra };
+    ev.options = optionsFor(ev, d);
     S.events.push(ev); d.event = ev;
-    ev.safeAction = safetyAction(d, ev);                  // safety is never left to the human: the drone acts first …
-    ev.autoSafe = tier === 1;
-    setLevel(d, 'H', TITLE[type]);                         // … and then asks what to do next
-    log(d, 'EVENT', `${TITLE[type]} — tier ${tier} (${TIER_NAME[tier]}); ${ev.safeAction}.`, { eventId: ev.id, tier });
+    ev.safeAction = safetyAction(d, ev);                  // safety is never left to the human: the drone acts first
+    if (tier === 1) {
+      if (type === 'conflict') applyOption(d, ev, 'rule');                // the priority rule applies at once: one drone yields, the other passes
+      else { ev.waiting = true; if (['pigeon', 'gust', 'nofly'].includes(type)) { d.held = true; d.heldBy = ev.id; } }
+      setLevel(d, 'L3', `${TITLE[type]} — handled automatically`);
+      log(d, 'EVENT', `${TITLE[type]} — ① critical; ${ev.safeAction}. It continues by itself when it is safe.`, { eventId: ev.id, tier });
+    } else {
+      setLevel(d, 'H', TITLE[type]);
+      log(d, 'EVENT', `${TITLE[type]} — tier ${tier} (${TIER_NAME[tier]}); ${ev.safeAction}. On hold until the operator decides.`, { eventId: ev.id, tier });
+    }
     return ev;
   }
   function safetyAction(d, ev) {
@@ -251,7 +292,7 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
       case 'ped': case 'dog': if (d.drop > 0.05) { d.phase = 'reel'; return 'reeled the parcel up and hovered'; } if (['descend', 'scan', 'verify', 'lower'].includes(d.phase)) d.phase = 'wait'; return 'stopped lowering and hovered';
       case 'conflict': d.held = true; d.heldBy = ev.id; { const o = droneOf(ev.with); o.climbOver = true; o.needPlan = true; } return 'stopped and holding; the other drone climbs 15 m to pass';
       case 'nofly': d.held = true; d.heldBy = ev.id; return 'stopped outside the zone';
-      case 'gust': if (d.drop > 0.05) { d.phase = 'reel'; return 'reeled up and hovered'; } d.held = true; d.heldBy = ev.id; return 'hovering above the roofline';
+      case 'gust': if (d.drop > 0.05) { d.phase = 'reel'; return 'reeled up and hovered'; } d.held = true; d.heldBy = ev.id; return 'holding position away from the building';
       case 'pigeon': d.held = true; d.heldBy = ev.id; return 'holding until the flock passes';
       case 'occluded': if (['descend', 'scan', 'verify', 'lower'].includes(d.phase)) d.phase = 'climb'; return 'climbing above the cloud';
       default: return 'hovering';
@@ -261,7 +302,7 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
     const d = droneOf(ev.drone); ev.status = status; ev.resolvedBy ??= by; ev.resolvedAt ??= S.t; ev.closedAt = S.t;
     if (d.event === ev) d.event = null;
     if (d.heldBy === ev.id) { d.held = false; d.heldBy = null; }
-    if (levelRank(d.level) >= levelRank('H') && d.phase !== 'return') setLevel(d, 'L0', 'Cleared');
+    if ((levelRank(d.level) >= levelRank('H') || d.level === 'L3') && d.phase !== 'return' && !d.target?.backup) setLevel(d, 'L0', 'Cleared');
   }
   function abort(d, reason) {
     if (d.phase === 'return' || d.phase === 'land' || d.phase === 'idle') return;
@@ -280,19 +321,21 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
       case 'assume': d.confirmed = true; setLevel(d, 'L2', 'Assuming the instructed spot'); if (d.phase === 'confirm') d.phase = 'descend'; break;
       case 'rule': case 'swap': {
         const other = droneOf(ev.with), yielder = id === 'rule' ? d : other, goer = yielder === d ? other : d;
-        yielder.held = true; yielder.heldBy = null; yielder.yieldFor = goer.id; yielder.yieldCap = S.t + 45; goer.held = false; goer.heldBy = null; goer.climbOver = true; goer.needPlan = true;
+        yielder.held = true; yielder.heldBy = null; yielder.yieldFor = goer.id; yielder.yieldCap = S.t + 45; goer.held = false; goer.heldBy = null; goer.yieldFor = null; goer.climbOver = true; goer.needPlan = true;
         setLevel(yielder, 'L3', `${yielder.id} yields to ${goer.id}`); setLevel(goer, 'L1', 'Proceeding'); break;
       }
     }
   }
+  /** the operator answers an event: an open one (② / ③, the drone is on hold) or a critical one the drone is handling ('auto', override) */
   function resolve(evId, optionId, by = 'operator') {
-    const ev = S.events.find((e) => e.id === evId); if (!ev || ev.status !== 'open') return false;
+    const ev = S.events.find((e) => e.id === evId); if (!ev || !['open', 'auto'].includes(ev.status) || ev.option) return false;
     if (!ev.options.some((o) => o.id === optionId)) return false;
-    const d = droneOf(ev.drone), wasHeld = ['pigeon', 'gust', 'nofly'].includes(ev.type);
-    ev.resolvedBy = by; ev.resolvedAt = S.t; ev.option = optionId; ev.missed = by === 'auto';
-    ev.reaction = by === 'operator' ? +(S.t - ev.opened).toFixed(2) : null;
-    log(d, by === 'auto' ? 'AUTO' : 'OPERATOR', `${by === 'auto' ? 'No reply in time — fixed rule: ' : 'Operator: '}${ev.options.find((o) => o.id === optionId).label}.`, { eventId: ev.id, tier: ev.tier });
-    if (optionId === 'wait') { ev.status = 'acknowledged'; ev.waiting = true; d.event = ev; if (wasHeld) { d.held = true; d.heldBy = ev.id; } setLevel(d, 'L2', 'Waiting'); return true; }   // stays attached to the drone until the hazard clears (or the hover budget ends it)
+    const d = droneOf(ev.drone), wasHeld = ['pigeon', 'gust', 'nofly'].includes(ev.type), wasAuto = ev.status === 'auto';
+    ev.resolvedBy = by; ev.resolvedAt = S.t; ev.option = optionId;
+    ev.reaction = +(S.t - ev.opened).toFixed(2);
+    log(d, 'OPERATOR', `Operator: ${ev.options.find((o) => o.id === optionId).label}.`, { eventId: ev.id, tier: ev.tier });
+    if (wasAuto && (optionId === 'wait' || optionId === 'rule')) return true;                     // confirms what the drone is already doing
+    if (optionId === 'wait') { ev.status = 'acknowledged'; ev.waiting = true; d.event = ev; d.hover = Math.min(d.hover, HOVER_BUDGET - 40); if (wasHeld) { d.held = true; d.heldBy = ev.id; } setLevel(d, 'L2', 'Waiting until clear'); return true; }   // the operator delegates: carry on by yourself once it is clear
     ev.status = 'resolved'; if (d.event === ev) d.event = null;
     if (ev.type === 'conflict') { const other = droneOf(ev.with); if (other.conflictEvent === ev) other.conflictEvent = null; }
     applyOption(d, ev, optionId);
@@ -316,10 +359,19 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
     setLevel(d, 'L0', 'Departed'); d.maxLevel = 'L0';
     log(d, 'DEPART', `${d.id} takes order #${o.id}${o.urgent ? ' (URGENT)' : ''}: ${o.shop ? `pick up at ${o.shop.name}, deliver to ${o.addr.name}` : `deliver to ${o.addr.name}`}, cruising at ${Math.round(d.cruise * SCALE_M)} m.`);
   }
+  /** low obstacles: before a horizontal move below the treetops, look ~1 u ahead; if a tree / lamp is in the way, climb (and do not
+   *  move sideways) until the drone is above it. Returns true while it is climbing. */
+  function lowGuard(d, p, dt) {
+    const dx = p.x - d.x, dz = p.z - d.z, L = Math.hypot(dx, dz); if (L < 1e-3 || !low.length) return false;
+    const la = Math.min(L, 1.0), need = lowNeed(d.x, d.z, d.x + dx / L * la, d.z + dz / L * la);
+    if (d.y - SLAB >= need - 1e-3) return false;
+    d.y = Math.min(d.y + VZ * dt * 1.5, SLAB + need); return true;
+  }
   function goTo(d, p, y, dt, speed = V) {
     const dx = p.x - d.x, dz = p.z - d.z, L = Math.hypot(dx, dz), s = speed * d.speedK * dt;
-    if (L > 1e-4) { const k = Math.min(1, s / L); d.x += dx * k; d.z += dz * k; }
-    d.y += clamp(y - d.y, -VZ * dt * 1.5, VZ * dt * 1.5);
+    if (L > 1e-4) { if (lowGuard(d, p, dt)) return false; const k = Math.min(1, s / L); d.x += dx * k; d.z += dz * k; }
+    const floor = L > 0.05 ? SLAB + lowNeed(d.x, d.z, d.x, d.z) : 0;   // never sink into a crown on the way; the spot itself is always clear
+    d.y += clamp(Math.max(y, Math.min(floor, d.y)) - d.y, -VZ * dt * 1.5, VZ * dt * 1.5);
     return L < 0.05 && Math.abs(y - d.y) < 0.05;
   }
   const finishOrder = (d, outcome) => {
@@ -350,7 +402,7 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
     const flying = FLIGHT.has(d.phase);
     if (d.order && !['return', 'land'].includes(d.phase)) {
       if (d.battery <= BATTERY_RESERVE) return abort(d, `Battery reached the ${BATTERY_RESERVE}% reserve.`);
-      if (d.hover > HOVER_BUDGET) return abort(d, `Hover budget of ${HOVER_BUDGET} s used up.`);
+      if (d.hover > HOVER_BUDGET && !['open', 'auto'].includes(d.event?.status)) return abort(d, `Hover budget of ${HOVER_BUDGET} s used up.`);   // a drone on hold for the operator is the operator's call
     }
     if (flying) {                                         // route trace for the map
       if (S.t - d.routeLog >= 0.6) { d.routeLog = S.t; d.route.push({ x: d.x, y: d.y, z: d.z, ret: d.phase !== 'enter' }); if (d.route.length > 160) d.route.shift(); }
@@ -359,7 +411,7 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
     if (d.phase !== 'land') {
       const bl = balloonAt(S.t, true), db = Math.hypot(d.x - bl.x, (d.y - SLAB - bl.y) * 0.7, d.z - bl.z);
       if (db < BAL_HOLD) {
-        if (db < BAL_CORE) { const hx = d.x - bl.x, hz = d.z - bl.z, L = Math.hypot(hx, hz) || 1, nx = d.x + hx / L * V * 0.5 * dt, nz = d.z + hz / L * V * 0.5 * dt; if (!obstacles.some((q) => nx > q.x0 && nx < q.x1 && nz > q.z0 && nz < q.z1 && d.y - SLAB < q.h + 0.5)) { d.x = nx; d.z = nz; } }
+        if (db < BAL_CORE) { const hx = d.x - bl.x, hz = d.z - bl.z, L = Math.hypot(hx, hz) || 1, nx = d.x + hx / L * V * 0.5 * dt, nz = d.z + hz / L * V * 0.5 * dt; if (!obstacles.some((q) => nx > q.x0 && nx < q.x1 && nz > q.z0 && nz < q.z1 && d.y - SLAB < q.h + 0.5) && d.y - SLAB >= lowNeed(d.x, d.z, nx, nz)) { d.x = nx; d.z = nz; if (d.goal && FLIGHT.has(d.phase)) d.needPlan = true; } }   // pushed off the planned line: re-plan from here
         if (!d.balloonNear) { d.balloonNear = true; log(d, 'PARADE', 'Parade balloon ahead: backing off and holding until it has passed.'); if (levelRank(d.level) < levelRank('L1')) setLevel(d, 'L1', 'Parade balloon nearby'); }
         return;
       }
@@ -408,7 +460,7 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
         return;
       }
       case 'confirm': {
-        if (custReplies(o) && S.t - d.confirmStart >= o.replyDelay) { d.confirmed = true; d.phase = 'descend'; log(d, 'CONFIRMED', 'Customer confirmed the spot.'); return; }
+        if (custReplies(o) && S.t - d.confirmStart >= o.replyDelay && !d.event) { d.confirmed = true; d.phase = 'descend'; log(d, 'CONFIRMED', 'Customer confirmed the spot.'); return; }
         if (!custReplies(o) && S.t - d.confirmStart >= 8 && !d.event) openEvent(d, 'silent');
         return;
       }
@@ -416,7 +468,7 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
         if (!d.confettiDone && o.tries === 0 && o.confettiRoll < 0.6 * o.addr.ctx.paradeNear) { d.confettiDone = true; clouds.push({ id: `Cd${++dynClouds}`, t0: S.t, t1: S.t + o.confettiDur, x: o.addr.x, z: o.addr.z, r: 5, top: 6.5, dynamic: true }); log(d, 'EVENT', 'Parade confetti drifts over the yard.'); }
         const cl = cloudOver(d, d.y - SLAB); if (cl && d.y - SLAB < cl.top && hyp(d, cl) < cl.r - 0.5 && !d.event) { openEvent(d, 'occluded', { cloud: cl.id }); return; } if (goTo(d, T, ground + HOVER, dt)) { d.phase = 'scan'; d.timer = 0; } return; }
       case 'shift': { if (goTo(d, T, ground + HOVER, dt, 1.2)) { d.phase = 'scan'; d.timer = 0; log(d, 'SCAN', 'Scanning the backup spot.'); } return; }
-      case 'climb': { if (goTo(d, T, ground + 7.2, dt) && !inCloud(d)) { if (d.event?.type === 'occluded') closeEvent(d.event, 'self'); d.phase = 'descend'; log(d, 'RESCAN', 'Cloud gone: descending to rescan.'); } return; }
+      case 'climb': { if (goTo(d, T, ground + 7.2, dt) && !inCloud(d) && d.event?.status !== 'open') { if (d.event?.type === 'occluded') closeEvent(d.event, 'self'); d.phase = 'descend'; log(d, 'RESCAN', 'Cloud gone: descending to rescan.'); } return; }
       case 'scan': {
         d.timer += dt;
         const cl = cloudOver(d, d.y - SLAB);
@@ -435,7 +487,7 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
         d.waitT += dt; d.timer += dt;
         if (d.timer >= 1) {
           d.timer = 0; const v = checks(d);
-          if (v.ok && !d.event?.waiting) { d.phase = 'lower'; setLevel(d, T.backup ? 'L3' : 'L0', 'Spot clear again: lowering.'); log(d, 'VERIFY_OK', 'Spot clear again: lowering.'); d.waitT = 0; }
+          if (v.ok && !d.event) { d.phase = 'lower'; setLevel(d, T.backup ? 'L3' : 'L0', 'Spot clear again: lowering.'); log(d, 'VERIFY_OK', 'Spot clear again: lowering.'); d.waitT = 0; }
           else if (!v.ok && v.blockers.dyn.length && !d.event) openEvent(d, v.blockers.dyn[0].kind === 'dog' ? 'dog' : 'ped');
           else if (!v.ok && v.blockers.carBlock && !d.event) { if (o.backupOK) switchBackup(d, 'Pad blocked by a car: moving to the pre-authorized backup spot.'); else openEvent(d, 'car'); }
         }
@@ -452,7 +504,7 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
       case 'reel': { d.drop = Math.max(0, d.drop - REEL * dt); if (d.drop <= 1e-3) { d.phase = 'wait'; d.timer = 0; } return; }
       case 'release': {
         d.timer += dt;
-        if (d.timer > 1) { d.parcelAt = { x: T.x, z: T.z }; finishOrder(d, T.backup ? 'delivered-alt' : 'delivered'); d.phase = 'reelup'; }
+        if (d.timer > 1) { d.parcelAt = { x: T.x, z: T.z }; o.dropAt = d.parcelAt; finishOrder(d, T.backup ? 'delivered-alt' : 'delivered'); d.phase = 'reelup'; }
         return;
       }
       case 'reelup': { d.drop = Math.max(0, d.drop - REEL * dt * 1.5); if (d.drop <= 0) d.phase = 'leave'; return; }
@@ -488,16 +540,20 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
   function updateAgents(dt) {
     for (const p of peds) {
       const wants = () => S.drones.filter((d) => d.order && ['enter', 'locate', 'confirm', 'descend', 'scan', 'verify', 'wait'].includes(d.phase) && hyp(d, p) < 40);
-      const retarget = () => { const w = wants(); p.goal = w.length && Rped() < 0.7 ? w[Math.floor(Rped() * w.length)].order.addr : pickAddr(Rped, (x) => 0.4 + x.ctx.paradeNear + 0.6 * x.ctx.tallShare); p.look = 8 + Rped() * 8; };
+      const retarget = () => { const w = wants(); p.goal = w.length && Rped() < 0.7 ? w[Math.floor(Rped() * w.length)].order.addr : pickAddr(Rped, (x) => 0.4 + x.ctx.paradeNear + 0.6 * x.ctx.tallShare); p.look = 8 + Rped() * 8; p.path = null; };
       if (p.wait > 0) { p.wait -= dt; p.phase += dt * 0.5; continue; }
-      p.look = (p.look ?? 10) - dt; if (p.look <= 0) retarget();
-      const dx = p.goal.x - p.x, dz = p.goal.z - p.z, L = Math.hypot(dx, dz);
-      if (L < 0.25) { p.wait = 2 + Rped() * 3; retarget(); continue; }
-      p.x += dx / L * p.speed * dt; p.z += dz / L * p.speed * dt; p.heading = Math.atan2(dx, dz); p.phase += dt * 6;
+      p.look = (p.look ?? 10) - dt; if (p.look <= 0 && !p.inLot) retarget();      // changes of mind happen on the street, not inside a yard
+      if (!p.path) p.path = walkPath(p, p.goal);
+      const q = p.path[0];
+      if (!q) { p.wait = 2 + Rped() * 3; p.inLot = true; retarget(); continue; }   // arrived at the pad: stand for a moment, then walk off
+      const dx = q.x - p.x, dz = q.z - p.z, L = Math.hypot(dx, dz), s = p.speed * dt;
+      if (L <= s) { p.x = q.x; p.z = q.z; p.path.shift(); } else { p.x += dx / L * s; p.z += dz / L * s; }
+      if (L > 1e-4) p.heading = Math.atan2(dx, dz);
+      p.inLot = p.path.length <= 1 && Math.hypot(p.x - p.goal.x, p.z - p.goal.z) < 3.5; p.phase += dt * 6;
     }
     for (const g of dogs) {
       if (g.state === 'roam') {
-        g.x = g.home.x + BACKUP_DX + Math.sin(S.t * 0.4 + g.k) * 0.6; g.z = g.home.z + 0.4 + Math.cos(S.t * 0.3 + g.k) * 0.4;
+        const y = dogYard(g.home); g.x = y.x + Math.sin(S.t * 0.4 + g.k) * 0.6; g.z = y.z + 0.4 + Math.cos(S.t * 0.3 + g.k) * 0.4;
         for (const d of S.drones) if (d.order && d.order.addr === g.home && d.phase === 'lower' && d.drop >= HOVER * 0.4 && d.order.dogAttn && g.forOrder !== d.order.id) {
           g.state = 'run'; g.t0 = S.t; g.stay = 18 + Rdog() * 24; g.forOrder = d.order.id; g.from = { x: g.x, z: g.z }; g.to = { x: g.home.x + 0.35, z: g.home.z + 0.2 };
         }
@@ -556,7 +612,7 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
         if (hyp(d, z) < z.r + 0.6 || hyp(ahead, z) < z.r + 0.6 || targetIn) { d.zoneSeen.add(z.id); openEvent(d, 'nofly', { zone: z.id }); break; }
       }
       // gust toward a building taller than the drone
-      if (!d.event && gu && gu.v >= 9 && S.t >= (d.gustIgnore ?? 0)) {
+      if (!d.event && gu && gu.v >= 9 && S.t >= (d.gustIgnore ?? 0) && d.y - SLAB > 1.5) {   // airborne only: a drone still on its slot is not pushed anywhere
         for (const o of obstacles) {
           const cx = (o.x0 + o.x1) / 2, cz = (o.z0 + o.z1) / 2, dx = cx - d.x, dz = cz - d.z, L = Math.hypot(dx, dz) || 1;
           const gap = Math.max(o.x0 - d.x, 0, d.x - o.x1) + Math.max(o.z0 - d.z, 0, d.z - o.z1);
@@ -566,7 +622,7 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
     }
     // pedestrians / dogs reaching the descent zone while a parcel is down are handled by the drone state machine; track closest approach
     for (const ev of S.events) {
-      if (ev.tier !== 1 || (ev.status !== 'open' && ev.status !== 'acknowledged')) continue;
+      if (ev.tier !== 1 || !['open', 'acknowledged', 'auto'].includes(ev.status)) continue;
       const d = droneOf(ev.drone); let m = Infinity; const me = { x: d.x, y: d.y - d.drop, z: d.z };
       if (ev.type === 'conflict') m = dist3(d, droneOf(ev.with)) * SCALE_M;
       else if (ev.type === 'ped' || ev.type === 'dog') for (const a of [...peds, ...dogs]) if (hyp(a, d) < 4) { const pp = { x: a.x, y: SLAB + 0.4, z: a.z }; m = Math.min(m, dist3(pp, d) * SCALE_M); if (d.drop > 0.05) m = Math.min(m, dist3(pp, me) * SCALE_M); }
@@ -576,7 +632,7 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
   function selfClose() {
     const gu = active(gusts, S.t);
     for (const ev of S.events) {
-      if (ev.status !== 'open' && ev.status !== 'acknowledged') continue;
+      if (!['open', 'acknowledged', 'auto'].includes(ev.status)) continue;
       const d = droneOf(ev.drone); let clear = false;
       switch (ev.type) {
         case 'ped': case 'dog': { const T = d.target; clear = !T || ![...peds, ...dogs].some((a) => hyp(a, T) <= (a.kind === 'dog' ? DOG_ZONE : PED_ZONE) + 0.8); break; }
@@ -586,19 +642,21 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
         case 'nofly': { const z = zones.find((x) => x.id === ev.zone); clear = !z || S.t >= z.t1; break; }
         case 'silent': clear = d.confirmed; break;
         case 'car': clear = !!d.target?.backup || S.t >= d.order.carUntil; break;
-        case 'conflict': clear = false; break;
+        case 'conflict': { const o = droneOf(ev.with); clear = !d.yieldFor && !o.yieldFor && S.t - ev.opened > 2; break; }
       }
-      if (clear && ev.type !== 'conflict') {
+      ev.clearNow = clear;
+      if (ev.status === 'open') continue;                                   // ② / ③: stays on hold until the operator decides
+      if (clear) {
         closeEvent(ev, 'self');
         if (ev.type === 'occluded' && d.phase === 'climb') { d.phase = 'descend'; }
         if ((ev.type === 'ped' || ev.type === 'dog') && d.phase === 'wait') d.timer = 1;
       }
     }
   }
-  function deadlines() {
-    for (const ev of S.events) if (ev.status === 'open' && S.t >= ev.deadline) resolve(ev.id, ev.defaultId, 'auto');
-  }
-  const queueList = () => S.events.filter((e) => e.status === 'open').sort((a, b) => a.tier - b.tier || (a.deadline - S.t) - (b.deadline - S.t));
+  // the operator's list: critical events the drones are handling (for information / override) first, then everything on hold,
+  // by tier, then the one that has been waiting longest
+  const queueList = () => S.events.filter((e) => e.status === 'open' || e.status === 'auto').sort((a, b) => a.tier - b.tier || (a.status === 'auto') - (b.status === 'auto') || a.opened - b.opened);
+  const onHold = () => S.events.filter((e) => e.status === 'open');
 
   // ---------------------------------------------------------------- commands
   function command(droneId, id) {
@@ -634,7 +692,6 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
     conflictScan();
     separationGuard();
     detectors();
-    deadlines();
     selfClose();
     for (const d of S.drones) {
       stepDrone(d, dt);
@@ -644,32 +701,36 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
         d.series.push([+(S.t - d.order.tAssigned).toFixed(1), +dm.toFixed(1)]); if (d.series.length > 400) d.series.shift();
       }
     }
-    S.queuePeak = Math.max(S.queuePeak, queueList().length);
-    if (S.t - (S.lastSample ?? -9) >= 5) { S.lastSample = S.t; S.series.push([+S.t.toFixed(0), queueList().length]); }
+    const held = onHold().length; S.queuePeak = Math.max(S.queuePeak, held); S.holdS = (S.holdS ?? 0) + held * dt;
+    if (S.t - (S.lastSample ?? -9) >= 5) { S.lastSample = S.t; S.series.push([+S.t.toFixed(0), held]); }
   }
   function run(seconds, dt = 0.1) { for (let t = 0; t < seconds; t += dt) step(dt); return S; }
 
   // ---------------------------------------------------------------- scorecard
   function scorecard() {
     const ev = S.events, mean = (a) => (a.length ? +(a.reduce((x, y) => x + y, 0) / a.length).toFixed(1) : null);
-    const react = (t) => mean(ev.filter((e) => e.tier === t && e.reaction != null).map((e) => e.reaction));
     const fin = orders.filter((x) => x.outcome), n = Math.max(1, fin.length), by = (o) => fin.filter((x) => x.outcome === o).length;
-    const aborted = by('aborted');
+    const aborted = by('aborted'), minutes = Math.max(1 / 6, S.t / 60);
     const t1 = ev.filter((e) => e.tier === 1), closest = t1.map((e) => e.closestM).filter((x) => x != null);
-    const missed = ev.filter((e) => e.missed), minutes = Math.max(1 / 6, S.t / 60);
+    // ② / ③ events: how long the drone stood on hold before the operator answered (still open = counted up to now)
+    const held = ev.filter((e) => e.tier > 1), waitOf = (e) => (e.resolvedAt ?? (e.status === 'open' ? S.t : e.closedAt ?? S.t)) - e.opened;
+    const wait = (t) => mean(held.filter((e) => e.tier === t).map(waitOf));
+    const weighted = held.reduce((x, e) => x + waitOf(e) * (e.tier === 2 ? 2 : 1), 0);
     const dels = orders.filter((o) => o.outcome && o.outcome !== 'aborted' && o.tDone != null && o.tAssigned != null).map((o) => o.tDone - o.tAssigned);
     return {
-      time: +S.t.toFixed(0), endedBy: null, orders: fin.length,
-      reaction: { 1: react(1), 2: react(2), 3: react(3) }, missed: missed.length, missedByTier: { 1: missed.filter((e) => e.tier === 1).length, 2: missed.filter((e) => e.tier === 2).length, 3: missed.filter((e) => e.tier === 3).length },
+      time: +S.t.toFixed(0), orders: fin.length,
+      wait: { 2: wait(2), 3: wait(3) }, longestWaitS: held.length ? +Math.max(...held.map(waitOf)).toFixed(0) : null, onHoldNow: onHold().length, unanswered: held.filter((e) => e.status === 'open').length,
+      holdSharePct: +((S.holdS ?? 0) / (N_DRONES * Math.max(1, S.t)) * 100).toFixed(1),
+      autoHandled: t1.length, overrides: t1.filter((e) => e.resolvedBy === 'operator' && !['wait', 'rule'].includes(e.option)).length,
       delivered: +(by('delivered') / n * 100).toFixed(0), deliveredAlt: +(by('delivered-alt') / n * 100).toFixed(0), aborted: +(aborted / n * 100).toFixed(0), redelivered: orders.filter((o) => o.redelivered).length,
       closestTier1M: closest.length ? Math.min(...closest) : null, eventsTotal: ev.length, tier1: t1.length, eventsPerMin: +(ev.length / minutes).toFixed(1), peakQueue: S.queuePeak, avgDeliveryS: mean(dels),
       avgLocateS: mean(fin.filter((x) => x.locateS != null).map((x) => x.locateS)), byType: Object.fromEntries(EVENT_TYPES.map((t) => [t, ev.filter((e) => e.type === t).length])),
-      score: Math.max(0, Math.round(100 - 1.5 * missed.filter((e) => e.tier === 1).length - 0.8 * missed.filter((e) => e.tier === 2).length - 0.4 * missed.filter((e) => e.tier === 3).length - 0.5 * aborted / n * 100)),
+      score: Math.max(0, Math.round(100 - Math.min(60, weighted / minutes * 0.12) - 0.5 * aborted / n * 100)),
     };
   }
 
   return {
-    state: S, step, run, resolve, command, available, checks: (id) => { const d = droneOf(id); return d?.order ? checks(d).list : []; }, queue: queueList, scorecard, parcelPos, droneOf, flockBirds, activeGust: () => active(gusts, S.t), activeZones: () => zones.filter((z) => S.t >= z.t0 && S.t < z.t1), activeCloud: () => active(clouds, S.t),
+    state: S, step, run, resolve, command, available, checks: (id) => { const d = droneOf(id); return d?.order ? checks(d).list : []; }, queue: queueList, onHold, scorecard, backupOf: (o) => backupOf(o), parcelPos, droneOf, flockBirds, activeGust: () => active(gusts, S.t), activeZones: () => zones.filter((z) => S.t >= z.t0 && S.t < z.t1), activeCloud: () => active(clouds, S.t),
     knowledgeCells(id) { const d = droneOf(id), K = d?.know; if (!K) return []; const out = []; for (let k = 0; k < GRID * GRID; k++) out.push({ x0: K.ox + (k % GRID), z0: K.oz + Math.floor(k / GRID), state: K.state[k], age: S.t - K.seen[k] }); return out; },
     balloon: (t) => balloonAt(t, true),
     debugOpen(id, type) { return openEvent(droneOf(id), type); },

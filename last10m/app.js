@@ -1,8 +1,8 @@
 // Last 10m v2 — the application: one shared city, nine drones, a human operator who triages.
 // Views: Map (routes, incident dots, delivery radius) · Monitor (3×3 wall of drone cameras) · Scene (one drone: console + camera).
 // main.js builds and draws the city; this module runs the world simulation on top of it.
-import { BOARD, PRESETS, DEFAULT_SETTINGS, createWorld, TIER_NAME, TITLE, SCENE_OF, WORLD_CONST } from './world.js?v=7';
-import { createStage } from './stage.js?v=7';
+import { BOARD, PRESETS, DEFAULT_SETTINGS, createWorld, TIER_NAME, TITLE, SCENE_OF, WORLD_CONST } from './world.js?v=8';
+import { createStage } from './stage.js?v=8';
 import { SCALE_M, HUB } from './scenes.js';
 import { LEVEL_TEXT } from './sim.js';
 
@@ -40,7 +40,7 @@ function startRun() {
   ensureCity();
   if (world && world.state.t > 30) { runs = [{ n: runNo, settings: { ...lastSettings }, card: world.scorecard() }, ...runs].slice(0, 2); store.set('l10.v2.runs', runs); store.set('l10.v2.memory', memory); }   // the run that was going is kept for the comparison
   lastSettings = { ...settings };
-  world = createWorld(settings, { obstacles: cityData.obstacles, tiles: cityData.tiles, memory, plan: planner });
+  world = createWorld(settings, { obstacles: cityData.obstacles, low: cityData.low, roads: cityData.roads, tiles: cityData.tiles, memory, plan: planner });
   runNo++; store.set('l10.v2.runNo', runNo);
   scoreOpen = false; sideSig = ''; consoleSig = ''; if (mode === 'scene' && !world.droneOf(sel)) sel = 'D-01';
   renderBoard(); renderSide(); renderStatus(); renderScore();
@@ -64,15 +64,15 @@ city.S.layers.rest = false; city.S.layers.perm = false; city.S.layers.cand = fal
 const hideAirspaceDrones = () => city.S.couriers.forEach((c) => { c.mesh.visible = false; if (c.label) c.label.visible = false; if (c.halo) c.halo.visible = false; });
 
 // ---------------- helpers ----------------
-const tierOf = (d) => (d.event && ['open', 'acknowledged'].includes(d.event.status) ? d.event.tier : 0);
-const openTier = (d) => (d.event?.status === 'open' ? d.event.tier : 0);
+const tierOf = (d) => (d.event && ['open', 'acknowledged', 'auto'].includes(d.event.status) ? d.event.tier : 0);
+const openTier = (d) => (['open', 'auto'].includes(d.event?.status) ? d.event.tier : 0);   // flashing: critical, being handled right now
 const orderLine = (d) => (d.order ? `#${d.order.id}${d.order.urgent ? ' · URGENT' : ''} → ${d.order.addr.name}` : 'idle at hub');
 const phaseText = (d) => ({ idle: 'idle at hub', enter: 'flying out', locate: 'locating', confirm: 'asking customer', descend: 'descending', scan: 'scanning', verify: 'verifying', wait: 'waiting', lower: 'lowering', reel: 'reeling in', release: 'releasing', reelup: 'reeling up', leave: 'flying home', return: 'returning (aborted)', land: 'landing', shift: 'moving to backup', climb: 'climbing', pickup: 'collecting at the shop' }[d.phase] ?? d.phase);
 const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 function counts() {
-  const S = world.state, c = { 1: 0, 2: 0, 3: 0 }; for (const e of S.events) if (e.status === 'open') c[e.tier]++;
+  const S = world.state, c = { 1: 0, 2: 0, 3: 0 }; for (const e of S.events) if (e.status === 'open' || e.status === 'auto') c[e.tier]++;
   const delivered = S.orders.filter((o) => o.outcome && o.outcome !== 'aborted').length, aborted = S.orders.filter((o) => o.outcome === 'aborted').length;
-  return { open: c, delivered, aborted, inflight: S.drones.filter((d) => d.order).length, missed: S.events.filter((e) => e.missed).length };
+  return { open: c, delivered, aborted, inflight: S.drones.filter((d) => d.order).length, onHold: S.events.filter((e) => e.status === 'open').length };
 }
 
 // ---------------- mode switching ----------------
@@ -133,63 +133,73 @@ function restart(msg) {
 }
 
 // ---------------- side panel: To resolve (map / monitor) · console (scene) ----------------
+const mmss = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 function rowHTML(e) {
-  const d = world.droneOf(e.drone), left = Math.max(0, e.deadline - world.state.t);
-  return `<button type="button" class="item ${TIER_CLS[e.tier]}" data-open="${e.drone}" data-ev="${e.id}"><span class="tdot" style="background:${TIER_COLOR[e.tier]}">${e.tier}</span>
+  const auto = e.status === 'auto', waited = world.state.t - e.opened;
+  return `<button type="button" class="item ${TIER_CLS[e.tier]}${auto ? ' auto' : ''}" data-open="${e.drone}" data-ev="${e.id}"><span class="tdot" style="background:${TIER_COLOR[e.tier]}">${e.tier}</span>
     <span style="min-width:0;flex:1"><b>${esc(e.drone)} · ${esc(TITLE[e.type])}${e.urgent ? '<span class="urg">URGENT</span>' : ''}</b>
-    <span class="small">${esc(TIER_NAME[e.tier])} · order #${e.order}${e.with ? ` · with ${esc(e.with)}` : ''}</span>
-    <span class="cbar"><i style="width:${Math.max(0, Math.min(100, left / e.window * 100))}%;background:${TIER_COLOR[e.tier]}"></i></span></span><span class="when" data-left="${e.id}">${Math.ceil(left)} s</span></button>`;
+    <span class="small">${auto ? 'Handled automatically · no action needed' : e.clearNow ? 'Looks clear now · tap to continue' : 'On hold · waiting for you'}</span></span>
+    <span class="when">${auto ? 'AUTO' : mmss(waited)}</span></button>`;
 }
 function renderSide() {
   if (!world) return;
   const el = $('l10-side');
   if (mode === 'scene') { renderConsole(true); return; }
   const q = world.queue(), c = counts();
-  const sig = q.map((e) => e.id).join();
+  const sig = q.map((e) => `${e.id}${e.status}${e.clearNow ? 1 : 0}`).join();
   if (sig !== sideSig || !el.querySelector('.list')) {
     sideSig = sig;
-    el.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:baseline"><h2>To resolve</h2><span class="small">tier, then time left</span></div>
+    el.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:baseline"><h2>To resolve</h2><span class="small">tier, then longest waiting</span></div>
       <div class="tabs"><a class="t1">① Critical <span>${c.open[1]}</span></a><a class="t2">② Urgent <span>${c.open[2]}</span></a><a class="t3">③ Can wait <span>${c.open[3]}</span></a></div>
       <div class="list">${q.length ? q.map(rowHTML).join('') : '<p class="small" style="padding:6px 2px">Nothing to resolve. Drones are working.</p>'}</div>`;
   } else {
     el.querySelectorAll('.tabs a span').forEach((s, i) => { s.textContent = c.open[i + 1]; });
-    for (const e of q) { const left = Math.max(0, e.deadline - world.state.t), row = el.querySelector(`[data-ev="${e.id}"]`); if (!row) continue; row.querySelector('.cbar i').style.width = `${Math.max(0, Math.min(100, left / e.window * 100))}%`; row.querySelector('.when').textContent = `${Math.ceil(left)} s`; }
+    for (const e of q) { const row = el.querySelector(`[data-ev="${e.id}"]`); if (row && e.status === 'open') row.querySelector('.when').textContent = mmss(world.state.t - e.opened); }
   }
 }
-function foundText(d, ev) {
-  const S = world.state;
+// one plain sentence: what happened, and what the drone did about it
+function whatHappened(d, ev) {
+  const S = world.state, T = d.target ?? d.order?.addr;
   switch (ev.type) {
-    case 'ped': case 'dog': { const T = d.target; const a = [...S.agents.peds, ...S.agents.dogs].filter((x) => (ev.type === 'dog') === (x.kind === 'dog')).sort((x, y) => dist(x, T) - dist(y, T))[0]; return a ? `${a.kind === 'dog' ? 'dog' : 'person'} ${(dist(a, T) * SCALE_M).toFixed(1)} m from the drop spot` : 'someone near the drop spot'; }
-    case 'conflict': { const o = world.droneOf(ev.with); return `${o.id} ${(Math.hypot(o.x - d.x, o.z - d.z) * SCALE_M).toFixed(0)} m away · ${ev.kind2}`; }
-    case 'nofly': return `no-fly zone ${ev.zone} opened across the route / pad`;
-    case 'gust': return `gust of ${(world.activeGust()?.v ?? 0).toFixed(0)} m/s toward a tall building`;
-    case 'pigeon': return 'pigeon flock inside the 12 m buffer';
-    case 'occluded': return 'sensor range under 3 m (confetti)';
-    case 'car': return 'a car is parked on the pad';
-    case 'silent': return `customer silent for ${Math.round(S.t - (d.confirmStart ?? S.t))} s`;
+    case 'ped': case 'dog': { const a = [...S.agents.peds, ...S.agents.dogs].filter((x) => (ev.type === 'dog') === (x.kind === 'dog')).sort((x, y) => dist(x, T) - dist(y, T))[0]; const m = a ? `${(dist(a, T) * SCALE_M).toFixed(0)} m` : 'close';
+      return `${ev.type === 'dog' ? 'A dog is' : 'Someone is'} ${m} from the drop spot.`; }
+    case 'conflict': { const o = world.droneOf(ev.with); return `${o.id} needs the same airspace (${ev.kind2}).`; }
+    case 'nofly': return 'A temporary no-fly zone opened on the route.';
+    case 'gust': return `A ${(world.activeGust()?.v ?? 12).toFixed(0)} m/s gust is pushing toward a tall building.`;
+    case 'pigeon': return 'A pigeon flock is in the flight path.';
+    case 'occluded': return 'Parade confetti hides the drop spot from the sensor.';
+    case 'car': return 'A car is parked on the delivery pad.';
+    case 'silent': return `The customer has not answered for ${mmss(S.t - (d.confirmStart ?? S.t))}.`;
   }
-  return '—';
+  return '';
 }
-const WHY = { ped: 'person in the descent zone', dog: 'animal on the drop zone', conflict: 'two flight paths share the same airspace', nofly: 'temporary restriction over the route or pad', gust: 'gust may push the drone or tether into a building', pigeon: 'birds on the planned path', occluded: 'cannot observe the drop zone', car: 'the pad is occupied by a static object', silent: 'drop spot not confirmed by the customer' };
-function lastFail(d) { const c = (d.lastCheck ?? []).find((x) => !x.ok); return c ? { found: c.detail, why: `${c.label} failed` } : null; }
+const cap = (t) => (t ? t[0].toUpperCase() + t.slice(1) : '');
 function renderConsole(force) {
   const el = $('l10-side'), d = sel && world ? world.droneOf(sel) : null; if (!d) return;
-  const S = world.state, ev = d.event, openEv = ev?.status === 'open' ? ev : null, checks = world.checks(d.id), cmds = world.available(d.id);
-  const sig = [d.phase, ev?.id, ev?.status, d.level, d.order?.id, d.held, d.hold, checks.map((c) => c.ok).join(), S.done, S.events.length].join('|');
-  if (!force && sig === consoleSig) { if (openEv) { const left = Math.max(0, openEv.deadline - S.t); const c = $('l10-count'); if (c) c.textContent = `${Math.ceil(left)} s`; const b = $('l10-countbar'); if (b) b.style.width = `${Math.max(0, Math.min(100, left / openEv.window * 100))}%`; } return; }
+  const S = world.state, ev = d.event && ['open', 'auto', 'acknowledged'].includes(d.event.status) ? d.event : null;
+  const live = ev && (ev.status === 'open' || (ev.status === 'auto' && !ev.option));
+  const sig = [d.phase, ev?.id, ev?.status, ev?.option, ev?.clearNow, d.order?.id, S.done].join('|');
+  if (!force && sig === consoleSig) { const w = $('l10-waited'); if (w && ev?.status === 'open') w.textContent = mmss(S.t - ev.opened); return; }
   consoleSig = sig;
-  const tier = ev ? ev.tier : 0, f = ev ? { found: foundText(d, ev), why: WHY[ev.type], tried: ev.safeAction, proposes: ev.options.find((o) => o.id === ev.defaultId)?.label } : (lastFail(d) ?? {});
-  el.innerHTML = `<div id="l10-console" style="display:flex;flex-direction:column;gap:10px;min-height:0">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><div><h2 style="font-size:18px">${esc(d.id)} · ${esc(phaseText(d))}</h2><span class="small">${esc(orderLine(d))} · ${esc(LEVEL_TEXT[d.level])}</span></div>
-      ${tier ? `<span class="tchip" style="background:${TIER_COLOR[tier]}">${tier} · ${esc(TIER_NAME[tier])}</span>` : `<span class="chip grey">${d.order ? 'ON TRACK' : 'IDLE'}</span>`}</div>
-    ${checks.length ? `<div class="checks">${checks.map((c) => `<span class="${c.ok ? '' : 'bad'}" title="${esc(c.detail)}">${c.ok ? '✓' : '✕'} ${esc(c.label)}</span>`).join('')}</div>` : ''}
-    ${ev ? `<div class="evcard"><b>${esc(TITLE[ev.type])}</b><span class="small">scene ${SCENE_OF[ev.type]} · tier ${ev.tier}${ev.urgent ? ' · raised by the urgent order' : ''} · opened ${fmtT(ev.opened)}</span></div>` : ''}
-    <div class="q"><div><div>FOUND</div>${esc(f.found ?? '—')}</div><div><div>WHY NOT</div>${esc(f.why ?? '—')}</div><div><div>TRIED</div>${esc(f.tried ?? '—')}</div><div><div>PROPOSES</div>${esc(f.proposes ?? (d.order ? 'continue' : 'wait for an order'))}</div></div>
-    ${openEv ? `<div class="opts">${openEv.options.map((o) => `<button type="button" class="${o.primary ? 'black wide' : 'pill'}" data-resolve="${openEv.id}" data-opt="${o.id}">${esc(o.label)}</button>`).join('')}</div>
-      <div><div class="small" style="display:flex;justify-content:space-between"><span>No command → fixed rule: ${esc(openEv.options.find((o) => o.id === openEv.defaultId)?.label ?? '')} <em>(missed decision)</em></span><b style="color:${TIER_COLOR[openEv.tier]}" id="l10-count">${Math.max(0, Math.ceil(openEv.deadline - S.t))} s</b></div><div class="bar"><div id="l10-countbar" style="width:${Math.max(0, Math.min(100, (openEv.deadline - S.t) / openEv.window * 100))}%;background:${TIER_COLOR[openEv.tier]}"></div></div></div>`
-      : (ev ? `<div class="small">Decision recorded: ${esc(ev.options.find((o) => o.id === ev.option)?.label ?? '')} ${ev.resolvedBy === 'auto' ? '(fixed rule, no reply)' : ''}. Waiting for the hazard to clear.</div>` : '')}
-    <div class="opts">${cmds.filter((c) => c.id !== 'force').map((c) => `<button type="button" class="pill" data-cmd="${c.id}" ${c.enabled ? '' : 'disabled'}>${esc(c.label)}</button>`).join('')}</div>
-    <button type="button" class="force" disabled>Force lower · ${esc(cmds.find((c) => c.id === 'force').reason)}</button></div>`;
+  const head = `<div class="c-head"><div><h2>${esc(d.id)} · ${esc(phaseText(d))}</h2><span class="small">${esc(orderLine(d))}</span></div>
+      ${ev ? `<span class="tchip" style="background:${TIER_COLOR[ev.tier]}">${ev.tier} · ${esc(TIER_NAME[ev.tier])}</span>` : `<span class="chip ${d.order ? 'green' : 'grey'}">${d.order ? 'Normal' : 'Idle'}</span>`}</div>`;
+  if (!ev) {
+    el.innerHTML = `<div id="l10-console">${head}<p class="c-note">${d.order ? 'No problem. Nothing to do.' : 'Waiting at the hub for the next order.'}</p>
+      ${d.order && !['return', 'land', 'idle'].includes(d.phase) ? '<div class="opts"><button type="button" class="pill wide" data-cmd="return">Return to hub</button></div>' : ''}</div>`;
+    return;
+  }
+  const status = ev.status === 'auto' ? (ev.option ? 'Override sent.' : 'Handled automatically. It continues by itself when it is safe. You can still change it:')
+    : ev.status === 'acknowledged' ? 'You chose to wait. It continues by itself when it is clear.'
+    : ev.clearNow ? 'It looks clear now. The drone is still on hold until you decide.' : 'On hold until you decide.';
+  const opts = live ? ev.options.filter((o) => !(ev.status === 'auto' && ['wait', 'rule'].includes(o.id))).map((o) => {
+    const label = ev.clearNow && o.id === 'wait' ? 'Continue (it is clear)' : o.label;
+    return `<button type="button" class="${o.primary && ev.status === 'open' ? 'black wide' : 'pill'}" data-resolve="${ev.id}" data-opt="${o.id}">${esc(label)}</button>`;
+  }).join('') : '';
+  el.innerHTML = `<div id="l10-console">${head}
+    <div class="evcard t${ev.tier}"><b>${esc(TITLE[ev.type])}${ev.urgent ? ' <span class="urg">URGENT ORDER</span>' : ''}</b>
+      <p>${esc(whatHappened(d, ev))} ${esc(cap(ev.safeAction ?? ''))}.</p>
+      <span class="small">${esc(status)}${ev.status === 'open' ? ` · waiting <b id="l10-waited">${mmss(S.t - ev.opened)}</b>` : ''}</span></div>
+    ${opts ? `<div class="opts">${opts}</div>` : ''}</div>`;
 }
 $('l10-side').addEventListener('click', (e) => {
   const rs = e.target.closest('[data-resolve]'); if (rs) { world.resolve(rs.dataset.resolve, rs.dataset.opt); consoleSig = ''; sideSig = ''; renderConsole(true); return; }
@@ -202,7 +212,7 @@ function renderStatus() {
   if (!world) return; const c = counts(), S = world.state;
   $('l10-status').innerHTML = `<span>Time <b>${fmtT(S.t)}</b></span><span>Delivered <b>${c.delivered}</b><i>${c.aborted} aborted</i></span><span>In flight <b>${c.inflight}</b>/9</span>
     <span><i class="tdot s" style="background:${TIER_COLOR[1]}">1</i><b>${c.open[1]}</b></span><span><i class="tdot s" style="background:${TIER_COLOR[2]}">2</i><b>${c.open[2]}</b></span><span><i class="tdot s" style="background:${TIER_COLOR[3]}">3</i><b>${c.open[3]}</b></span>
-    <span>Missed <b>${c.missed}</b></span><span>Run <b>${runNo}</b></span><span><a href="#" data-score="1">Scorecard</a></span>`;
+    <span>On hold <b>${c.onHold}</b></span><span>Run <b>${runNo}</b></span><span><a href="#" data-score="1">Scorecard</a></span>`;
 }
 $('l10-status').addEventListener('click', (e) => { if (e.target.closest('[data-score]')) { e.preventDefault(); scoreOpen = true; renderScore(); } });
 
@@ -211,8 +221,8 @@ const SETTING_LABEL = { preset: 'City', orders: 'Orders', urgentPct: 'Urgent %',
 const PRESET_LABEL = Object.fromEntries(PRESETS.map((p) => [p.id, p.label]));
 const fmtN = (v, u = '') => (v == null ? '—' : `${v}${u}`);
 const ROWS = [
-  ['Score', (c) => c.score, '', 1], ['Avg reaction · ① Critical', (c) => c.reaction[1], ' s', -1], ['Avg reaction · ② Urgent', (c) => c.reaction[2], ' s', -1], ['Avg reaction · ③ Can wait', (c) => c.reaction[3], ' s', -1],
-  ['Missed decisions (fixed rule fired)', (c) => c.missed, '', -1], ['  of which ① Critical', (c) => c.missedByTier[1], '', -1],
+  ['Score', (c) => c.score, '', 1], ['Avg wait for you · ② Urgent', (c) => c.wait?.[2], ' s', -1], ['Avg wait for you · ③ Can wait', (c) => c.wait?.[3], ' s', -1], ['Longest wait', (c) => c.longestWaitS, ' s', -1],
+  ['Fleet time on hold', (c) => c.holdSharePct, ' %', -1], ['Still unanswered', (c) => c.unanswered, '', -1], ['① Critical, handled by the drones', (c) => c.autoHandled, '', 0],
   ['Delivered', (c) => c.delivered, ' %', 1], ['Delivered at backup', (c) => c.deliveredAlt, ' %', 0], ['Aborted', (c) => c.aborted, ' %', -1], ['Redelivered orders', (c) => c.redelivered, '', 0],
   ['Closest approach in ① events', (c) => c.closestTier1M, ' m', 1], ['Events per minute', (c) => c.eventsPerMin, '', 0], ['Peak queue length', (c) => c.peakQueue, '', -1], ['Avg delivery time', (c) => c.avgDeliveryS, ' s', -1], ['Run time', (c) => c.time, ' s', 0],
 ];
@@ -269,13 +279,13 @@ function drawMap() {
   }
   // incident dots: where each incident happened; colour follows the tier
   for (const e of S.events.slice(-120)) {
-    const p = P(e.pos.x, e.pos.z, 0.5), live = e.status === 'open', col = TIER_COLOR[e.tier], rad = live ? 7 : 4.5;
+    const p = P(e.pos.x, e.pos.z, 0.5), live = e.status === 'open' || e.status === 'auto', col = TIER_COLOR[e.tier], rad = live ? 7 : 4.5;
     if (live && e.tier === 1) { const k = (t * 1.6) % 1; fxg.strokeStyle = col; fxg.globalAlpha = 1 - k; fxg.lineWidth = 2; fxg.beginPath(); fxg.arc(p.x, p.y, rad + 4 + k * 14, 0, 7); fxg.stroke(); fxg.globalAlpha = 1; }
     fxg.globalAlpha = live ? 1 : 0.7; fxg.fillStyle = col; fxg.strokeStyle = '#fff'; fxg.lineWidth = 1.5; fxg.beginPath(); fxg.arc(p.x, p.y, rad, 0, 7); fxg.fill(); fxg.stroke(); fxg.globalAlpha = 1;
   }
   // warning labels: only a drone with an open event gets one (colour = tier); idle and normal drones carry no marker
   [...frames.children].forEach((b, i) => {
-    const d = S.drones[i], ev = d.event?.status === 'open' ? d.event : null;
+    const d = S.drones[i], ev = ['open', 'auto'].includes(d.event?.status) ? d.event : null;
     if (!ev) { if (!b.hidden) b.hidden = true; return; }
     if (b.hidden) b.hidden = false;
     const p = P(d.x, d.z, d.y); b.style.left = `${p.x + 14}px`; b.style.top = `${p.y - 14}px`;
@@ -301,7 +311,7 @@ function drawOverlay(d, cam) {
   if (o) {
     const blocked = d.lastCheck?.some((c) => !c.ok) && !d.target?.backup;
     const t = P(o.addr.x, o.addr.z); L.push({ ...t, side: 'r', cls: blocked ? 'red' : '', text: `Target · ${o.addr.name}${blocked ? ' · blocked' : ''}` });
-    const b = P(o.addr.x - 3.2, o.addr.z); L.push({ ...b, side: 'r', cls: d.target?.backup ? 'green' : '', text: d.target?.backup ? 'Backup · in use' : 'Backup spot' });
+    if (o.addr.backup) { const b = P(o.addr.backup.x, o.addr.backup.z); L.push({ ...b, side: 'r', cls: d.target?.backup ? 'green' : '', text: d.target?.backup ? 'Backup · in use' : 'Backup spot' }); }
   }
   for (const x of S.drones) if (Math.hypot(x.x - d.x, x.z - d.z) < 14 && x.phase !== 'idle') { const q = P(x.x, x.z, x.y); L.push({ ...q, side: 'l', cls: x === d ? '' : 'dim', text: `${x.id} · ${Math.round((x.y - 0.4) * SCALE_M)} m · ${phaseText(x)}` }); }
   for (const a of [...S.agents.peds, ...S.agents.dogs]) if (o && dist(a, o.addr) < 5) { const q = P(a.x, a.z, 0.6); L.push({ ...q, side: 'r', cls: dist(a, o.addr) < 2.6 ? 'red' : '', text: `${a.kind === 'dog' ? 'Dog' : 'Person'} · ${(dist(a, o.addr) * SCALE_M).toFixed(1)} m` }); }

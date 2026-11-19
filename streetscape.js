@@ -126,11 +126,14 @@ export function buildStreetscape({ scene, camera, world, buildingGroups, ROADS, 
   grids.visible = false; // pavement grid removed (kept off; geometry not built)
 
   // ---------- street furniture -------------------------------------------------------------------
+  const lowObstacles = [];                          // lamp posts and signals: thin, but taller than a drone hovering at 7 m
   const lamp = (x, z) => {
+    lowObstacles.push({ kind: 'lamp', x, z, r: 0.3, h: 2.7 });
     cy(M.ink, x, slab, z, 0.07, 0.12); cy(M.dark, x, slab, z, 0.035, 1.9);
     put(B, cyl, M.light, x, slab + 2.1, z, 0.2, 0.34, 0.2); put(B, cone, M.dark, x, slab + 2.4, z, 0.26, 0.16, 0.26); cy(M.ink, x, slab + 1.9, z, 0.14, 0.05);
   };
   const signal = (x, z, face) => {
+    lowObstacles.push({ kind: 'signal', x, z, r: 0.3, h: 2.6 });
     cy(M.ink, x, slab, z, 0.045, 2.3);
     for (const k of [0, 1]) bx(M.ink, x + face[0] * 0.12, slab + 1.55 + k * 0.5, z + face[1] * 0.12, 0.2, 0.42, 0.2);
     for (const k of [0, 1]) bx(M.white, x + face[0] * 0.2, slab + 1.7 + k * 0.5, z + face[1] * 0.2, face[0] ? 0.03 : 0.12, 0.12, face[1] ? 0.03 : 0.12);
@@ -334,5 +337,5 @@ export function buildStreetscape({ scene, camera, world, buildingGroups, ROADS, 
       c.m.position.set(c.vert ? off : c.s, 0, c.vert ? c.s : off); orient(c.m, dx, dz); kit.setFrame(c.m, c.ph);
     }
   }
-  return { update, root, stats: () => ({ people: people.length, cyclists: cyclists.length, crossings: crossings.length, facades: boxes.length, walkLines: walkLines.length }) };
+  return { update, root, lowObstacles, stats: () => ({ people: people.length, cyclists: cyclists.length, crossings: crossings.length, facades: boxes.length, walkLines: walkLines.length }) };
 }
