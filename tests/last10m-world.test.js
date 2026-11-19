@@ -5,7 +5,7 @@ import { createWorld, DEFAULT_SETTINGS, TIER, EVENT_TYPES, BOARD, paradeDistance
 
 const city = (p) => JSON.parse(readFileSync(new URL(`./fixtures/city-${p}.json`, import.meta.url)));
 const CITY = { high: city('high'), low: city('low'), mixed: city('mixed') };
-const make = (over = {}, memory = {}) => { const p = over.preset ?? 'mixed'; return createWorld({ ...DEFAULT_SETTINGS, ...over }, { obstacles: CITY[p].obstacles, low: CITY[p].low, roads: CITY[p].roads, tiles: CITY[p].tiles, memory }); };
+const make = (over = {}, memory = {}) => { const p = over.preset ?? 'mixed'; return createWorld({ ...DEFAULT_SETTINGS, shiftMin: 0, ...over }, { obstacles: CITY[p].obstacles, low: CITY[p].low, roads: CITY[p].roads, tiles: CITY[p].tiles, memory }); };
 // a simulated operator: answers every event that is on hold with its first (recommended) option after `delay` seconds
 const operate = (w, delay = 3) => { for (const e of w.onHold()) if (w.state.t - e.opened >= delay) w.resolve(e.id, (e.options.find((o) => o.primary) ?? e.options[0]).id); };
 const runOp = (w, secs, delay = 3) => { for (let t = 0; t < secs - 1e-9; t += 0.1) { w.step(0.1); operate(w, delay); } return w; };
@@ -243,7 +243,7 @@ test('scorecard: waiting time by tier, fleet time on hold, outcome shares, redel
 });
 
 test('the board only exposes the v2 controls', () => {
-  assert.deepEqual(BOARD.map((b) => b.key), ['orders', 'urgentPct', 'radiusM', 'flocks', 'pedestrians', 'dogs', 'replyPct', 'gustPerMin']);
+  assert.deepEqual(BOARD.map((b) => b.key), ['orders', 'urgentPct', 'radiusM', 'flocks', 'pedestrians', 'dogs', 'replyPct', 'gustPerMin', 'shiftMin']);
   assert.equal(EVENT_TYPES.length, 9);
 });
 
@@ -322,4 +322,58 @@ test('confetti comes in occasional bursts by the parade, not everywhere all the 
   for (let i = 0; i < 9000; i++) { w.step(0.1); operate(w, 2); n++; if (w.state.clouds.some((c) => w.state.t >= c.t0 && w.state.t < c.t1)) on++; }
   assert.ok(on / n < 0.5, `confetti in the air ${(on / n * 100).toFixed(0)}% of the time`);
   for (const c of w.state.clouds) assert.ok(paradeDistance(c) < 4.5, `a confetti cloud ${(paradeDistance(c) * 5).toFixed(0)} m from the parade`);
+});
+
+test('a shift has a fixed length: the world stops at the end and keeps what the report needs', () => {
+  const w = make({ shiftMin: 5 }); runOp(w, 400);
+  assert.equal(w.state.done, true); assert.equal(w.state.endedBy, 'shift'); assert.ok(Math.abs(w.state.t - 300) < 0.2, `ended at ${w.state.t}`);
+  assert.equal(w.state.gantt.length, 9); assert.ok(w.state.gantt.every((r) => r.length >= 299 && /^[ifpwhar]+$/.test(r)));
+  assert.ok(w.state.tracks.some((t) => t.length > 20));
+  const c = w.scorecard(); assert.equal(c.deliveredN + c.deliveredAltN + c.abortedN + c.unfinished, c.received); assert.ok(c.conflicts >= 0 && c.received > 5);
+  const d = make({}); d.run(700); assert.equal(d.state.done, false, 'shiftMin 0 = no end');
+});
+
+test('a silent customer: after 5 minutes without an answer the drone gives up by itself and the order is not sent again', () => {
+  const w = make({ replyPct: 0, dogs: 0, pedestrians: 0, flocks: 0, gustPerMin: 0 });
+  let ev = null; for (let i = 0; i < 6000 && !ev; i++) { w.step(0.1); ev = w.onHold().find((e) => e.type === 'silent'); }
+  assert.ok(ev); const d = w.droneOf(ev.drone), o = d.order, t0 = d.confirmStart;
+  w.run(250); assert.equal(ev.status, 'open', 'it waits for the operator first'); assert.equal(d.order, o);
+  w.run(60); assert.equal(ev.status, 'timeout'); assert.ok(['return', 'land', 'idle'].includes(d.phase) || d.order !== o);
+  w.run(120); assert.equal(o.outcome, 'aborted'); assert.equal(o.reason, 'customer unreachable'); assert.equal(o.tries, 1, 'never queued again');
+  assert.ok(w.state.log.some((e) => /did not answer for 5 minutes/.test(e.text) && e.t - t0 >= 299));
+});
+
+test('a parked car stays a while after the drone arrives; the pad is clear once it has gone', () => {
+  let seen = 0;
+  for (const seed of [1, 2, 3, 4, 5]) {
+    const w = make({ preset: 'low', seed, orders: 40 });
+    for (let i = 0; i < 9000; i++) {
+      w.step(0.1); operate(w, 30);
+      for (const e of w.state.events) if (e.type === 'car' && e.status === 'open') { const o = w.state.orders.find((x) => x.id === e.order); assert.ok(o.carUntil - o.carStay <= e.opened + 1e-6 && Number.isFinite(o.carUntil)); assert.equal(e.clearNow, w.state.t >= o.carUntil); seen++; }
+    }
+  }
+  assert.ok(seen > 0, 'no car event in five low-rise runs');
+});
+
+test('parcels: the customer takes them in after a while; a second parcel is never dropped on top of one still lying there', () => {
+  let beside = 0;
+  for (const preset of ['high', 'low', 'mixed']) {
+    const w = runOp(make({ preset, orders: 45, radiusM: 200 }), 900, 2), done = w.state.orders.filter((o) => o.dropAt);
+    assert.ok(done.length > 15, `${preset}: ${done.length} delivered`);
+    beside += w.state.log.filter((e) => /next to it/.test(e.text)).length;
+    for (const o of done) assert.ok(o.collectDelay >= 30 && o.collectDelay <= 90);
+    for (let a = 0; a < done.length; a++) for (let b = a + 1; b < done.length; b++) {
+      const A = done[a], B = done[b], both = Math.max(A.tDone, B.tDone) < Math.min(A.tDone + A.collectDelay, B.tDone + B.collectDelay);
+      assert.ok(!(both && Math.hypot(A.dropAt.x - B.dropAt.x, A.dropAt.z - B.dropAt.z) < 0.4), `${preset}: #${A.id} and #${B.id} on top of each other`);
+    }
+  }
+  assert.ok(beside > 0, 'a drone should have met an uncollected parcel at least once');
+});
+
+test('drop spots are clear of street furniture (bike racks, planters, café tables, bollards)', () => {
+  for (const preset of ['high', 'low', 'mixed']) {
+    const fur = CITY[preset].low.filter((q) => q.kind === 'furniture'); assert.ok(fur.length > 100);
+    const w = make({ preset, radiusM: 300 }); assert.ok(w.state.addresses.length >= 20, `${preset}: only ${w.state.addresses.length} addresses`);
+    for (const a of w.state.addresses) for (const p of [a, a.backup].filter(Boolean)) assert.ok(!fur.some((q) => Math.hypot(q.x - p.x, q.z - p.z) < q.r + 0.75), `${preset}: drop spot ${p.x},${p.z} on furniture`);
+  }
 });

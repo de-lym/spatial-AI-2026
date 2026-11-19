@@ -189,11 +189,12 @@ export function buildStreetscape({ scene, camera, world, buildingGroups, ROADS, 
       const [nx, nz] = e.n, tx = -nz, tz = nx;      // outward normal, tangent
       const at = (t, off) => [cx + nx * off + tx * t, cz + nz * off + tz * t];
       const frontPad = pad && nz === 1;
-      const slots = [-3.8, -1.3, 1.3, 3.8].filter((t) => !(frontPad && Math.abs(t) < 2.0) && !hub);
+      const slots = [-3.8, -1.3, 1.3, 3.8].filter((t) => !(nz === 1 && Math.abs(t) < 2.0) && !hub);   // the front centre of every lot is its delivery pad (Last 10m): keep it clear
       for (const t of slots) {
         const r = R(); const [px, pz] = at(t, 5.5);
         if (blocked(px, pz, 0.3) || green && r < 0.5) continue;
         const along = !!nz;                           // furniture long axis follows the edge
+        if (r < 0.66) { const [cx2, cz2] = at(t + (r >= 0.30 && r < 0.42 ? 0.55 : 0), 5.4); lowObstacles.push({ kind: 'furniture', x: cx2, z: cz2, r: r < 0.30 ? 1.1 : r < 0.42 ? 1.3 : r < 0.52 ? 0.85 : 0.6, h: r < 0.30 ? 0.8 : 0.5 }); }   // nothing is delivered on top of street furniture
         if (r < 0.30) planter(px, pz, along, 2.0);
         else if (r < 0.42) { const [qx, qz] = at(t, 5.15); if (!blocked(qx, qz, 0.5)) { cafe(qx, qz, Math.atan2(nx, nz)); if (R() < 0.8) cafe(...at(t + 1.1, 5.15), Math.atan2(nx, nz)); } }
         else if (r < 0.52) rack(...at(t, 5.45), along);

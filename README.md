@@ -61,12 +61,26 @@ stuck, the fleet delivers less and the score drops (only the battery reserve can
 An **urgent order raises an event by one tier**. **To resolve** lists the critical events the drones are handling first,
 then everything on hold, longest waiting first. Conflict rule: urgent first, then the lower drone ID; the other yields.
 
-## Scorecard and comparison
+## Shifts and the shift report
 
-The **Scorecard** (status bar) is live, because the simulation never ends. It shows: average wait for you by tier, longest wait,
-share of fleet time on hold, unanswered events, critical events the drones handled, delivered / backup / aborted %, redelivered orders, closest approach during tier ① events, events per minute and
-peak queue length. The run that was going before the last **Apply & restart / Reset** is kept and shown next to the live one (the better value is
-highlighted). Variants are never generated for you: change the board, **Apply & restart**, and compare.
+A run is a **shift of fixed length** (board: *Shift length*, 5–20 min, default 10). When it ends the world stops and the
+**shift report** opens by itself (also available any time from the status bar). It is drawn rather than written:
+
+* **Conditions** — the board settings as a row of pictograms.
+* **Headline numbers** — delivered %, two-drone conflicts, events, average wait for you, fleet time on hold, score; each with
+  ▲ / ▼ against the previous shift.
+* **Orders** — a ring: delivered · at the backup spot · aborted (incl. customers who never answered) · not finished.
+* **Map** — top-down plan of the city with every route flown, every incident (tier colour) and the delivery radius.
+* **What happened** — the nine event types as bars in tier colours, plus what the drones handled by themselves.
+* **The nine drones over the shift** — one bar per drone: at the drop spot · flying · at the shop · going home · on hold for
+  you · critical, handled · at the hub.
+
+**Start the next shift** keeps this one for the ▲ / ▼ comparison. Variants are never generated for you: change the board,
+start the next shift, and compare.
+
+Other rules worth knowing: a customer who has not answered for **5 minutes** is not coming — the drone flies home by
+itself and the order is closed as *customer unreachable*. A parked car stays some time **after the drone arrives**.
+Customers take their parcels in after 30–90 s; a drone that finds an earlier parcel still on the pad drops next to it.
 
 ## Tests
 

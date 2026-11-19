@@ -35,6 +35,7 @@ export const BOARD = [
   { group: 'Agents', key: 'dogs', label: 'Dogs', unit: '', min: 0, max: 8, step: 1, def: 3 },
   { group: 'Agents', key: 'replyPct', label: 'Customer reply rate', unit: '%', min: 0, max: 100, step: 5, def: 70 },
   { group: 'Weather', key: 'gustPerMin', label: 'Gust frequency', unit: '/min', min: 0, max: 6, step: 0.5, def: 2 },
+  { group: 'Shift', key: 'shiftMin', label: 'Shift length', unit: 'min', min: 5, max: 20, step: 1, def: 10 },
 ];
 export const DEFAULT_SETTINGS = { ...Object.fromEntries(BOARD.map((b) => [b.key, b.def])), preset: 'mixed', memory: 'retained', seed: 2026 };
 
@@ -49,6 +50,7 @@ export const EVENT_TYPES = Object.keys(TIER);
 // ------------------------------------------------------------------ constants (formerly board parameters)
 const V = 4, VZ = 1.6, LOWER = 0.28, REEL = 0.7;           // 20 m/s cruise, 1.4 m/s tether pay-out
 const HOVER_BUDGET = 75, TIME_CAP = 900, DEPART_GAP = 5, LAND_GAP = 5, HOLD_Y = 2.4, BAL_CORE = 5.8, BAL_HOLD = 8, MAX_TRIES = 2, BACKUP_DX = -3.2, PAD_DZ = 5.1;
+const SILENT_GIVE_UP = 300, SHIFT_DEFAULT = 10;   // a customer who has not answered for 5 min is not coming; a shift lasts 10 min unless the board says otherwise
 const PED_ZONE = 2.6, DOG_ZONE = 2.2, FRESH_S = 2, BATTERY_RESERVE = 20, N_DRONES = 9, GRID = 13;
 const HOVER_PHASES = new Set(['pickup', 'locate', 'confirm', 'descend', 'scan', 'verify', 'lower', 'wait', 'reel', 'shift', 'climb', 'release']);
 const FLIGHT = new Set(['enter', 'leave', 'return']);
@@ -109,10 +111,13 @@ export function createWorld(input = {}, { obstacles = [], low = [], roads = null
     const i = orderNo++, rr = rng(((P.seed >>> 0) * 13 + i * 97 + 5) >>> 0), a = addresses[Math.floor(rr() * addresses.length)];
     const urgent = rr() < P.urgentPct / 100, shop = shops.length ? shops[Math.floor(rr() * shops.length)] : null;
     const o = { id: i + 1, addr: a, shop, prepS: 2 + rr() * 4, urgent, confettiRoll: rr(), confettiDur: 20 + rr() * 10, status: 'queued', tries: 0, drone: null, tAssigned: null, tDone: null, outcome: null, redelivered: false,
-      car: rr() < 0.02 + 0.45 * a.ctx.lowShare, carUntil: S0.t + 60 + rr() * 110, needConfirm: rr() < 0.6, replyRoll: rr(), replyRoll2: rr(), replyDelay: 4 + rr() * 22, dogAttn: rr() < 0.1 + 0.85 * a.ctx.lowShare, backupOK: !!a.backup && rr() < 0.3 };
+      car: rr() < 0.02 + 0.45 * a.ctx.lowShare, carStay: 60 + rr() * 110, carUntil: Infinity, needConfirm: rr() < 0.6, replyRoll: rr(), replyRoll2: rr(), replyDelay: 4 + rr() * 22, dogAttn: rr() < 0.1 + 0.85 * a.ctx.lowShare, backupOK: !!a.backup && rr() < 0.3 };
+    o.collectDelay = 30 + rr() * 60;                      // the customer comes out and takes the parcel in after this long
     orders.push(o); return o;
   }
   const S0 = { t: 0 };
+  /** an earlier parcel that is still lying at this spot (the customer has not taken it in yet) */
+  const parcelAt = (p, except) => orders.find((x) => x !== except && x.dropAt && S.t < x.tDone + x.collectDelay && Math.hypot(x.dropAt.x - p.x, x.dropAt.z - p.z) < 0.45) ?? null;
   const Rarr = seedOf(9), GAP = 600 / P.orders;
   let nextArrival = 0;
   function arrivals() { while (S.t >= nextArrival) { makeOrder(); nextArrival += nextArrival === 0 ? GAP * 0.3 : GAP * (0.55 + 0.9 * Rarr()); } }
@@ -416,7 +421,7 @@ export function createWorld(input = {}, { obstacles = [], low = [], roads = null
     const flying = FLIGHT.has(d.phase);
     if (d.order && !['return', 'land'].includes(d.phase)) {
       if (d.battery <= BATTERY_RESERVE) return abort(d, `Battery reached the ${BATTERY_RESERVE}% reserve.`);
-      if (d.hover > HOVER_BUDGET && !['open', 'auto'].includes(d.event?.status)) return abort(d, `Hover budget of ${HOVER_BUDGET} s used up.`);   // a drone on hold for the operator is the operator's call
+      if (d.hover > HOVER_BUDGET && !['open', 'auto'].includes(d.event?.status) && d.event?.type !== 'silent') return abort(d, `Hover budget of ${HOVER_BUDGET} s used up.`);   // a drone on hold for the operator is the operator's call
     }
     if (flying) {                                         // route trace for the map
       if (S.t - d.routeLog >= 0.6) { d.routeLog = S.t; d.route.push({ x: d.x, y: d.y, z: d.z, ret: d.phase !== 'enter' }); if (d.route.length > 160) d.route.shift(); }
@@ -450,6 +455,7 @@ export function createWorld(input = {}, { obstacles = [], low = [], roads = null
         if (followPath(d, dt)) {
           d.speedK = 1;
           if (d.leg === 'toShop') { d.phase = 'pickup'; d.pickStep = 'down'; d.timer = 0; d.shopArrive = S.t + (++S.seq) * 1e-6; log(d, 'ARRIVE_SHOP', `Arrived at ${T.name}: collecting the order.`); return; }
+          if (o.car && o.carUntil === Infinity) o.carUntil = S.t + o.carStay;   // the car leaves some time after the drone gets there
           d.phase = 'locate'; d.timer = 0; log(d, 'LOCATE', isKnown(o) ? `Recognised ${o.addr.name} from memory.` : `Searching for ${o.addr.name}…`);
         }
         return;
@@ -478,6 +484,10 @@ export function createWorld(input = {}, { obstacles = [], low = [], roads = null
         if (columnBusy(d)) holdAt(d, T, dt); else backOver(d, T, dt);
         if (custReplies(o) && S.t - d.confirmStart >= o.replyDelay && !d.event) { d.confirmed = true; d.phase = 'descend'; log(d, 'CONFIRMED', 'Customer confirmed the spot.'); return; }
         if (!custReplies(o) && S.t - d.confirmStart >= 8 && !d.event) openEvent(d, 'silent');
+        if (S.t - d.confirmStart >= SILENT_GIVE_UP && !d.confirmed && d.event?.type === 'silent') {   // nobody answered for 5 min: the customer is not coming
+          const ev = d.event; ev.resolvedBy = 'timeout'; o.noRetry = true; o.reason = 'customer unreachable';
+          abort(d, 'The customer did not answer for 5 minutes.'); ev.status = 'timeout'; return;
+        }
         return;
       }
       case 'descend': { if (columnBusy(d) && d.y - SLAB > HOVER + 1) { holdAt(d, T, dt); return; }   // another drone is working that pad: wait on the holding ring, not on top of it
@@ -490,7 +500,13 @@ export function createWorld(input = {}, { obstacles = [], low = [], roads = null
         d.timer += dt;
         const cl = cloudOver(d, d.y - SLAB);
         if (cl && sensorRadius(d) < 1 && !d.event) { openEvent(d, 'occluded', { cloud: cl.id }); return; }
-        if (d.timer >= (isKnown(o) ? 1 : 2.5)) d.phase = 'verify';
+        if (d.timer >= (isKnown(o) ? 1 : 2.5)) {
+          if (parcelAt(T, o) && !T.beside) {                 // an earlier parcel is still lying there: put this one next to it
+            const spot = [[0.7, 0], [-0.7, 0], [0, -0.7], [0.5, -0.5], [-0.5, -0.5]].map(([dx, dz]) => ({ x: T.x + dx, z: T.z + dz })).find((q) => !parcelAt(q, o) && !lowNear(q.x, q.z, 0.35));
+            if (spot) { d.target = { ...T, x: spot.x, z: spot.z, beside: true }; log(d, 'ADAPT', 'An earlier parcel is still on the pad: dropping this one next to it.'); d.phase = 'descend'; return; }
+          }
+          d.phase = 'verify';
+        }
         return;
       }
       case 'verify': {
@@ -543,7 +559,7 @@ export function createWorld(input = {}, { obstacles = [], low = [], roads = null
           d.landing = false;
           d.phase = 'idle'; d.readyAt = S.t + 2; d.battery = 100; d.route = []; d.parcelAt = null; d.delivered = false;
           const o2 = d.order;
-          if (d.abortedOrder && o2 && o2.status === 'active') { o2.tries++; o2.status = o2.tries < MAX_TRIES ? 'queued' : 'aborted'; if (o2.status === 'aborted') { o2.outcome = 'aborted'; o2.tDone = S.t; S.completed++; } }
+          if (d.abortedOrder && o2 && o2.status === 'active') { o2.tries++; o2.status = o2.tries < MAX_TRIES && !o2.noRetry ? 'queued' : 'aborted'; if (o2.status === 'aborted') { o2.outcome = 'aborted'; o2.tDone = S.t; S.completed++; } }
           d.order = null; d.target = null; setLevel(d, 'L0', 'At hub'); d.maxLevel = 'L0';
         }
         return;
@@ -694,7 +710,7 @@ export function createWorld(input = {}, { obstacles = [], low = [], roads = null
         case 'nofly': { const z = zones.find((x) => x.id === ev.zone); clear = !z || S.t >= z.t1; break; }
         case 'silent': clear = d.confirmed; break;
         case 'car': clear = !!d.target?.backup || S.t >= d.order.carUntil; break;
-        case 'conflict': { const o = droneOf(ev.with); clear = !d.yieldFor && !o.yieldFor && S.t - ev.opened > 2; break; }
+        case 'conflict': { const o = droneOf(ev.with); clear = d.yieldFor !== o.id && o.yieldFor !== d.id && S.t - ev.opened > 2; break; }   // only this pair's yield matters, not another one further down the line
       }
       ev.clearNow = clear;
       if (ev.status === 'open') continue;                                   // ② / ③: stays on hold until the operator decides
@@ -737,9 +753,17 @@ export function createWorld(input = {}, { obstacles = [], low = [], roads = null
     const swing = Math.hypot(d.px, d.pz) * 0.5 * (d.drop / HOVER);
     return { x: d.x + d.px * (d.drop / HOVER) + swing * 0.2, y: d.y - 0.25 - d.drop, z: d.z + d.pz * (d.drop / HOVER) };
   }
+  const shiftS = (P.shiftMin ?? SHIFT_DEFAULT) * 60;      // 0 = no shift end (the world runs for ever)
+  // what each drone is doing, one letter per second, for the shift report:
+  // i idle · f flying · p at the shop · w working at the drop spot · h on hold for the operator · a handling a critical event · r going home
+  const stateLetter = (d) => d.phase === 'idle' ? 'i' : d.event?.status === 'open' ? 'h' : d.event?.status === 'auto' ? 'a' : ['return', 'leave', 'land'].includes(d.phase) ? 'r' : d.phase === 'pickup' ? 'p' : FLIGHT.has(d.phase) ? 'f' : 'w';
   function step(dt) {
     if (S.done) return;
-    S.t += dt; S0.t = S.t; extendSchedules(S.t + 90); arrivals();
+    if (shiftS > 0 && S.t >= shiftS - 1e-9) { S.done = true; S.endedBy = 'shift'; return; }
+    S.t += dt;
+    if (Math.floor(S.t) > (S.ganttT ?? -1)) { S.ganttT = Math.floor(S.t); S.gantt ??= S.drones.map(() => ''); S.drones.forEach((d, i) => { S.gantt[i] += stateLetter(d); }); }
+    if (S.t - (S.trackT ?? -9) >= 2) { S.trackT = S.t; S.tracks ??= S.drones.map(() => []); S.drones.forEach((d, i) => { if (d.phase !== 'idle') S.tracks[i].push([+d.x.toFixed(1), +d.z.toFixed(1)]); else if (S.tracks[i].at(-1) !== null) S.tracks[i].push(null); }); }   // where every drone flew, for the report map
+    S0.t = S.t; extendSchedules(S.t + 90); arrivals();
     updateAgents(dt);
     conflictScan();
     separationGuard(dt);
@@ -776,7 +800,8 @@ export function createWorld(input = {}, { obstacles = [], low = [], roads = null
     const weighted = held.reduce((x, e) => x + waitOf(e) * (e.tier === 2 ? 2 : 1), 0);
     const dels = orders.filter((o) => o.outcome && o.outcome !== 'aborted' && o.tDone != null && o.tAssigned != null).map((o) => o.tDone - o.tAssigned);
     return {
-      time: +S.t.toFixed(0), orders: fin.length,
+      time: +S.t.toFixed(0), orders: fin.length, received: orders.length, unfinished: orders.length - fin.length, unreachable: fin.filter((x) => x.reason === 'customer unreachable').length,
+      deliveredN: by('delivered'), deliveredAltN: by('delivered-alt'), abortedN: aborted, conflicts: ev.filter((e) => e.type === 'conflict').length, endedBy: S.endedBy, shiftS,
       wait: { 2: wait(2), 3: wait(3) }, longestWaitS: held.length ? +Math.max(...held.map(waitOf)).toFixed(0) : null, onHoldNow: onHold().length, unanswered: held.filter((e) => e.status === 'open').length,
       holdSharePct: +((S.holdS ?? 0) / (N_DRONES * Math.max(1, S.t)) * 100).toFixed(1),
       autoHandled: t1.length, overrides: t1.filter((e) => e.resolvedBy === 'operator' && !['wait', 'rule'].includes(e.option)).length,
@@ -788,7 +813,7 @@ export function createWorld(input = {}, { obstacles = [], low = [], roads = null
   }
 
   return {
-    state: S, step, run, resolve, command, available, checks: (id) => { const d = droneOf(id); return d?.order ? checks(d).list : []; }, queue: queueList, onHold, scorecard, backupOf: (o) => backupOf(o), parcelPos, droneOf, flockBirds, activeGust: () => active(gusts, S.t), activeZones: () => zones.filter((z) => S.t >= z.t0 && S.t < z.t1), activeCloud: () => active(clouds, S.t),
+    state: S, shiftS, step, run, resolve, command, available, checks: (id) => { const d = droneOf(id); return d?.order ? checks(d).list : []; }, queue: queueList, onHold, scorecard, backupOf: (o) => backupOf(o), parcelPos, droneOf, flockBirds, activeGust: () => active(gusts, S.t), activeZones: () => zones.filter((z) => S.t >= z.t0 && S.t < z.t1), activeCloud: () => active(clouds, S.t),
     knowledgeCells(id) { const d = droneOf(id), K = d?.know; if (!K) return []; const out = []; for (let k = 0; k < GRID * GRID; k++) out.push({ x0: K.ox + (k % GRID), z0: K.oz + Math.floor(k / GRID), state: K.state[k], age: S.t - K.seen[k] }); return out; },
     balloon: (t) => balloonAt(t, true),
     debugOpen(id, type) { return openEvent(droneOf(id), type); },

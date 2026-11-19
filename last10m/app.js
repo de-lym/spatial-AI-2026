@@ -1,8 +1,8 @@
 // Last 10m v2 — the application: one shared city, nine drones, a human operator who triages.
 // Views: Map (routes, incident dots, delivery radius) · Monitor (3×3 wall of drone cameras) · Scene (one drone: console + camera).
 // main.js builds and draws the city; this module runs the world simulation on top of it.
-import { BOARD, PRESETS, DEFAULT_SETTINGS, createWorld, TIER_NAME, TITLE, SCENE_OF, WORLD_CONST } from './world.js?v=9';
-import { createStage } from './stage.js?v=9';
+import { BOARD, PRESETS, DEFAULT_SETTINGS, createWorld, TIER_NAME, TITLE, SCENE_OF, WORLD_CONST } from './world.js?v=10';
+import { createStage } from './stage.js?v=10';
 import { SCALE_M, HUB } from './scenes.js';
 import { LEVEL_TEXT } from './sim.js';
 
@@ -29,7 +29,7 @@ let runNo = store.get('l10.v2.runNo', 0);
 let lastSettings = null; let world = null, builtKey = '', cityData = null, building = false;
 let showTrails = true; const viewIx = {};
 let running = true, speedIx = 0, mode = 'map', sel = null, showKnow = false, scoreOpen = false, boardOpen = true, boardTouched = false;
-let scoreClock = 0, uiClock = 0, memClock = 0, cellRR = 0, sideSig = '', consoleSig = '';
+let reportShown = false, scoreClock = 0, uiClock = 0, memClock = 0, cellRR = 0, sideSig = '', consoleSig = '';
 
 // ---------------- city + run lifecycle ----------------
 function ensureCity() {
@@ -42,7 +42,7 @@ function startRun() {
   lastSettings = { ...settings };
   world = createWorld(settings, { obstacles: cityData.obstacles, low: cityData.low, roads: cityData.roads, tiles: cityData.tiles, memory, plan: planner });
   runNo++; store.set('l10.v2.runNo', runNo);
-  scoreOpen = false; sideSig = ''; consoleSig = ''; if (mode === 'scene' && !world.droneOf(sel)) sel = 'D-01';
+  scoreOpen = false; reportShown = false; sideSig = ''; consoleSig = ''; if (mode === 'scene' && !world.droneOf(sel)) sel = 'D-01';
   renderBoard(); renderSide(); renderStatus(); renderScore();
 }
 
@@ -158,7 +158,9 @@ function renderSide() {
   }
 }
 // one plain sentence: what happened, and what the drone did about it
+const GONE = { ped: 'The person has walked away from the drop spot.', dog: 'The dog has left the drop spot.', car: 'The car has driven off the pad.', pigeon: 'The flock has passed.', occluded: 'The confetti has settled.', gust: 'The gust has passed.', nofly: 'The no-fly zone has been lifted.' };
 function whatHappened(d, ev) {
+  if (ev.clearNow && GONE[ev.type]) return GONE[ev.type];
   const S = world.state, T = d.target ?? d.order?.addr;
   switch (ev.type) {
     case 'ped': case 'dog': { const a = [...S.agents.peds, ...S.agents.dogs].filter((x) => (ev.type === 'dog') === (x.kind === 'dog')).sort((x, y) => dist(x, T) - dist(y, T))[0]; const m = a ? `${(dist(a, T) * SCALE_M).toFixed(0)} m` : 'close';
@@ -169,7 +171,7 @@ function whatHappened(d, ev) {
     case 'pigeon': return 'A pigeon flock is in the flight path.';
     case 'occluded': return 'Parade confetti hides the drop spot from the sensor.';
     case 'car': return 'A car is parked on the delivery pad.';
-    case 'silent': return `The customer has not answered for ${mmss(S.t - (d.confirmStart ?? S.t))}.`;
+    case 'silent': return `The customer has not answered for ${mmss(S.t - (d.confirmStart ?? S.t))}. After 5:00 the drone gives up and flies home.`;
   }
   return '';
 }
@@ -197,7 +199,7 @@ function renderConsole(force) {
   }).join('') : '';
   el.innerHTML = `<div id="l10-console">${head}
     <div class="evcard t${ev.tier}"><b>${esc(TITLE[ev.type])}${ev.urgent ? ' <span class="urg">URGENT ORDER</span>' : ''}</b>
-      <p>${esc(whatHappened(d, ev))} ${esc(cap(ev.safeAction ?? ''))}.</p>
+      <p>${esc(whatHappened(d, ev))}${ev.clearNow ? '' : ` ${esc(cap(ev.safeAction ?? ''))}.`}</p>
       <span class="small">${esc(status)}${ev.status === 'open' ? ` · waiting <b id="l10-waited">${mmss(S.t - ev.opened)}</b>` : ''}</span></div>
     ${opts ? `<div class="opts">${opts}</div>` : ''}</div>`;
 }
@@ -210,38 +212,89 @@ $('l10-side').addEventListener('click', (e) => {
 // ---------------- status bar ----------------
 function renderStatus() {
   if (!world) return; const c = counts(), S = world.state;
-  $('l10-status').innerHTML = `<span>Time <b>${fmtT(S.t)}</b></span><span>Delivered <b>${c.delivered}</b><i>${c.aborted} aborted</i></span><span>In flight <b>${c.inflight}</b>/9</span>
+  $('l10-status').innerHTML = `<span>Shift <b>${fmtT(S.t)}</b><i>/ ${fmtT(world.shiftS)}</i></span><span>Delivered <b>${c.delivered}</b><i>${c.aborted} aborted</i></span><span>In flight <b>${c.inflight}</b>/9</span>
     <span><i class="tdot s" style="background:${TIER_COLOR[1]}">1</i><b>${c.open[1]}</b></span><span><i class="tdot s" style="background:${TIER_COLOR[2]}">2</i><b>${c.open[2]}</b></span><span><i class="tdot s" style="background:${TIER_COLOR[3]}">3</i><b>${c.open[3]}</b></span>
-    <span>On hold <b>${c.onHold}</b></span><span>Run <b>${runNo}</b></span><span><a href="#" data-score="1">Scorecard</a></span>`;
+    <span>On hold <b>${c.onHold}</b></span><span>Run <b>${runNo}</b></span><span><a href="#" data-score="1">${S.done ? 'Shift report' : 'Report'}</a></span>`;
 }
 $('l10-status').addEventListener('click', (e) => { if (e.target.closest('[data-score]')) { e.preventDefault(); scoreOpen = true; renderScore(); } });
 
-// ---------------- scorecard + comparison ----------------
-const SETTING_LABEL = { preset: 'City', orders: 'Orders', urgentPct: 'Urgent %', radiusM: 'Radius m', flocks: 'Flocks', pedestrians: 'Pedestrians', dogs: 'Dogs', replyPct: 'Reply %', gustPerMin: 'Gust /min', memory: 'Memory', seed: 'Seed' };
+// ---------------- shift report: drawn, not written ----------------
+const SETTING_LABEL = { preset: 'City', orders: 'Orders', urgentPct: 'Urgent %', radiusM: 'Radius m', flocks: 'Flocks', pedestrians: 'Pedestrians', dogs: 'Dogs', replyPct: 'Reply %', gustPerMin: 'Gust /min', memory: 'Memory', seed: 'Seed', shiftMin: 'Shift min' };
 const PRESET_LABEL = Object.fromEntries(PRESETS.map((p) => [p.id, p.label]));
 const fmtN = (v, u = '') => (v == null ? '—' : `${v}${u}`);
-const ROWS = [
-  ['Score', (c) => c.score, '', 1], ['Avg wait for you · ② Urgent', (c) => c.wait?.[2], ' s', -1], ['Avg wait for you · ③ Can wait', (c) => c.wait?.[3], ' s', -1], ['Longest wait', (c) => c.longestWaitS, ' s', -1],
-  ['Fleet time on hold', (c) => c.holdSharePct, ' %', -1], ['Still unanswered', (c) => c.unanswered, '', -1], ['① Critical, handled by the drones', (c) => c.autoHandled, '', 0],
-  ['Delivered', (c) => c.delivered, ' %', 1], ['Delivered at backup', (c) => c.deliveredAlt, ' %', 0], ['Aborted', (c) => c.aborted, ' %', -1], ['Redelivered orders', (c) => c.redelivered, '', 0],
-  ['Closest approach in ① events', (c) => c.closestTier1M, ' m', 1], ['Events per minute', (c) => c.eventsPerMin, '', 0], ['Peak queue length', (c) => c.peakQueue, '', -1], ['Avg delivery time', (c) => c.avgDeliveryS, ' s', -1], ['Run time', (c) => c.time, ' s', 0],
-];
+const INK = '#141414', MUTED = '#6E6C69', LIGHT = '#D9D5CD', SURF = '#F6F4EF';
+// small line pictograms (24×24, stroke = currentColor)
+const ICON = {
+  city: '<path d="M3 21V9l5-3v15M8 21V4l6 3v14M14 21v-9l7 2v7M2 21h20"/>', orders: '<path d="M4 8l8-4 8 4v9l-8 4-8-4z M4 8l8 4 8-4 M12 12v9"/>', urgent: '<path d="M12 3v11 M12 18.5v.5"/><circle cx="12" cy="12" r="10"/>',
+  radius: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="1.5"/><path d="M12 12h9"/>', flocks: '<path d="M2 10c3-3 5-3 7 0 2-3 4-3 7 0 M9 17c2-2 3.5-2 5 0 2-2 3.5-2 5 0"/>',
+  pedestrians: '<circle cx="12" cy="4.5" r="2"/><path d="M12 7v7l-3 7 M12 14l3 7 M8 11l4-3 4 3"/>', dogs: '<path d="M4 13h11l3-4h2v3l-2 2v6 M6 13v7 M15 13v7 M4 13l-1-3"/>',
+  replyPct: '<path d="M4 5h16v10H9l-5 4z"/>', gustPerMin: '<path d="M3 9h11a3 3 0 1 0-3-3 M3 14h15a3 3 0 1 1-3 3 M3 19h7"/>', memory: '<path d="M6 4h12v16H6z M9 8h6 M9 12h6 M9 16h3"/>', shiftMin: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2 M9 2h6"/>',
+};
+const icon = (k) => `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${ICON[k]}</svg>`;
+const STATE = [['w', 'At the drop spot', INK], ['f', 'Flying', '#8E8B85'], ['p', 'At the shop', '#B9B5AE'], ['r', 'Going home', LIGHT], ['h', 'On hold for you', TIER_COLOR[2]], ['a', 'Critical, handled', TIER_COLOR[1]], ['i', 'At the hub', '#EEEBE4']];
+const STATE_OF = Object.fromEntries(STATE.map(([k, l, c]) => [k, { l, c }]));
+
+function conditionsHTML(st) {
+  const items = [['city', PRESET_LABEL[st.preset] ?? st.preset], ['orders', `${st.orders} / 10 min`], ['urgent', `${st.urgentPct}% urgent`], ['radius', `${st.radiusM} m`], ['flocks', `${st.flocks} flocks`], ['pedestrians', `${st.pedestrians} people`], ['dogs', `${st.dogs} dogs`], ['replyPct', `${st.replyPct}% reply`], ['gustPerMin', `${st.gustPerMin} gusts/min`], ['memory', st.memory === 'fresh' ? 'Fresh memory' : 'Retained memory'], ['shiftMin', `${st.shiftMin ?? 10} min shift`]];
+  return `<div class="rp-cond">${items.map(([k, t]) => `<span title="${esc(SETTING_LABEL[k] ?? k)}">${icon(k)}${esc(t)}</span>`).join('')}</div>`;
+}
+function donutSVG(c) {
+  const parts = [['Delivered', c.deliveredN, INK], ['At backup spot', c.deliveredAltN, MUTED], ['Aborted', c.abortedN, TIER_COLOR[1]], ['Not finished', c.unfinished, LIGHT]].filter((p) => p[1] > 0);
+  const tot = Math.max(1, c.received), R = 52, r = 34, cx = 64, cy = 64; let a0 = -Math.PI / 2;
+  const arcs = parts.map(([l, n, col]) => {
+    const a1 = a0 + n / tot * Math.PI * 2, big = a1 - a0 > Math.PI ? 1 : 0, P = (ang, rad) => `${(cx + Math.cos(ang) * rad).toFixed(2)},${(cy + Math.sin(ang) * rad).toFixed(2)}`;
+    const d = parts.length === 1 ? `M${cx - R},${cy}a${R},${R} 0 1,0 ${2 * R},0a${R},${R} 0 1,0 ${-2 * R},0M${cx - r},${cy}a${r},${r} 0 1,1 ${2 * r},0a${r},${r} 0 1,1 ${-2 * r},0` : `M${P(a0, R)}A${R},${R} 0 ${big} 1 ${P(a1, R)}L${P(a1, r)}A${r},${r} 0 ${big} 0 ${P(a0, r)}Z`;
+    a0 = a1; return `<path d="${d}" fill="${col}" fill-rule="evenodd" stroke="${SURF}" stroke-width="2"><title>${l}: ${n}</title></path>`;
+  }).join('');
+  const pct = Math.round((c.deliveredN + c.deliveredAltN) / tot * 100);
+  return `<div class="rp-donut"><svg viewBox="0 0 128 128" role="img" aria-label="Outcome of ${c.received} orders">${arcs}<text x="64" y="62" text-anchor="middle" class="big">${pct}%</text><text x="64" y="78" text-anchor="middle" class="sm">delivered</text></svg>
+    <ul>${[['Delivered', c.deliveredN, INK], ['At backup spot', c.deliveredAltN, MUTED], ['Aborted', c.abortedN, TIER_COLOR[1], c.unreachable ? `${c.unreachable} customer unreachable` : ''], ['Not finished', c.unfinished, LIGHT, 'still in the queue or in the air']].map(([l, n, col, sub]) => `<li><i style="background:${col}"></i><b>${n}</b> ${l}${sub ? `<span>${esc(sub)}</span>` : ''}</li>`).join('')}<li class="tot">${c.received} orders received</li></ul></div>`;
+}
+function mapSVG(S, settingsUsed) {
+  const obs = cityData?.obstacles ?? [], tiles = cityData?.tiles ?? [], ext = 62, hMax = Math.max(1, ...obs.map((o) => o.h));
+  const tileR = tiles.map((t) => `<rect x="${t.cx - 5.85}" y="${t.cz - 5.85}" width="11.7" height="11.7" fill="#EFECE5"/>`).join('');
+  const bld = obs.map((o) => `<rect x="${o.x0.toFixed(1)}" y="${o.z0.toFixed(1)}" width="${(o.x1 - o.x0).toFixed(1)}" height="${(o.z1 - o.z0).toFixed(1)}" fill="${INK}" fill-opacity="${(0.18 + 0.6 * o.h / hMax).toFixed(2)}"><title>${esc(o.name ?? o.id)} · ${Math.round(o.h * SCALE_M)} m</title></rect>`).join('');
+  const tracks = (S.tracks ?? []).map((tr) => { let d = '', pen = false; for (const p of tr) { if (!p) { pen = false; continue; } d += `${pen ? 'L' : 'M'}${p[0]},${p[1]}`; pen = true; } return d ? `<path d="${d}" fill="none" stroke="${INK}" stroke-opacity=".28" stroke-width=".35" stroke-linejoin="round"/>` : ''; }).join('');
+  const rad = (settingsUsed.radiusM ?? 200) / SCALE_M;
+  const dots = S.events.map((e) => `<circle cx="${e.pos.x.toFixed(1)}" cy="${e.pos.z.toFixed(1)}" r="1.5" fill="${TIER_COLOR[e.tier]}" stroke="${SURF}" stroke-width=".5"><title>${fmtT(e.opened)} · ${esc(e.drone)} · ${esc(TITLE[e.type])}</title></circle>`).join('');
+  return `<svg class="rp-map" viewBox="${-ext} ${-ext} ${ext * 2} ${ext * 2}" role="img" aria-label="Routes and incidents">${tileR}${bld}<circle cx="0" cy="0" r="${rad}" fill="none" stroke="${TIER_COLOR[1]}" stroke-width=".5" stroke-dasharray="2 1.5"/>${tracks}<rect x="-2" y="-2" width="4" height="4" fill="${SURF}" stroke="${INK}" stroke-width=".6"><title>Hub</title></rect>${dots}</svg>`;
+}
+function eventsHTML(card) {
+  const types = Object.entries(card.byType ?? {}).sort((a, b) => b[1] - a[1]), max = Math.max(1, ...types.map((t) => t[1]));
+  const TIERS = { ped: 1, conflict: 1, nofly: 1, gust: 1, dog: 2, pigeon: 2, occluded: 2, car: 3, silent: 3 };
+  return `<div class="rp-bars">${types.map(([k, n]) => `<div class="row" title="${esc(TITLE[k])}: ${n}"><span class="lab">${esc(TITLE[k])}</span><span class="track"><i style="width:${n / max * 100}%;background:${TIER_COLOR[TIERS[k]]}"></i></span><b>${n}</b></div>`).join('')}</div>
+    <div class="rp-legend">${[1, 2, 3].map((t) => `<span><i style="background:${TIER_COLOR[t]}"></i>${t} ${TIER_NAME[t]}</span>`).join('')}</div>`;
+}
+function ganttSVG(S) {
+  const rows = S.gantt ?? [], T = Math.max(1, ...rows.map((r) => r.length)), W = 600, RH = 14, G = 4, LW = 34, H = rows.length * (RH + G);
+  const bars = rows.map((r, i) => { let out = '', k = 0; while (k < r.length) { let j = k; while (j < r.length && r[j] === r[k]) j++; const st = STATE_OF[r[k]] ?? STATE_OF.i; out += `<rect x="${(LW + k / T * (W - LW)).toFixed(2)}" y="${i * (RH + G)}" width="${Math.max(0.6, (j - k) / T * (W - LW)).toFixed(2)}" height="${RH}" fill="${st.c}"${r[k] === 'a' ? ' class="hatch"' : ''}><title>${S.drones[i].id} · ${fmtT(k)}–${fmtT(j)} · ${st.l}</title></rect>`; k = j; } return `<text x="0" y="${i * (RH + G) + RH - 3}" class="id">${S.drones[i].id}</text>${out}`; }).join('');
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => `<text x="${LW + f * (W - LW)}" y="${H + 12}" class="tick" text-anchor="${f === 0 ? 'start' : f === 1 ? 'end' : 'middle'}">${fmtT(f * T)}</text>`).join('');
+  return `<svg class="rp-gantt" viewBox="0 0 ${W} ${H + 16}" role="img" aria-label="What each drone did over the shift">${bars}${ticks}</svg>
+    <div class="rp-legend">${STATE.map(([k, l, c]) => `<span><i style="background:${c}"${k === 'a' ? ' class="hatch"' : ''}></i>${l}</span>`).join('')}</div>`;
+}
+const arrow = (cur, prev, better) => { if (prev == null || cur == null || cur === prev) return ''; const up = cur > prev, good = better > 0 ? up : !up; return `<em class="${good ? 'good' : 'bad'}">${up ? '▲' : '▼'} ${Math.abs(+(cur - prev).toFixed(1))}</em>`; };
 function renderScore() {
   const el = $('l10-score'); el.hidden = !scoreOpen; if (!scoreOpen || !world) return;
-  const live = { n: runNo, settings: { ...settings }, card: world.scorecard() }, prev = runs[0];
-  const cols = [live, prev].filter(Boolean);
-  const better = (i, f, dir) => { if (!prev || !dir) return ''; const x = f(live.card), y = f(prev.card); if (x == null || y == null || x === y) return ''; return (dir > 0 ? x > y : x < y) ? (i === 0 ? ' win' : '') : (i === 1 ? ' win' : ''); };
-  el.innerHTML = `<div class="sc-head"><div><h2>Scorecard · run ${live.n}</h2><span class="small">live · ${fmtT(live.card.time)} · ${live.card.orders} orders finished · ${live.card.eventsTotal} events (${live.card.tier1} critical) · the simulation keeps running</span></div><button type="button" class="pill" data-sc="close">Close</button></div>
-    <div class="sc-score">${cols.map((r, i) => `<div class="sc-big${i === 1 ? ' prev' : ''}"><b>${r.card.score}</b><span>${i === 0 ? 'this run (live)' : 'previous run'} · #${r.n}</span></div>`).join('')}</div>
-    <table class="sc-table"><thead><tr><th></th>${cols.map((r, i) => `<th>${i === 0 ? 'This run' : 'Previous'} · #${r.n}</th>`).join('')}</tr></thead><tbody>
-      <tr class="settings"><td>Environment</td>${cols.map((r) => `<td>${esc(PRESET_LABEL[r.settings.preset])}<br><span class="small">${['orders', 'urgentPct', 'radiusM', 'flocks', 'pedestrians', 'dogs', 'replyPct', 'gustPerMin', 'memory'].map((k) => `${SETTING_LABEL[k]} ${r.settings[k]}`).join(' · ')}</span></td>`).join('')}</tr>
-      ${ROWS.map(([label, f, u, dir]) => `<tr><td>${esc(label)}</td>${cols.map((r, i) => `<td class="${better(i, f, dir)}">${esc(fmtN(f(r.card), u))}</td>`).join('')}</tr>`).join('')}</tbody></table>
-    <p class="small">${prev ? 'Highlighted: the better of the two. The previous run is the one that was going before the last Apply &amp; restart / Reset.' : 'Change the board (for example another building cluster), Apply &amp; restart, and this run is kept for comparison.'}</p>
-    <div class="sc-foot"><button type="button" class="black" data-sc="again">Restart the run</button><button type="button" class="pill" data-sc="close">Close</button></div>`;
+  const S = world.state, c = world.scorecard(), st = lastSettings ?? settings, prev = runs[0]?.card ?? null, ended = S.done;
+  const delPct = (x) => (x ? Math.round(((x.deliveredN ?? 0) + (x.deliveredAltN ?? 0)) / Math.max(1, x.received ?? x.orders ?? 1) * 100) : null);
+  const hero = [
+    ['Delivered', delPct(c), '%', delPct(prev), 1], ['Two-drone conflicts', c.conflicts, '', prev?.conflicts, -1], ['Events', c.eventsTotal, '', prev?.eventsTotal, -1],
+    ['Avg wait for you', c.wait[2] ?? c.wait[3], ' s', prev?.wait?.[2] ?? prev?.wait?.[3], -1], ['Fleet time on hold', c.holdSharePct, '%', prev?.holdSharePct, -1], ['Score', c.score, '', prev?.score, 1],
+  ];
+  el.innerHTML = `<div class="sc-head"><div><h2>Shift report · run ${runNo}</h2><span class="small">${ended ? `Shift over · ${fmtT(c.time)}` : `Live · ${fmtT(c.time)} of ${fmtT((st.shiftMin ?? 10) * 60)}`} · seed ${st.seed}${prev ? ` · ▲▼ compared with run ${runs[0].n}` : ''}</span></div><button type="button" class="pill" data-sc="close">Close</button></div>
+    ${conditionsHTML(st)}
+    <div class="rp-hero">${hero.map(([l, v, u, pv, b]) => `<div><b>${fmtN(v, u)}</b><span>${l}</span>${arrow(v, pv, b)}</div>`).join('')}</div>
+    <div class="rp-grid">
+      <section><h3>Orders</h3>${donutSVG(c)}</section>
+      <section><h3>Where they flew, where things happened</h3>${mapSVG(S, st)}<div class="rp-legend"><span><i style="background:${TIER_COLOR[1]};border-radius:50%"></i>incident (tier colour)</span><span><i class="dash"></i>delivery radius</span></div></section>
+      <section><h3>What happened</h3>${eventsHTML(c)}<p class="small">Critical events handled by the drones themselves: <b>${c.autoHandled}</b>${c.closestTier1M != null ? ` · closest approach ${c.closestTier1M} m` : ''}. Longest anyone waited for you: <b>${fmtN(c.longestWaitS, ' s')}</b>.</p></section>
+    </div>
+    <section><h3>The nine drones over the shift</h3>${ganttSVG(S)}</section>
+    <div class="sc-foot"><button type="button" class="black" data-sc="again">${ended ? 'Start the next shift' : 'Restart the shift'}</button><button type="button" class="pill" data-sc="close">Close</button></div>`;
 }
 $('l10-score').addEventListener('click', (e) => {
   const a = e.target.closest('[data-sc]')?.dataset.sc; if (!a) return;
-  if (a === 'close') { scoreOpen = false; renderScore(); } if (a === 'again') restart('Run restarted.');
+  if (a === 'close') { scoreOpen = false; renderScore(); } if (a === 'again') restart('New shift started.');
 });
 
 // ---------------- monitor wall: nine drone cameras ----------------
@@ -366,7 +419,8 @@ function frame(dt) {
     }
     if (mode === 'scene') { const d = world.droneOf(sel); if (d) { renderTimeline(d); renderConsole(false); } } else renderSide();
   }
-  if (scoreOpen) { scoreClock += dt; if (scoreClock > 4) { scoreClock = 0; const el = $('l10-score'), st = el.scrollTop; renderScore(); el.scrollTop = st; } }
+  if (world.state.done && !reportShown) { reportShown = true; scoreOpen = true; renderScore(); toast('Shift over: here is the report.'); }   // the shift ends: the report opens by itself
+  if (scoreOpen && !world.state.done) { scoreClock += dt; if (scoreClock > 4) { scoreClock = 0; const el = $('l10-score'), st = el.scrollTop; renderScore(); el.scrollTop = st; } }
   if (memClock > 5) { memClock = 0; store.set('l10.v2.memory', memory); }
 }
 

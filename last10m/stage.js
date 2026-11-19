@@ -62,8 +62,10 @@ export function createStage({ scene, couriers, obstacles = () => [] }) {
       const tether = carrying && d.drop > 0.02; h.tether.visible = tether;
       if (tether) { const a = h.tether.geometry.attributes.position; a.setXYZ(0, d.x + d.px, d.y - 0.2, d.z + d.pz); a.setXYZ(1, p.x, p.y + 0.13, p.z); a.needsUpdate = true; h.tether.geometry.computeBoundingSphere(); }
     });
-    // delivered parcels stay where they were left
+    // delivered parcels lie where they were left until the customer takes them in
     for (const o of S.orders) if (o.outcome === 'delivered' || o.outcome === 'delivered-alt') {
+      const there = S.t < o.tDone + (o.collectDelay ?? 60); const m0 = parcels.get(o.id);
+      if (!there) { if (m0 && m0.visible) m0.visible = false; continue; }
       if (!parcels.has(o.id)) { const m = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.26, 0.34), M.parcel); const at = o.dropAt ?? o.addr; m.position.set(at.x, SLAB + 0.13, at.z); m.castShadow = true; root.add(m); parcels.set(o.id, m); }
     }
     // parked cars (only where a car is actually blocking a pad a drone is serving)
