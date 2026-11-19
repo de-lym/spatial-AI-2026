@@ -64,8 +64,11 @@ The continuous machine location `{x, y, z}` in metres is the carrier of all thre
 | **Distance to You** | 3D Euclidean distance between the parcel and the requested spot, metres; it grows again on abort | the narrative indicator in Scene mode |
 | **Closest approach** | the smallest 3D distance between a drone or parcel and a person, animal or other drone **during tier ① events** | the safety line of the scorecard |
 
-Planned flight height is `clamp(tallest building on the leg + 2 u, 10, 23)` (50–115 m), so flight distance is not the
-deciding metric; clearance and time are.
+Every leg is planned by the AIRSPACE **flying boundary system** (`spatial.js` `planRoute`): map edge, building volumes with
+clearance, restricted volumes and the permitted airspace with its land-use floors, entered and left through landing columns
+(every parcel's front pad has one, wide enough to include its backup spot). A drone only follows the planned polyline and
+never cuts a corner through a building (tested: no drone position is ever inside an obstacle). Without the planner (node
+tests) a conservative fallback is used: straight up, over the tallest building of the leg plus a margin, straight down.
 
 ## 5. Agents
 

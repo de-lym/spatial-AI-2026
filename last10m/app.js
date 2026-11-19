@@ -1,8 +1,8 @@
 // Last 10m v2 — the application: one shared city, nine drones, a human operator who triages.
 // Views: Map (routes, incident dots, delivery radius) · Monitor (3×3 wall of drone cameras) · Scene (one drone: console + camera).
 // main.js builds and draws the city; this module runs the world simulation on top of it.
-import { BOARD, PRESETS, DEFAULT_SETTINGS, createWorld, TIER_NAME, TITLE, SCENE_OF, WORLD_CONST } from './world.js';
-import { createStage } from './stage.js';
+import { BOARD, PRESETS, DEFAULT_SETTINGS, createWorld, TIER_NAME, TITLE, SCENE_OF, WORLD_CONST } from './world.js?v=5';
+import { createStage } from './stage.js?v=6';
 import { SCALE_M, HUB } from './scenes.js';
 import { LEVEL_TEXT } from './sim.js';
 
@@ -33,11 +33,11 @@ let uiClock = 0, memClock = 0, cellRR = 0, finishedHandled = false, sideSig = ''
 // ---------------- city + run lifecycle ----------------
 function ensureCity() {
   const key = `${settings.preset}:${settings.seed}`;
-  if (key !== builtKey) { city.rebuildCity({ preset: settings.preset, seed: settings.seed }); cityData = city.exportCity(); builtKey = key; stage?.resetCache(); }
+  if (key !== builtKey) { planCache.clear(); city.rebuildCity({ preset: settings.preset, seed: settings.seed }); cityData = city.exportCity(); builtKey = key; stage?.resetCache(); }
 }
 function startRun() {
   ensureCity();
-  world = createWorld(settings, { obstacles: cityData.obstacles, tiles: cityData.tiles, memory });
+  world = createWorld(settings, { obstacles: cityData.obstacles, tiles: cityData.tiles, memory, plan: planner });
   runNo++; store.set('l10.v2.runNo', runNo);
   finishedHandled = false; scoreOpen = false; sideSig = ''; consoleSig = ''; if (mode === 'scene' && !world.droneOf(sel)) sel = 'D-01';
   renderBoard(); renderSide(); renderStatus(); renderScore();
@@ -49,9 +49,21 @@ function finishRun() {
   scoreOpen = true; renderScore(); renderStatus();
 }
 
+// ---------------- flight boundary system: the AIRSPACE route planner decides every leg ----------------
+// (map edge, building volumes + clearance, restricted volumes, permitted airspace with landing columns). Plans are cached per city.
+const planCache = new Map();
+function planner(from, to, opts) {
+  const r1 = (v) => Math.round(v * 20) / 20, key = `${builtKey}|${r1(from.x)},${r1(from.y)},${r1(from.z)}>${r1(to.x)},${r1(to.y)},${r1(to.z)}|${opts?.base ?? ''}`;
+  if (planCache.has(key)) return planCache.get(key);
+  const r = city.planRoute(from, to, opts); const out = r?.ok ? { ok: true, pts: r.pts } : { ok: false };
+  if (planCache.size > 4000) planCache.clear(); planCache.set(key, out); return out;
+}
+
 // ---------------- 3D ----------------
 const stage = createStage({ scene: city.scene, couriers: city.S.couriers, obstacles: () => city.world.obstacles });
 { const cam = city.camera, ctl = city.controls; ctl.target.set(0, 0, 4); cam.position.set(60, 52, 64); cam.zoom = 0.4; cam.updateProjectionMatrix(); ctl.update(); ctl.saveState?.(); }
+stage.setMainOnly([stage.trails]);                              // trails are drawn on the Map only
+city.S.layers.rest = false; city.S.layers.perm = false; city.S.layers.cand = false; city.S.layers.sel = false;   // no airspace boxes on screen
 const hideAirspaceDrones = () => city.S.couriers.forEach((c) => { c.mesh.visible = false; if (c.label) c.label.visible = false; if (c.halo) c.halo.visible = false; });
 
 // ---------------- helpers ----------------
@@ -105,9 +117,9 @@ $('l10-board').addEventListener('input', (e) => {
   const k = e.target.dataset.key; if (!k) return;
   const p = BOARD.find((f) => f.key === k); draft[k] = +e.target.value;
   if (p) { const row = e.target.closest('.param'); row.querySelector('.val').textContent = fmtVal(p, draft[k]); const name = row.querySelector('.name'); if (!name.querySelector('.pending')) name.insertAdjacentHTML('beforeend', '<span class="tag pending">unsaved</span>'); }
-  if (k === 'radiusM') window.__l10.radiusDraft = draft[k];
+  if (k === 'radiusM') { window.__l10.radiusDraft = draft[k]; window.__l10.radiusUntil = performance.now() + 1600; }
 });
-$('l10-board').addEventListener('change', (e) => { if (e.target.dataset.key === 'radiusM') { renderBoard(); } if (e.target.dataset.key === 'seed') renderBoard(); });
+$('l10-board').addEventListener('change', (e) => { if (e.target.dataset.key === 'radiusM') { window.__l10.radiusUntil = performance.now() + 1200; } if (e.target.dataset.key === 'seed') renderBoard(); });
 $('l10-board').addEventListener('click', (e) => {
   const pr = e.target.closest('[data-preset]'); if (pr) { draft.preset = pr.dataset.preset; renderBoard(); return; }
   const mm = e.target.closest('[data-mem]'); if (mm) { draft.memory = mm.dataset.mem; renderBoard(); return; }
@@ -237,7 +249,7 @@ wall.addEventListener('click', (e) => { const b = e.target.closest('[data-open]'
 
 // ---------------- map: drone markers, routes, incident dots, delivery radius ----------------
 const frames = $('l10-frames');
-frames.innerHTML = Array.from({ length: 9 }, (_, i) => `<button type="button" data-open="D-0${i + 1}" aria-label="Open drone D-0${i + 1}"><span>${i + 1}</span></button>`).join('');
+frames.innerHTML = Array.from({ length: 9 }, (_, i) => `<button type="button" data-open="D-0${i + 1}" aria-label="Open drone D-0${i + 1}" hidden><span></span></button>`).join('');   // warning labels only: shown while a drone has an open event
 frames.addEventListener('click', (e) => { const b = e.target.closest('[data-open]'); if (b) setMode('scene', b.dataset.open); });
 const fx = $('l10-mapfx'), fxg = fx.getContext('2d');
 function drawMap() {
@@ -246,32 +258,29 @@ function drawMap() {
   fxg.clearRect(0, 0, W, H);
   const P = (x, z, y) => { const p = stage.projectWith(city.camera, { x, z, y }, r.width, r.height); return { x: r.left + p.x, y: r.top + p.y }; };
   const S = world.state, t = performance.now() / 1000;
-  // delivery radius: a red circle around the hub (the draft value while the slider is dragged)
-  const radiusU = ((window.__l10.radiusDraft ?? settings.radiusM)) / SCALE_M;
-  fxg.save(); fxg.lineWidth = 2.5; fxg.strokeStyle = '#D93A26'; fxg.fillStyle = 'rgba(217,58,38,.06)'; fxg.beginPath();
-  for (let i = 0; i <= 96; i++) { const a = i / 96 * Math.PI * 2, p = P(HUB.x + Math.cos(a) * radiusU, HUB.z + Math.sin(a) * radiusU, 0.5); i ? fxg.lineTo(p.x, p.y) : fxg.moveTo(p.x, p.y); }
-  fxg.closePath(); fxg.fill(); fxg.stroke(); fxg.restore();
-  const hubP = P(HUB.x, HUB.z, 0.5); fxg.fillStyle = '#D93A26'; fxg.font = '600 11px Inter, sans-serif'; fxg.fillText(`${window.__l10.radiusDraft ?? settings.radiusM} m`, hubP.x + 6, hubP.y - radiusU * 0 - 8);
-  // routes: thin black, dashed while returning
-  fxg.lineWidth = 1.4; fxg.strokeStyle = '#141414';
-  for (const d of S.drones) {
-    if (!d.order || d.route.length < 1) continue;
-    const pts = [...d.route, { x: d.x, z: d.z, ret: d.route.at(-1)?.ret }];
-    let prev = null;
-    for (const p of pts) { const q = P(p.x, p.z, 0.45); if (prev) { fxg.setLineDash(p.ret ? [5, 4] : []); fxg.beginPath(); fxg.moveTo(prev.x, prev.y); fxg.lineTo(q.x, q.y); fxg.stroke(); } prev = q; }
+  // delivery radius: a green circle around the hub that only shows while the radius is being adjusted; otherwise fully transparent
+  const L = window.__l10, left = (L.radiusUntil ?? 0) - performance.now();
+  if (left > 0 && L.radiusDraft != null) {
+    const a = Math.min(1, left / 500), radiusU = L.radiusDraft / SCALE_M;
+    fxg.save(); fxg.globalAlpha = a; fxg.lineWidth = 2.5; fxg.strokeStyle = '#2E9A57'; fxg.fillStyle = 'rgba(46,154,87,.10)'; fxg.beginPath();
+    for (let i = 0; i <= 96; i++) { const q = i / 96 * Math.PI * 2, p = P(HUB.x + Math.cos(q) * radiusU, HUB.z + Math.sin(q) * radiusU, 0.5); i ? fxg.lineTo(p.x, p.y) : fxg.moveTo(p.x, p.y); }
+    fxg.closePath(); fxg.fill(); fxg.stroke();
+    const hubP = P(HUB.x, HUB.z, 0.5); fxg.fillStyle = '#2E9A57'; fxg.font = '600 12px Inter, sans-serif'; fxg.fillText(`${L.radiusDraft} m`, hubP.x + 8, hubP.y - 10); fxg.restore();
   }
-  fxg.setLineDash([]);
   // incident dots: where each incident happened; colour follows the tier
   for (const e of S.events.slice(-120)) {
     const p = P(e.pos.x, e.pos.z, 0.5), live = e.status === 'open', col = TIER_COLOR[e.tier], rad = live ? 7 : 4.5;
     if (live && e.tier === 1) { const k = (t * 1.6) % 1; fxg.strokeStyle = col; fxg.globalAlpha = 1 - k; fxg.lineWidth = 2; fxg.beginPath(); fxg.arc(p.x, p.y, rad + 4 + k * 14, 0, 7); fxg.stroke(); fxg.globalAlpha = 1; }
     fxg.globalAlpha = live ? 1 : 0.7; fxg.fillStyle = col; fxg.strokeStyle = '#fff'; fxg.lineWidth = 1.5; fxg.beginPath(); fxg.arc(p.x, p.y, rad, 0, 7); fxg.fill(); fxg.stroke(); fxg.globalAlpha = 1;
   }
-  // drone markers (buttons)
+  // warning labels: only a drone with an open event gets one (colour = tier); idle and normal drones carry no marker
   [...frames.children].forEach((b, i) => {
-    const d = S.drones[i], p = P(d.x, d.z, d.y), tier = openTier(d) || tierOf(d);
-    b.style.left = `${p.x}px`; b.style.top = `${p.y}px`;
-    const cls = `${tier ? TIER_CLS[tier] : d.order ? 'busy' : 'idle'}${openTier(d) === 1 ? ' flash' : ''}`; if (b.className !== cls) b.className = cls;
+    const d = S.drones[i], ev = d.event?.status === 'open' ? d.event : null;
+    if (!ev) { if (!b.hidden) b.hidden = true; return; }
+    if (b.hidden) b.hidden = false;
+    const p = P(d.x, d.z, d.y); b.style.left = `${p.x + 14}px`; b.style.top = `${p.y - 14}px`;
+    const cls = `t${ev.tier}${ev.tier === 1 ? ' flash' : ''}`; if (b.className !== cls) b.className = cls;
+    const txt = `! ${TITLE[ev.type]}`; if (b.firstChild.textContent !== txt) b.firstChild.textContent = txt;
   });
 }
 
@@ -288,18 +297,23 @@ function drawOverlay(d, cam) {
       g.fillStyle = st === 0.5 ? 'rgba(46,154,87,.09)' : fill[st]; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.lineTo(e.x, e.y); g.lineTo(f.x, f.y); g.closePath(); g.fill();
     }
   }
-  const L = [];
+  const L = [];                     // side: 'l' = drone-related, left of the figure · 'r' = everything else, right of the figure / circumstance
   if (o) {
     const blocked = d.lastCheck?.some((c) => !c.ok) && !d.target?.backup;
-    const t = P(o.addr.x, o.addr.z); L.push({ ...t, cls: blocked ? 'red' : '', text: `Target · ${o.addr.name}${blocked ? ' · blocked' : ''}` });
-    const b = P(o.addr.x - 3.2, o.addr.z); L.push({ ...b, cls: d.target?.backup ? 'green' : '', text: d.target?.backup ? 'Backup · in use' : 'Backup spot' });
+    const t = P(o.addr.x, o.addr.z); L.push({ ...t, side: 'r', cls: blocked ? 'red' : '', text: `Target · ${o.addr.name}${blocked ? ' · blocked' : ''}` });
+    const b = P(o.addr.x - 3.2, o.addr.z); L.push({ ...b, side: 'r', cls: d.target?.backup ? 'green' : '', text: d.target?.backup ? 'Backup · in use' : 'Backup spot' });
   }
-  for (const x of S.drones) if (Math.hypot(x.x - d.x, x.z - d.z) < 14 && x.phase !== 'idle') { const q = P(x.x, x.z, x.y + 0.6); L.push({ ...q, cls: x === d ? '' : 'dim', text: `${x.id} · ${Math.round((x.y - 0.4) * SCALE_M)} m · ${phaseText(x)}` }); }
-  for (const a of [...S.agents.peds, ...S.agents.dogs]) if (o && dist(a, o.addr) < 5) { const q = P(a.x, a.z, 1.2); L.push({ ...q, cls: dist(a, o.addr) < 2.6 ? 'red' : '', text: `${a.kind === 'dog' ? 'Dog' : 'Person'} · ${(dist(a, o.addr) * SCALE_M).toFixed(1)} m` }); }
-  for (const z of world.activeZones()) if (Math.hypot(z.x - d.x, z.z - d.z) < 14) { const q = P(z.x, z.z, 0.6); L.push({ ...q, cls: 'red', text: `No-fly zone · ${Math.ceil(z.t1 - S.t)} s` }); }
-  const cl = world.activeCloud(); if (cl && Math.hypot(cl.x - d.x, cl.z - d.z) < 14) { const q = P(cl.x, cl.z, cl.top + 0.6); L.push({ ...q, text: 'Confetti' }); }
-  const sx = $('l10-view').clientWidth / W, sy = $('l10-view').clientHeight / H;
-  $('l10-labels').innerHTML = L.filter((l) => l.x > 0 && l.x < W && l.y > 0 && l.y < H).map((l) => `<span class="label ${l.cls ?? ''}" style="left:${l.x * sx}px;top:${l.y * sy}px">${esc(l.text)}</span>`).join('');
+  for (const x of S.drones) if (Math.hypot(x.x - d.x, x.z - d.z) < 14 && x.phase !== 'idle') { const q = P(x.x, x.z, x.y); L.push({ ...q, side: 'l', cls: x === d ? '' : 'dim', text: `${x.id} · ${Math.round((x.y - 0.4) * SCALE_M)} m · ${phaseText(x)}` }); }
+  for (const a of [...S.agents.peds, ...S.agents.dogs]) if (o && dist(a, o.addr) < 5) { const q = P(a.x, a.z, 0.6); L.push({ ...q, side: 'r', cls: dist(a, o.addr) < 2.6 ? 'red' : '', text: `${a.kind === 'dog' ? 'Dog' : 'Person'} · ${(dist(a, o.addr) * SCALE_M).toFixed(1)} m` }); }
+  for (const z of world.activeZones()) if (Math.hypot(z.x - d.x, z.z - d.z) < 14) { const q = P(z.x, z.z, 0.6); L.push({ ...q, side: 'r', cls: 'red', text: `No-fly zone · ${Math.ceil(z.t1 - S.t)} s` }); }
+  const cl = world.activeCloud(); if (cl && Math.hypot(cl.x - d.x, cl.z - d.z) < 14) { const q = P(cl.x, cl.z, cl.top * 0.5); L.push({ ...q, side: 'r', text: 'Confetti' }); }
+  const sx = $('l10-view').clientWidth / W, sy = $('l10-view').clientHeight / H, GAP = 24, OFF = 16;
+  const vis = L.filter((l) => l.x > 0 && l.x < W && l.y > 0 && l.y < H);
+  for (const side of ['l', 'r']) {      // keep labels of one side from stacking on top of each other
+    const col = vis.filter((l) => l.side === side).sort((p, q) => p.y - q.y); let last = -1e9;
+    for (const l of col) { l.ly = Math.max(l.y, last + GAP / sy); last = l.ly; }
+  }
+  $('l10-labels').innerHTML = vis.map((l) => `<span class="label ${l.side} ${l.cls ?? ''}" style="left:${(l.x + (l.side === 'l' ? -OFF : OFF)) * sx}px;top:${l.ly * sy}px">${esc(l.text)}</span>`).join('');
 }
 function renderTimeline(d) {
   const S = world.state, o = d.order, t0 = o?.tAssigned ?? Math.max(0, S.t - 60), span = Math.max(60, S.t - t0 + 5);
@@ -324,6 +338,8 @@ function frame(dt) {
   if (running && !world.state.done) { let left = dt * SPEEDS[speedIx]; while (left > 1e-6 && !world.state.done) { const s = Math.min(0.1, left); world.step(s); left -= s; } }
   if (world.state.done && !finishedHandled) finishRun();
   stage.sync(world, mode === 'scene' ? sel : null);
+  stage.syncTrails(world, mode === 'map');
+  const pr = city.parade; if (pr?.paradeVisual && pr.engine?.paradeAtTime) pr.paradeVisual.update(pr.engine.paradeAtTime(world.state.t), world.state.t);   // the parade runs on the world clock
   fx.style.display = mode === 'map' ? 'block' : 'none';
   if (mode === 'map') drawMap();
   if (mode === 'monitor') { for (let k = 0; k < 3; k++) { const c = cells[cellRR++ % cells.length], d = world.droneOf(c.id); stage.renderCell(world, d, c.ctx); } }

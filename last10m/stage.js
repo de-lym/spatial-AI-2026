@@ -32,11 +32,11 @@ export function createStage({ scene, couriers, obstacles = () => [] }) {
   const ring = (r0, r1, m) => { const o = new THREE.Mesh(new THREE.RingGeometry(r0, r1, 56), m); o.rotation.x = -Math.PI / 2; o.renderOrder = 2; o.visible = false; root.add(o); return o; };
   const ringM = { target: new THREE.MeshBasicMaterial({ color: 0x141414, side: THREE.DoubleSide }), backup: new THREE.MeshBasicMaterial({ color: 0x9a9a9a, side: THREE.DoubleSide }),
     sensor: new THREE.MeshBasicMaterial({ color: 0x141414, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false }),
-    zone: new THREE.MeshBasicMaterial({ color: 0x141414, side: THREE.DoubleSide }), zoneFill: new THREE.MeshBasicMaterial({ color: 0x141414, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false }) };
+  };
   const target = ring(0.5, 0.62, ringM.target), backup = ring(0.42, 0.5, ringM.backup), sensorRing = ring(0.97, 1, ringM.sensor);
 
   let drones = null;
-  const agentMeshes = new Map(), cars = new Map(), parcels = new Map(), zones = new Map(), clouds = new Map(), birds = [];
+  const agentMeshes = new Map(), cars = new Map(), parcels = new Map(), clouds = new Map(), birds = [];
 
   function carMesh() {
     const g = new THREE.Group(), body = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.25, 0.65), M.mid); body.position.y = 0.16; body.castShadow = true;
@@ -85,12 +85,6 @@ export function createStage({ scene, couriers, obstacles = () => [] }) {
       if (!on && !v) continue; if (!v) { v = confetti(); clouds.set(c.id, v); }
       v.pts.visible = on; if (on) { const a = v.pts.geometry.attributes.position; v.seed.forEach(([sx, sy, sz, ph], i) => { const y = ((sy - (S.t * 0.25 + ph)) % 1 + 1) % 1; a.setXYZ(i, c.x + sx * c.r, SLAB + y * c.top, c.z + sz * c.r); }); a.needsUpdate = true; }
     }
-    for (const z of S.zones) {
-      const on = S.t >= z.t0 && S.t < z.t1; let v = zones.get(z.id);
-      if (!on && !v) continue;
-      if (!v) { v = { ring: ring(z.r - 0.12, z.r, ringM.zone), fill: ring(0, z.r - 0.12, ringM.zoneFill) }; v.ring.position.set(z.x, SLAB + 0.05, z.z); v.fill.position.set(z.x, SLAB + 0.04, z.z); zones.set(z.id, v); }
-      v.ring.visible = v.fill.visible = on;
-    }
     // selected drone: target, backup, sensor disc
     const d = selId ? world.droneOf(selId) : null;
     target.visible = !!(d?.order && d.target); backup.visible = !!(d?.order); sensorRing.visible = !!(d?.order && d.phase !== 'idle');
@@ -99,6 +93,32 @@ export function createStage({ scene, couriers, obstacles = () => [] }) {
       backup.position.set(d.order.addr.x - 3.2, SLAB + 0.03, d.order.addr.z); backup.material = d.target?.backup ? ringM.target : ringM.backup;
       const r = Math.max(0.5, Math.min(6, Math.max(3, 2.6 + (d.y - SLAB) * 0.3))); sensorRing.scale.setScalar(r); sensorRing.position.set(d.x, SLAB + 0.04, d.z);
     }
+  }
+
+  // ---------- 3D trails: where each drone has actually flown, in three dimensions (outbound solid, return dashed) ----------
+  const trails = new THREE.Group(); trails.name = 'drone trails'; root.add(trails);
+  const solidMat = new THREE.MeshBasicMaterial({ color: 0x141414 });
+  const dashMat = new THREE.ShaderMaterial({ uniforms: { uCount: { value: 40 } },
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: 'uniform float uCount; varying vec2 vUv; void main(){ if (fract(vUv.x * uCount) > 0.55) discard; gl_FragColor = vec4(0.078, 0.078, 0.078, 1.0); }' });
+  const trailState = [];
+  const tube = (pts, r, material) => { if (pts.length < 2) return null; const c = new THREE.CatmullRomCurve3(pts, false, 'centripetal'); const m = new THREE.Mesh(new THREE.TubeGeometry(c, Math.min(260, pts.length * 3), r, 4, false), material); m.frustumCulled = false; return m; };
+  function syncTrails(world, show) {
+    trails.visible = show; if (!show) return;
+    const now = performance.now();
+    world.state.drones.forEach((d, i) => {
+      const t = (trailState[i] ??= { n: -1, at: 0, solid: null, dash: null });
+      const live = d.order && d.phase !== 'idle' && d.route.length > 1;
+      if (!live) { if (t.solid || t.dash) { for (const k of ['solid', 'dash']) if (t[k]) { trails.remove(t[k]); t[k].geometry.dispose(); t[k] = null; } t.n = -1; } return; }
+      if (d.route.length === t.n && now - t.at < 450) return;
+      if (now - t.at < 250) return;
+      t.n = d.route.length; t.at = now;
+      const all = [...d.route, { x: d.x, y: d.y, z: d.z, ret: d.route.at(-1).ret }].map((p) => ({ v: new THREE.Vector3(p.x + (p.x === d.x ? d.px : 0), p.y - 0.15, p.z), ret: !!p.ret }));
+      const k = all.findIndex((p) => p.ret), out = (k < 0 ? all : all.slice(0, k + 1)).map((p) => p.v), back = k < 0 ? [] : all.slice(Math.max(0, k - 1)).map((p) => p.v);
+      for (const key of ['solid', 'dash']) if (t[key]) { trails.remove(t[key]); t[key].geometry.dispose(); t[key] = null; }
+      t.solid = tube(out, 0.075, solidMat); t.dash = tube(back, 0.06, dashMat);
+      if (t.solid) trails.add(t.solid); if (t.dash) trails.add(t.dash);
+    });
   }
 
   // ---------- off-screen renderers (monitor cells and the zoomed scene) ----------
@@ -143,7 +163,7 @@ export function createStage({ scene, couriers, obstacles = () => [] }) {
   function renderCell(world, d, ctx2d) {
     const W = ctx2d.canvas.width, H = ctx2d.canvas.height; cellView ??= makeView(W, H);
     if (cellView.w !== W || cellView.h !== H) { cellView.renderer.setSize(W, H, false); cellView.w = W; cellView.h = H; }
-    const f = focusOf(world, d), dir = dirFor(f); faceFigures(dir); aim(cellView.cam, f, 9.5, W / H, dir);
+    const f = { x: d.x + d.px, y: d.y, z: d.z + d.pz }; faceFigures(ISO); aim(cellView.cam, f, 8, W / H, ISO);   // every cell is welded to its drone: the drone is always the centre of the picture
     const restore = hideMain(); cellView.ink.render(scene, cellView.cam); restore(); ctx2d.drawImage(cellView.canvas, 0, 0, W, H);
   }
   function renderBig(world, d, ctx2d, halfH = 8) {
@@ -155,5 +175,5 @@ export function createStage({ scene, couriers, obstacles = () => [] }) {
   const setMainOnly = (list) => { mainOnly = list.filter(Boolean); };
   const projectWith = (cam, p, w, h) => { const v = new THREE.Vector3(p.x, p.y ?? SLAB, p.z).project(cam); return { x: (v.x + 1) / 2 * w, y: (1 - v.y) / 2 * h, front: v.z < 1 }; };
   const resetCache = () => dirCache.clear();
-  return { sync, renderCell, renderBig, projectWith, setMainOnly, resetCache, root, ISO };
+  return { sync, syncTrails, trails, renderCell, renderBig, projectWith, setMainOnly, resetCache, root, ISO };
 }

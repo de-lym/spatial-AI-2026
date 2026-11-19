@@ -64,7 +64,7 @@ const routePoint = (u) => { const L = ROUTE.length - 1, f = u * L, i = Math.min(
  * createWorld(settings, { obstacles, tiles, memory })
  *   obstacles: [{x0,x1,z0,z1,h}]   tiles: [{cx,cz,landUse,name}]   memory: { landmarks: {addressKey: true} } (mutated)
  */
-export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {} } = {}) {
+export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {}, plan = null } = {}) {
   const P = { ...DEFAULT_SETTINGS, ...input };
   const seedOf = (k) => rng(((P.seed >>> 0) * 31 + k * 7919) >>> 0);
   const Rord = seedOf(1), Rped = seedOf(2), Rdog = seedOf(3), Rfl = seedOf(4), Rgust = seedOf(5), Rzone = seedOf(6), Rconf = seedOf(7), Revt = seedOf(8);
@@ -79,11 +79,12 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
     for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) { const t = tilesByKey.get(`${Math.round(a.tile.cx / 16) + i},${Math.round(a.tile.cz / 16) + j}`); if (!t) continue; n++; if (t.landUse === 'housing') low++; if (t.landUse === 'cbd') tall++; }
     return { lowShare: n ? low / n : 0, tallShare: n ? tall / n : 0, paradeNear: clamp(1 - paradeDistance(a) / 12, 0, 1) };
   };
-  let all = tiles.filter((t) => !(t.cx === 0 && t.cz === 0) && t.landUse !== 'sensitive' && !/pond/i.test(t.name || ''))
+  const clearPad = (x, z) => !obstacles.some((o) => x > o.x0 - 1.3 && x < o.x1 + 1.3 && z > o.z0 - 1.3 && z < o.z1 + 1.3);   // a pad (and its backup spot) is never inside or hard against a building
+  let all = tiles.filter((t) => !(t.cx === 0 && t.cz === 0) && t.landUse !== 'sensitive' && !/pond/i.test(t.name || '') && clearPad(t.cx, t.cz + PAD_DZ) && clearPad(t.cx + BACKUP_DX, t.cz + PAD_DZ))
     .map((t) => ({ key: `${t.cx},${t.cz}`, x: t.cx, z: t.cz + PAD_DZ, tile: t, name: t.name || t.id, id: t.id }));
   all.sort((a, b) => hyp(a, HUB) - hyp(b, HUB));
   let addresses = all.filter((a) => hyp(a, HUB) <= radiusU);
-  if (addresses.length < 4) addresses = all.slice(0, 4);
+  if (addresses.length < 4) addresses = all.slice(0, 4);   // the parcel grid is 80 m apart: with a very small radius the four nearest addresses are used
   for (const a of addresses) a.ctx = ctxOf(a);
 
   // ---- orders (all random draws of an order come from its own stream, so board changes never reshuffle other orders)
@@ -92,13 +93,13 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
     const rr = rng(((P.seed >>> 0) * 13 + i * 97 + 5) >>> 0), a = addresses[Math.floor(Rord() * addresses.length)];
     const urgent = Rord() < P.urgentPct / 100;
     orders.push({ id: i + 1, addr: a, urgent, confettiRoll: rr(), confettiDur: 20 + rr() * 10, status: 'queued', tries: 0, drone: null, tAssigned: null, tDone: null, outcome: null, redelivered: false,
-      car: rr() < 0.05 + 0.3 * a.ctx.lowShare, carUntil: 60 + rr() * 110, needConfirm: rr() < 0.6, replyRoll: rr(), replyRoll2: rr(), replyDelay: 4 + rr() * 22, dogAttn: rr() < 0.85, backupOK: rr() < 0.3 });
+      car: rr() < 0.02 + 0.45 * a.ctx.lowShare, carUntil: 60 + rr() * 110, needConfirm: rr() < 0.6, replyRoll: rr(), replyRoll2: rr(), replyDelay: 4 + rr() * 22, dogAttn: rr() < 0.1 + 0.85 * a.ctx.lowShare, backupOK: rr() < 0.3 });
   }
 
   // ---- ground and air agents (they have their own simple behaviour; they are not scenery)
   const pickAddr = (R, weight) => { const w = addresses.map(weight), s = w.reduce((x, y) => x + y, 0); let u = R() * s; for (let i = 0; i < w.length; i++) { u -= w[i]; if (u <= 0) return addresses[i]; } return addresses.at(-1); };
   const peds = Array.from({ length: P.pedestrians }, (_, k) => { const a = pickAddr(Rped, (x) => 0.4 + x.ctx.paradeNear + 0.6 * x.ctx.tallShare); return { id: `P${k + 1}`, kind: 'person', x: a.x + (Rped() - 0.5) * 3, z: a.z + (Rped() - 0.5) * 3, goal: a, wait: Rped() * 4, phase: Rped() * 6, heading: 0, speed: 0.7 + Rped() * 0.3 }; });
-  const dogs = Array.from({ length: P.dogs }, (_, k) => { const a = pickAddr(Rdog, (x) => 0.25 + x.ctx.lowShare * 2); return { id: `G${k + 1}`, kind: 'dog', home: a, x: a.x + BACKUP_DX, z: a.z + 0.4, state: 'roam', t0: 0, stay: 0, heading: 0, k, forOrder: null }; });
+  const dogs = Array.from({ length: P.dogs }, (_, k) => { const a = pickAddr(Rdog, (x) => 0.5 + x.ctx.lowShare * 2); return { id: `G${k + 1}`, kind: 'dog', home: a, x: a.x + BACKUP_DX, z: a.z + 0.4, state: 'roam', t0: 0, stay: 0, heading: 0, k, forOrder: null }; });
   const flocks = Array.from({ length: P.flocks }, (_, k) => { const th = Math.floor(Rfl() * 4) * Math.PI / 2 + (Rfl() - 0.5) * 0.5; return { id: `F${k + 1}`, n: 4 + Math.floor(Rfl() * 3), dx: Math.cos(th), dz: Math.sin(th), lat: (Rfl() - 0.5) * 2 * Math.min(44, radiusU * 0.85), off: Rfl() * 120, speed: 2.2 + Rfl() * 0.8, y: SLAB + 9 + Rfl() * 7 }; });
   const flockBirds = (t) => { const out = []; for (const f of flocks) { const s = ((t * f.speed + f.off) % 120) - 60; for (let i = 0; i < f.n; i++) out.push({ id: `${f.id}b${i}`, flock: f.id, x: f.dx * s - f.dz * f.lat + (i % 3 - 1) * 1.6, z: f.dz * s + f.dx * f.lat + (Math.floor(i / 3) - 0.5) * 1.6, y: f.y + Math.sin(t * 5 + i) * 0.15, flap: t * 14 + i }); } return out; };
 
@@ -114,7 +115,7 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
     P, t: 0, done: false, endedBy: null, orders, drones: [], events: [], agents: { peds, dogs }, flocks, gusts, zones, clouds, addresses,
     log: [], queuePeak: 0, series: [], completed: 0,
   };
-  const home = (i) => ({ x: (i % 3 - 1) * 2.7, z: 3.2 + Math.floor(i / 3) * 2.7 });
+  const home = (i) => ({ x: (i % 3 - 1) * 1.7, z: 4.4 + Math.floor(i / 3) * 1.4 });   // inside the hub's landing column
   for (let i = 0; i < N_DRONES; i++) {
     const h = home(i);
     S.drones.push({ id: `D-0${i + 1}`, idx: i, x: h.x, y: SLAB, z: h.z, home: h, phase: 'idle', visible: true, order: null, target: null, cruise: CRUISE, drop: 0, speedK: 1, battery: 100,
@@ -134,10 +135,38 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
   function setLevel(d, level, reason) { d.level = level; d.levelReason = reason; if (levelRank(level) > levelRank(d.maxLevel)) d.maxLevel = level; }
 
   // ---------------------------------------------------------------- helpers: terrain, sensing
-  function cruiseHeightFor(a, b) {
+  // ---- routes. The flying boundary system of the AIRSPACE model decides where a drone may be: map edge, building volumes + clearance,
+  // restricted volumes and the permitted airspace (land-use floors, reachable only through landing columns). `plan` is that planner
+  // (spatial.js planRoute, injected by the app); without it a conservative fallback is used: straight up, over the tallest building
+  // of the leg plus a margin, straight down. A drone only ever follows a planned polyline — it never cuts a corner through a building.
+  const MARGIN_U = 1.4;
+  function fallbackPlan(from, to, baseU) {
     let top = 0;
-    for (const o of obstacles) for (let k = 0; k <= 24; k++) { const x = a.x + (b.x - a.x) * k / 24, z = a.z + (b.z - a.z) * k / 24; if (x > o.x0 - 1 && x < o.x1 + 1 && z > o.z0 - 1 && z < o.z1 + 1) top = Math.max(top, o.h); }
-    return clamp(top + 2, CRUISE, 23);
+    const len = Math.hypot(to.x - from.x, to.z - from.z), n = Math.max(2, Math.ceil(len / 0.3));
+    for (let k = 0; k <= n; k++) {
+      const x = from.x + (to.x - from.x) * k / n, z = from.z + (to.z - from.z) * k / n;
+      for (const o of obstacles) if (x > o.x0 - MARGIN_U && x < o.x1 + MARGIN_U && z > o.z0 - MARGIN_U && z < o.z1 + MARGIN_U) top = Math.max(top, o.h);
+    }
+    const L = clamp(Math.max(baseU, top + 2), CRUISE, 23.5);
+    const pts = [{ x: from.x, y: L, z: from.z }, { x: to.x, y: L, z: to.z }, { x: to.x, y: to.y, z: to.z }];
+    return pts.filter((p, i) => i === 0 || Math.hypot(p.x - pts[i - 1].x, p.z - pts[i - 1].z, p.y - pts[i - 1].y) > 1e-3);
+  }
+  function planLeg(d, to) {
+    const from = { x: d.x, y: Math.max(0, d.y - SLAB), z: d.z }, baseM = 50 + (d.climbOver ? 15 : 0);
+    let pts = null;
+    if (plan) { try { const r = plan(from, to, { base: baseM }); if (r?.ok && r.pts?.length) pts = r.pts.map((p) => ({ x: p.x, y: p.y, z: p.z })); } catch { pts = null; } }
+    if (!pts) pts = fallbackPlan(from, to, baseM / SCALE_M);
+    d.path = pts; d.goal = to; d.needPlan = false; d.cruise = Math.max(CRUISE, ...pts.map((p) => p.y));
+  }
+  function followPath(d, dt) {                                   // returns true when the whole polyline has been flown
+    if (d.needPlan && d.goal) planLeg(d, d.goal);
+    const p = d.path?.[0]; if (!p) return true;
+    const sp = V * d.speedK; if (sp < 1e-6) return false;
+    const dx = p.x - d.x, dz = p.z - d.z, dy = SLAB + p.y - d.y, t = Math.max(Math.hypot(dx, dz) / sp, Math.abs(dy) / (VZ * 1.6));
+    if (t < 1e-6) { d.path.shift(); return d.path.length === 0; }
+    const k = Math.min(1, dt / t); d.x += dx * k; d.z += dz * k; d.y += dy * k;
+    if (k >= 1) d.path.shift();
+    return d.path.length === 0;
   }
   const cloudOver = (p, h = 0) => clouds.find((c) => S.t >= c.t0 && S.t < c.t1 && hyp(p, c) < c.r + 0.5 && h < c.top + 0.3) ?? null;
   const inCloud = (p) => clouds.find((c) => S.t >= c.t0 && S.t < c.t1 && hyp(p, c) < c.r + 0.5) ?? null;
@@ -200,7 +229,7 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
   function safetyAction(d, ev) {
     switch (ev.type) {
       case 'ped': case 'dog': if (d.drop > 0.05) { d.phase = 'reel'; return 'reeled the parcel up and hovered'; } if (['descend', 'scan', 'verify', 'lower'].includes(d.phase)) d.phase = 'wait'; return 'stopped lowering and hovered';
-      case 'conflict': d.held = true; d.heldBy = ev.id; droneOf(ev.with).climbOver = true; return 'stopped and holding; the other drone climbs 15 m to pass';
+      case 'conflict': d.held = true; d.heldBy = ev.id; { const o = droneOf(ev.with); o.climbOver = true; o.needPlan = true; } return 'stopped and holding; the other drone climbs 15 m to pass';
       case 'nofly': d.held = true; d.heldBy = ev.id; return 'stopped outside the zone';
       case 'gust': if (d.drop > 0.05) { d.phase = 'reel'; return 'reeled up and hovered'; } d.held = true; d.heldBy = ev.id; return 'hovering above the roofline';
       case 'pigeon': d.held = true; d.heldBy = ev.id; return 'holding until the flock passes';
@@ -226,12 +255,12 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
     switch (id) {
       case 'backup': d.approved = true; switchBackup(d, 'Backup spot approved.'); break;
       case 'return': abort(d, 'Sent home.'); break;
-      case 'climb': d.climbOver = true; setLevel(d, 'L3', 'Climbing over'); if (ev.type === 'occluded') d.phase = 'climb'; break;
+      case 'climb': d.climbOver = true; d.needPlan = true; setLevel(d, 'L3', 'Climbing over'); if (ev.type === 'occluded') d.phase = 'climb'; break;
       case 'resume': d.gustIgnore = active(gusts, S.t)?.t1 ?? 0; setLevel(d, 'L1', 'Continuing in gust'); break;
       case 'assume': d.confirmed = true; setLevel(d, 'L2', 'Assuming the instructed spot'); if (d.phase === 'confirm') d.phase = 'descend'; break;
       case 'rule': case 'swap': {
         const other = droneOf(ev.with), yielder = id === 'rule' ? d : other, goer = yielder === d ? other : d;
-        yielder.held = true; yielder.heldBy = null; yielder.yieldFor = goer.id; yielder.yieldCap = S.t + 45; goer.held = false; goer.heldBy = null; goer.climbOver = true;
+        yielder.held = true; yielder.heldBy = null; yielder.yieldFor = goer.id; yielder.yieldCap = S.t + 45; goer.held = false; goer.heldBy = null; goer.climbOver = true; goer.needPlan = true;
         setLevel(yielder, 'L3', `${yielder.id} yields to ${goer.id}`); setLevel(goer, 'L1', 'Proceeding'); break;
       }
     }
@@ -254,10 +283,11 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
   function nextOrder() { const q = orders.filter((o) => o.status === 'queued'); q.sort((a, b) => (b.urgent - a.urgent) || a.id - b.id); return q[0] ?? null; }
   function assign(d, o) {
     o.status = 'active'; o.drone = d.id; o.tAssigned = S.t; if (o.tries > 0) o.redelivered = true;
-    d.order = o; d.target = { x: o.addr.x, z: o.addr.z, name: o.addr.name, original: true }; d.cruise = cruiseHeightFor(d.home, o.addr);
+    d.order = o; d.target = { x: o.addr.x, z: o.addr.z, name: o.addr.name, original: true };
     d.phase = 'enter'; d.drop = 0; d.hover = 0; d.waitT = 0; d.escalated = false; d.approved = false; d.confirmed = false; d.confettiDone = false; d.lmCount = 0; d.delivered = false; d.abortedOrder = false;
-    d.climbOver = false; d.zoneSeen = new Set(); d.route = [{ x: d.x, z: d.z }]; d.routeLog = S.t; d.series = []; d.scanned = false; d.seenAt = -99; d.gustIgnore = 0; d.speedK = 1;
+    d.climbOver = false; d.zoneSeen = new Set(); d.route = [{ x: d.x, y: d.y, z: d.z }]; d.routeLog = S.t; d.series = []; d.scanned = false; d.seenAt = -99; d.gustIgnore = 0; d.speedK = 1;
     d.know = { ox: o.addr.x - GRID / 2, oz: o.addr.z - GRID / 2, state: new Uint8Array(GRID * GRID), seen: new Float32Array(GRID * GRID).fill(-99) };
+    planLeg(d, { x: o.addr.x, y: CRUISE, z: o.addr.z });
     setLevel(d, 'L0', 'Departed'); d.maxLevel = 'L0';
     log(d, 'DEPART', `${d.id} takes order #${o.id}${o.urgent ? ' (URGENT)' : ''} to ${o.addr.name}, cruising at ${Math.round(d.cruise * SCALE_M)} m.`);
   }
@@ -280,7 +310,8 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
     }
     for (const a of [...peds, ...dogs]) if (hyp(a, d) <= r) { const i = Math.floor(a.x - K.ox) + Math.floor(a.z - K.oz) * GRID; if (i >= 0 && i < GRID * GRID && Math.floor(a.x - K.ox) < GRID) { K.state[i] = 3; K.seen[i] = S.t; } }
     if (r >= 1.5) d.seenAt = S.t;
-    if (hyp(d, d.order.addr) <= r + 1 && !isKnown(d.order)) { d.lmCount += dt; if (d.lmCount >= 3) { memory.landmarks[lmKey(d.order)] = true; log(d, 'LANDMARK', `New landmark: ${d.order.addr.name}.`); } }
+    // a landmark is learned by looking at it from right above, not by flying past
+    if (['locate', 'confirm', 'descend', 'scan', 'verify', 'wait', 'lower'].includes(d.phase) && hyp(d, d.order.addr) <= Math.min(r + 1, 2.5) && !isKnown(d.order)) { d.lmCount += dt; if (d.lmCount >= 3) { memory.landmarks[lmKey(d.order)] = true; log(d, 'LANDMARK', `New landmark: ${d.order.addr.name}.`); } }
   }
 
   function stepDrone(d, dt) {
@@ -297,7 +328,7 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
       if (d.hover > HOVER_BUDGET) return abort(d, `Hover budget of ${HOVER_BUDGET} s used up.`);
     }
     if (flying) {                                         // route trace for the map
-      if (S.t - d.routeLog >= 0.6) { d.routeLog = S.t; d.route.push({ x: d.x, z: d.z, ret: d.phase !== 'enter' }); if (d.route.length > 160) d.route.shift(); }
+      if (S.t - d.routeLog >= 0.6) { d.routeLog = S.t; d.route.push({ x: d.x, y: d.y, z: d.z, ret: d.phase !== 'enter' }); if (d.route.length > 160) d.route.shift(); }
     }
     if (d.yieldFor && ['return', 'land', 'leave'].includes(d.phase)) { d.yieldFor = null; d.held = false; }      // leaving the area is always allowed
     if (d.held && !d.heldBy && !d.yieldFor) d.held = false;                                   // safety net: a hold always has an owner (an event or a yield)
@@ -315,10 +346,7 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
         const close = nearestBird(d);
         if (close < 2.4) { d.speedK = 0; if (!d.event) openEvent(d, 'pigeon'); return; }
         d.speedK = close < 5 ? 0.35 : 1;
-        const lift = clamp(0.2 + (d.y - ground) / Math.max(2, d.cruise * 0.5), 0.2, 1);
-        d.speedK *= lift;
-        const cy = d.climbOver ? Math.min(SLAB + 23, SLAB + d.cruise + 3) : SLAB + d.cruise;
-        if (goTo(d, T, cy, dt)) { d.speedK = 1; d.phase = 'locate'; d.timer = 0; log(d, 'LOCATE', isKnown(o) ? `Recognised ${o.addr.name} from memory.` : `Searching for ${o.addr.name}…`); }
+        if (followPath(d, dt)) { d.speedK = 1; d.phase = 'locate'; d.timer = 0; log(d, 'LOCATE', isKnown(o) ? `Recognised ${o.addr.name} from memory.` : `Searching for ${o.addr.name}…`); }
         return;
       }
       case 'locate': {
@@ -375,11 +403,16 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
         return;
       }
       case 'reelup': { d.drop = Math.max(0, d.drop - REEL * dt * 1.5); if (d.drop <= 0) d.phase = 'leave'; return; }
-      case 'leave': { const close = nearestBird(d); if (close < 2.4) { d.speedK = 0; if (!d.event) openEvent(d, 'pigeon'); return; } d.speedK = close < 5 ? 0.35 : 1; if (goTo(d, d.home, SLAB + Math.min(23, d.cruise + (d.climbOver ? 3 : 0)), dt)) { d.speedK = 1; d.phase = 'land'; } return; }
+      case 'leave': {
+        const close = nearestBird(d); if (close < 2.4) { d.speedK = 0; if (!d.event) openEvent(d, 'pigeon'); return; } d.speedK = close < 5 ? 0.35 : 1;
+        if (!d.path?.length || d.goal?.y !== 0) planLeg(d, { x: d.home.x, y: 0, z: d.home.z });
+        if (followPath(d, dt)) { d.speedK = 1; d.phase = 'land'; } return;
+      }
       case 'return': {
         d.drop = Math.max(0, d.drop - REEL * dt * 1.5); if (d.drop > 0) return;
         const close = nearestBird(d); d.speedK = close < 2.4 ? 0 : close < 5 ? 0.35 : 1;
-        if (goTo(d, d.home, SLAB + Math.max(d.cruise + (d.climbOver ? 3 : 0), d.y - SLAB), dt)) { d.speedK = 1; d.phase = 'land'; }
+        if (!d.path?.length || d.goal?.y !== 0) planLeg(d, { x: d.home.x, y: 0, z: d.home.z });
+        if (followPath(d, dt)) { d.speedK = 1; d.phase = 'land'; }
         return;
       }
       case 'land': {
@@ -442,8 +475,8 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
       if (!flightNear && !padOverlap) continue;
       pairCool.set(key, S.t + 6);
       const y = lowerPriority(a, b), g = y === a ? b : a;                              // the rule: urgent first, then the lower ID; the other yields
-      if (y.event) { y.held = true; y.yieldFor = g.id; y.yieldCap = S.t + 45; g.climbOver = true; log(y, 'YIELD', `${y.id} yields to ${g.id} (priority rule; it is already handling another event).`); continue; }   // no second event on a busy drone
-      const ev = openEvent(y, 'conflict', { with: g.id, kind2: padOverlap ? 'descent overlap' : 'path overlap' });
+      if (y.event) { y.held = true; y.yieldFor = g.id; y.yieldCap = S.t + 45; g.climbOver = true; g.needPlan = true; log(y, 'YIELD', `${y.id} yields to ${g.id} (priority rule; it is already handling another event).`); continue; }   // no second event on a busy drone
+      const ev = openEvent(y, 'conflict', { with: g.id, withUrgent: !!g.order?.urgent, kind2: padOverlap ? 'descent overlap' : 'path overlap' });
       if (ev) g.conflictEvent = ev;
     }
   }

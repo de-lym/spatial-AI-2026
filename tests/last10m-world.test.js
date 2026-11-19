@@ -18,12 +18,12 @@ test('one fixture per city preset; high-rise lots are taller than low-rise lots'
 });
 
 test('nine fixed drones, all at the hub, a seeded order queue inside the delivery radius', () => {
-  const w = make({ orders: 30, radiusM: 120 });
+  const w = make({ orders: 30, radiusM: 160 });
   assert.equal(w.state.drones.length, 9);
   assert.deepEqual(w.state.drones.map((d) => d.id), ['D-01', 'D-02', 'D-03', 'D-04', 'D-05', 'D-06', 'D-07', 'D-08', 'D-09']);
   assert.equal(w.state.orders.length, 30);
-  for (const o of w.state.orders) assert.ok(Math.hypot(o.addr.x, o.addr.z) <= 120 / 5 + 1e-6, 'order outside the delivery radius');
-  const w2 = make({ orders: 30, radiusM: 120 });
+  for (const o of w.state.orders) assert.ok(Math.hypot(o.addr.x, o.addr.z) <= 160 / 5 + 1e-6, 'order outside the delivery radius');
+  const w2 = make({ orders: 30, radiusM: 160 });
   assert.deepEqual(w.state.orders.map((o) => [o.addr.key, o.urgent]), w2.state.orders.map((o) => [o.addr.key, o.urgent]));
 });
 
@@ -101,7 +101,7 @@ test('conflict rule: the urgent order goes first, on equal priority the lower dr
       const y = w.droneOf(e.drone), g = w.droneOf(e.with);
       const oy = w.state.orders.find((o) => o.id === e.order);
       // reconstruct the priority of the goer at event time from the log of the event: urgent flag of the yielder's order and ids
-      if (!oy.urgent) assert.ok(y.idx > g.idx || w.state.orders.some((o) => o.drone === g.id && o.urgent), `${y.id} yielded to ${g.id}`);
+      if (!e.urgent) assert.ok(y.idx > g.idx || e.withUrgent, `${y.id} yielded to ${g.id}`);
     }
   }
   assert.ok(n >= 5, `conflicts seen: ${n}`);
@@ -147,8 +147,9 @@ test('more dogs → more dog events; more pigeon flocks → more pigeon events; 
 });
 
 test('city preset changes the event mix: low-rise → more dogs and cars, high-rise → more gust trouble', () => {
-  const sum = (p, types, over) => [1, 2, 3].reduce((n, seed) => n + types.reduce((m, ty) => m + count(run({ preset: p, seed, ...over }), ty), 0), 0);
-  assert.ok(sum('low', ['dog', 'car'], { dogs: 6 }) > sum('high', ['dog', 'car'], { dogs: 6 }), 'low-rise should see more dogs and cars');
+  const seeds = [1, 2, 3, 4, 5, 6];
+  const sum = (p, types, over) => seeds.reduce((n, seed) => n + types.reduce((m, ty) => m + count(run({ preset: p, seed, orders: 40, radiusM: 300, ...over }), ty), 0), 0);
+  assert.ok(sum('low', ['dog', 'car'], { dogs: 8 }) > sum('high', ['dog', 'car'], { dogs: 8 }), 'low-rise should see more dogs and cars');
   assert.ok(sum('high', ['gust'], { gustPerMin: 5 }) > sum('low', ['gust'], { gustPerMin: 5 }), 'high-rise should see more gust trouble');
 });
 
@@ -181,4 +182,25 @@ test('scorecard: reaction by tier, missed decisions, outcome shares, redeliverie
 test('the board only exposes the v2 controls', () => {
   assert.deepEqual(BOARD.map((b) => b.key), ['orders', 'urgentPct', 'radiusM', 'flocks', 'pedestrians', 'dogs', 'replyPct', 'gustPerMin']);
   assert.equal(EVENT_TYPES.length, 9);
+});
+
+test('drones never fly through a building: every position of every drone stays outside every obstacle volume', () => {
+  for (const preset of ['high', 'low', 'mixed']) {
+    const w = make({ preset, orders: 40, urgentPct: 40 }); const obs = CITY[preset].obstacles; let steps = 0;
+    for (let i = 0; i < 9000 && !w.state.done; i++) {
+      w.step(0.1);
+      for (const d of w.state.drones) {
+        if (d.phase === 'idle') continue; steps++;
+        const alt = d.y - 0.4;
+        for (const o of obs) assert.ok(!(d.x > o.x0 && d.x < o.x1 && d.z > o.z0 && d.z < o.z1 && alt < o.h), `${preset}: ${d.id} inside ${o.id} (h ${o.h}) at t=${w.state.t.toFixed(1)} alt ${alt.toFixed(1)} phase ${d.phase}`);
+      }
+    }
+    assert.ok(steps > 2000);
+  }
+});
+
+test('drones follow planned polylines: a leg is up, over, down — never a diagonal climb through the neighbourhood', () => {
+  const w = make({ orders: 12 }); let maxLow = 0;
+  for (let i = 0; i < 4000; i++) { w.step(0.1); for (const d of w.state.drones) if (d.phase === 'enter' && d.y - 0.4 < 3) maxLow = Math.max(maxLow, Math.hypot(d.x - d.home.x, d.z - d.home.z)); }
+  assert.ok(maxLow < 3, `a departing drone travelled ${maxLow.toFixed(1)} u horizontally below 15 m`);
 });

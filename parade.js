@@ -284,5 +284,5 @@ export function createParade({pads,plan,blocked:staticBlocked,obstacles=[],metho
     if(state.time>=CONFIG.duration){state.finished=true;record('RUN_COMPLETE',null,'150 s observation window ended. Incomplete missions remain incomplete.');}
     if(state.tick%5===0)capture();
   }
-  reset();return {get config(){return config;},get state(){return state;},tick,reset,historical,get frames(){return frames;},crowdBlocked,approve(operator,id,accept){const l=state.landmarks[operator]?.[id];if(l?.status==='proposed')l.status=accept?'approved':'rejected';},snapshot(){return JSON.parse(JSON.stringify({config,pads,environment:{route:PARADE_ROUTE,policy:PARADE,crowdZones:CROWD_ZONES,eventSchedule:EVENT_SCHEDULE},...state}));}};
+  reset();return {paradeAtTime:t=>paradeAt(t,{drift:config.events.includes('balloon'),spectators,animateSpectators:false}),get config(){return config;},get state(){return state;},tick,reset,historical,get frames(){return frames;},crowdBlocked,approve(operator,id,accept){const l=state.landmarks[operator]?.[id];if(l?.status==='proposed')l.status=accept?'approved':'rejected';},snapshot(){return JSON.parse(JSON.stringify({config,pads,environment:{route:PARADE_ROUTE,policy:PARADE,crowdZones:CROWD_ZONES,eventSchedule:EVENT_SCHEDULE},...state}));}};
 }

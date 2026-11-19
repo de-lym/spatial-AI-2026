@@ -108,7 +108,7 @@ body[data-mode="scene"] #l10-scene { display: flex; }
 #l10-view .live { right: 14px; top: 14px; background: var(--ink); color: #fff; }
 #l10-view .know { right: 14px; top: 52px; cursor: pointer; }
 #l10-view .know[aria-pressed="true"] { background: var(--ink); color: #fff; }
-#l10-view .label { position: absolute; transform: translate(-50%, -130%); font: 600 11.5px Inter, sans-serif; background: rgba(246,245,243,.94); border: 1px solid rgba(20,20,20,.35); border-radius: 999px; padding: 2px 9px; white-space: nowrap; pointer-events: none; }
+#l10-view .label { position: absolute; transform: translate(0, -50%); font: 600 11.5px Inter, sans-serif; background: rgba(246,245,243,.94); border: 1px solid rgba(20,20,20,.35); border-radius: 999px; padding: 2px 9px; white-space: nowrap; pointer-events: none; }
 #l10-view .label.red { background: var(--red); color: #fff; border-color: var(--ink); } #l10-view .label.green { background: var(--green); color: #fff; border-color: var(--ink); }
 #l10-timeline { height: 56px; border-radius: 28px; display: flex; align-items: center; gap: 14px; padding: 0 14px 0 10px; flex: none; }
 #l10-timeline .track { flex: 1; position: relative; height: 38px; }
@@ -197,3 +197,12 @@ body[data-mode="monitor"] #l10-board .bbody, body[data-mode="scene"] #l10-board 
 
 #l10-console #l10-count { white-space: nowrap; margin-left: 8px; }
 #l10-side { overflow-y: auto; }
+
+/* labels: drone-related on the left of the figure, the rest on the right */
+#l10-view .label.l { transform: translate(-100%, -50%); }
+#l10-view .label.r { transform: translate(0, -50%); }
+/* map: warning labels only (no numbered drone markers) */
+#l10-frames button { width: auto; height: 26px; border-radius: 13px; padding: 0 11px; transform: translate(0, -100%); border: 1.5px solid var(--ink); color: #fff; box-shadow: 2px 2px 0 rgba(20,20,20,.85); white-space: nowrap; }
+#l10-frames button[hidden] { display: none; }
+#l10-frames button span { font: 700 11.5px/23px Inter, sans-serif; color: inherit; display: block; }
+#l10-frames button.t1 { background: var(--t1); color: #fff; } #l10-frames button.t2 { background: var(--t2); color: #fff; } #l10-frames button.t3 { background: var(--t3); color: var(--ink); }

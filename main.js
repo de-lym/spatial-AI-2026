@@ -581,6 +581,7 @@ const blockRecord = (t) => ({
 // Permitted prisms: every tile contributes [its land use's floor, the global ceiling]; neighbouring tiles with the same floor merge into one prism.
 // Restricted prisms: over each Sensitive block up to its configured altitude, plus temporary hazards. Every pad has a landing
 // column up to the floor above it so that takeoff and landing are valid transitions rather than gaps.
+const EXTRA_PADS = [];            // Last 10m: every parcel's front pad also gets a landing column, so drones may descend there inside the permitted airspace
 const airspace = new THREE.Group(); scene.add(airspace);
 const volViz = new Map();       // id → {v, fill, edges, label}
 const volMeshes = [];           // pickable fills
@@ -606,10 +607,10 @@ function genPermitted() {
   });
   vols.sort((a, b) => b.band - a.band || (b.x1 - b.x0) * (b.z1 - b.z0) - (a.x1 - a.x0) * (a.z1 - a.z0)); // upper band first, big prisms first
   vols.forEach((v, n) => { v.id = 'V-' + String(n + 1).padStart(2, '0'); });
-  for (const e of [platform, ...S.restaurants, ...S.customers]) {
+  for (const e of [platform, ...S.restaurants, ...S.customers, ...EXTRA_PADS]) {
     const t = tileOf(e.acc.x, e.acc.z), top = Math.min(LAND[t.landUse].minAltM, hi), hub = e === platform;
-    const id = hub ? 'T-00' : 'T-' + e.stationId.replace('-', ''), w = hub ? [4.4, 2.3] : [2.4, 2.4], cz = hub ? 5.3 : e.acc.z;
-    vols.push({ id, name: hub ? 'Launch hub column' : `${e.stationId} landing column`, kind: 'transition', x0: e.acc.x - w[0], x1: e.acc.x + w[0], z0: cz - w[1], z1: cz + w[1], zloM: 0, zhiM: top, tiles: [t.id], mix: { [t.landUse]: 1 } });
+    const id = hub ? 'T-00' : 'T-' + e.stationId.replace('-', ''), w = hub ? [4.4, 2.3] : e.extra ? [5.8, 2.4] : [2.4, 2.4], cz = hub ? 5.3 : e.acc.z;   // extra (Last 10m) columns also cover the backup spot 3.2 u beside the pad
+    vols.push({ id, name: hub ? 'Launch hub column' : `${e.stationId} landing column`, kind: 'transition', x0: e.acc.x - (e.extra ? 5.8 : w[0]), x1: e.acc.x + (e.extra ? 2.4 : w[0]), z0: cz - w[1], z1: cz + w[1], zloM: 0, zhiM: top, tiles: [t.id], mix: { [t.landUse]: 1 } });
   }
   return vols;
 }
@@ -2482,7 +2483,9 @@ function rebuildCity({ preset = 'mixed', seed: sd = 11 } = {}) {
     buildingFiller = true; buildFiller(x, z, preset); buildingFiller = false;
   }
   world.obstacles.forEach((o, i) => { o.id = 'B-' + String(i + 1).padStart(3, '0'); });
-  finishBlocks(); try { regenAirspace(); } catch (e) { /* airspace is not used by Last 10m */ }
+  EXTRA_PADS.length = 0;
+  for (const t of world.tiles) if (!(t.cx === 0 && t.cz === 0)) EXTRA_PADS.push({ extra: true, stationId: 'X-' + t.id, acc: { x: t.cx, z: t.cz + PAD_DZ } });
+  finishBlocks(); regenAirspace();
   if (street.root) scene.remove(street.root);
   try { street = buildStreetscape({ scene, camera, world, buildingGroups, ROADS, parcels, takenAt, slab: SLAB }); } catch (e) { console.error('Streetscape unavailable', e); }
   return world.obstacles.length;
@@ -2519,4 +2522,4 @@ if (!parade) updatePanels(true);
 frame();
 if (tutorial) tutorial.maybeAutoStart();
 // exposed for debugging / automated checks
-window.__sim = { get parade() { return parade; }, rebuildCity, exportCity, ink, SLAB, street, BG, inspection, placement, proximity, sepEvade, sepPlan, posAfter, prioCmp, scene, LAND, regenAirspace, segCheck, inPermitted, volumesAt, S, act, step, world, cfg, planRoute, planMission, getLocation, getAgentsAt, getAgentsInBox, setStage, previews, selectVolume, resetWorld, ui, ops, selectDrone, clearDroneSelection, renderEvents, camera, renderer, controls };
+window.__sim = { get parade() { return parade; }, rebuildCity, regenAirspace, exportCity, ink, SLAB, street, BG, inspection, placement, proximity, sepEvade, sepPlan, posAfter, prioCmp, scene, LAND, regenAirspace, segCheck, inPermitted, volumesAt, S, act, step, world, cfg, planRoute, planMission, getLocation, getAgentsAt, getAgentsInBox, setStage, previews, selectVolume, resetWorld, ui, ops, selectDrone, clearDroneSelection, renderEvents, camera, renderer, controls };

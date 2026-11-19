@@ -2,7 +2,7 @@
 // this module only (a) maps its state onto the existing cards, tables, inspector and drawer, and (b) drives the 3D actors.
 // Layout, graphics style and monochrome look are the shell's own — nothing here introduces new chrome.
 import * as THREE from 'three';
-import {CONFIG, createParade, distance} from './parade.js';
+import {CONFIG, createParade, distance} from './parade.js?v=2';
 import {METHODS} from './parade-methods.js';
 import {EVENT_IDS, EVENT_SCHEDULE} from './parade-events.js';
 import {CROWD_ZONES} from './parade-environment.js';
