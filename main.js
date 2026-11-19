@@ -27,6 +27,9 @@ import { installTutorial } from './tutorial.js?v=3';
    described twice, as machine state (XYZ…) and as a human-readable update.
    ==================================================================== */
 
+// Last 10m: when the page says data-app="last10m", main.js only builds and draws the city; last10m/app.js runs the nine scenes and the UI.
+const L10 = document.body.dataset.app === 'last10m';
+
 // ---------- operations UI model (adapter state; the simulation S stays the single source of truth) ------
 const dispId = (id) => 'DR-' + id.slice(2);          // display alias only: every read / command still uses the internal D-0x id
 const ops = createEventStore();                       // structured incidents + updates for the Incident Queue
@@ -2434,6 +2437,10 @@ function resizeMap() { // the canvas fills the page; size comes from the map con
   const a = w / h;
   Object.assign(camera, { left: -VIEW * a, right: VIEW * a, top: VIEW, bottom: -VIEW });
   // centre the city in the area the floating panels leave free (a fixed offset: selection never moves it)
+  if (L10) {   // keep the city centred in the area left of the right-hand column (408 px)
+    const side = w > 900 ? 408 : 0;
+    camera.setViewOffset(w, h, side / 2, 0, w, h); camera.updateProjectionMatrix(); return;
+  }
   const rc = (id) => document.querySelector(id)?.getBoundingClientRect();
   const l = rc('.left'), f = rc('.fleet'), t = rc('.statusbar');
   const freeL = l ? l.right + 16 : 0, freeT = t ? t.bottom + 8 : 0, freeB = f ? f.top - 8 : h;
@@ -2465,16 +2472,17 @@ function frame() {
   street.update(dt);
   try { droneView.render(dt); } catch (e) { droneView = { render() {} }; console.error(e); }
   if (!parade && (panelClock += dt) > 0.25) updatePanels();
-  ink.render(scene, camera);
+  if (!L10 || window.__l10?.drawMain !== false) ink.render(scene, camera);
+  if (L10) try { window.__l10?.frame(dt); } catch (e) { console.error(e); }
   requestAnimationFrame(frame);
 }
 let droneView = { render() {} };
 try { droneView = installDroneView({ scene, canvas: $('drone-live'), getDrone: () => selectedDrone(), hiddenWhileRendering: [selRing] }); } catch (e) { console.error('Live drone view unavailable', e); }
 if (PARADE_MODE) parade = installParade({ S, scene, world, planRoute, segCheck, camera, controls, removeOrder, routeLayer, selRing, setAdvanced, toast, SLAB, streetLabels, ink });
-const tutorial = parade ? null : installTutorial({ selectDrone, clearDroneSelection, S });
+const tutorial = parade || L10 ? null : installTutorial({ selectDrone, clearDroneSelection, S });
 if (tutorial) $('btn-tour').addEventListener('click', () => tutorial.start(true));
 if (!parade) updatePanels(true);
 frame();
 if (tutorial) tutorial.maybeAutoStart();
 // exposed for debugging / automated checks
-window.__sim = { get parade() { return parade; }, inspection, placement, proximity, sepEvade, sepPlan, posAfter, prioCmp, scene, LAND, regenAirspace, segCheck, inPermitted, volumesAt, S, act, step, world, cfg, planRoute, planMission, getLocation, getAgentsAt, getAgentsInBox, setStage, previews, selectVolume, resetWorld, ui, ops, selectDrone, clearDroneSelection, renderEvents, camera, renderer, controls };
+window.__sim = { get parade() { return parade; }, ink, SLAB, street, BG, inspection, placement, proximity, sepEvade, sepPlan, posAfter, prioCmp, scene, LAND, regenAirspace, segCheck, inPermitted, volumesAt, S, act, step, world, cfg, planRoute, planMission, getLocation, getAgentsAt, getAgentsInBox, setStage, previews, selectVolume, resetWorld, ui, ops, selectDrone, clearDroneSelection, renderEvents, camera, renderer, controls };

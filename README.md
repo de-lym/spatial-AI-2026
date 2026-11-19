@@ -1,6 +1,11 @@
-# AIRSPACE — Pre-delivery Orbit Inspection
+# Last 10m — So close, yet so far
 
-A separate working extension of the placement + proximity delivery simulator. All new interface text and recording captions are in English. The existing GitHub repository and earlier ZIP packages remain unchanged.
+A spatial-AI simulation of the **last ten metres of drone delivery**. Nine extreme cases run as nine independent
+scenes on one miniature city, each watched by its own camera. The drone starts every run knowing nothing about the
+block, scans it, builds landmarks it reuses next time, and decides — or asks a human — what to do when the drop spot is
+blocked, contested or unsafe.
+
+*Your package is only ten metres away. That doesn't mean you're getting it.*
 
 ## Run
 
@@ -8,74 +13,71 @@ A separate working extension of the placement + proximity delivery simulator. Al
 python3 -m http.server 8000
 ```
 
-Open http://localhost:8000 in a desktop browser. No frontend install or build is required; Three.js is vendored. Do not double-click index.html because ES modules need HTTP.
+Open <http://localhost:8000> (ES modules need HTTP; do not open the file directly). No build step; three.js is vendored.
+The original AIRSPACE operations app is still available at <http://localhost:8000/airspace.html>.
 
-## Delivery sequence
+## Three views
 
-**Pick up → Approach observation circuit → Orbit and observe → Evaluate model checks → Approach / descend → Drop off.**
+| View | What it answers | How to get there |
+|---|---|---|
+| **Map** | *Where* is something happening? A static view of the city; the nine scenes are framed and coloured by status. | Default view, or **Map** in the top switch |
+| **Monitor · 9** | *What* is happening? Nine live camera feeds, plus the list of things to resolve. | **Monitor · 9**, or **Open monitor →** |
+| **Scene** | *What do we do?* One zoomed feed, the drone's knowledge, the event timeline and the operator console. | Click a frame, a camera or a list item |
 
-Every customer-delivery leg now starts with an inspection task. The parcel stays on the drone throughout observation and any wait. Completing 100% of the circuit does not mark the order delivered.
+Status colours: **green** = normal (L0–L1), **yellow** = hazard being handled (L2 hold/wait, L3 avoid/redirect),
+**red** = emergency (H human decision, L4 abort), **grey** = ended (delivered or aborted).
 
-Click **Inspection** in the header, then **Start inspection demo** and confirm the session reset. Orders run normally; no new orders are created during the demo. **View inspection** centers an active drone and its site. You can also run the existing delivery session without starting a dedicated demo: the new behavior is built into ordinary deliveries.
+## The Simulation board (right column, same place on every page)
 
-The full ring is a faint blue line; the completed arc fills as the drone actually travels, with a dashed observation cue to the destination. The HUD, drone inspector, fleet attention and event queue show the current phase and progress. No timer can complete the circuit while the drone is stopped.
+* **Pause / 1× / Reset** — run control for all nine scenes.
+* **Environment parameters** — wind, gust peak, pigeon density, pedestrians, battery at launch, backup spots, hover budget,
+  operator timeout, memory (Fresh / Retained).
+* On the **Map** and **Monitor** pages the board edits the global set: **Apply to all** restarts all nine scenes.
+* In a **Scene** the board also shows that scene's own parameters (e.g. *Dog appears at*, *Dog stays for*). Tags show
+  `edited` (this scene differs) or `global`. **Apply to this scene** restarts only that scene; **Apply to all** pushes the
+  global values to every scene.
 
-## Separate completion and approval
+To compare environments, change parameters and run again: every run with the same parameters and seed is identical,
+so any difference comes from the environment, not from chance.
 
-The model checks all of the following before continuing to the delivery pad:
+## The nine scenes
 
-1. A complete observation circuit has been flown.
-2. The assigned parcel is aboard the same drone.
-3. A statically valid approach route exists.
-4. The delivery pad is neither occupied nor reserved for the teaching test.
+| # | Case | Trigger (by the drone's own state) | Automatic response | Human decision |
+|---|---|---|---|---|
+| A1 | Pet on drop zone | dog runs onto the lawn when the parcel is 3 m above it | reel in, wait, rescan | approve the backup spot (not pre-authorized) |
+| A2 | Drop zone occupied | car parked on the pad | static obstacle → go straight to the backup spot | — |
+| A3 | Person under descent | people cross the plaza while the parcel is lowered | reel in at 3.5 m, retry; after 2 interruptions use the backup | — |
+| B1 | Pigeon flock | flock crosses the drone's path 60 m out | slow down, hold, continue | — |
+| B2 | Balloon vs two drones | parade balloon drifts across both drones' paths | both hold | who yields (fixed rule: D-03) |
+| B3 | Gust on tether | gust while the parcel is half lowered | pause, shorten tether, wait for the gust; abort above 12 m/s sustained | — |
+| C1 | Sensor occluded | parade confetti over the yard | memory locates the pad but cannot prove it clear → climb, wait, rescan | — |
+| C2 | Customer silent | two lawns match "in front of my garage" | wait for the customer within the hover budget | choose east / west lawn |
+| C3 | Battery limit | kids playing on the pad, long trip | wait until the 20 % reserve, then abort | — |
 
-**Test: reserve delivery pad** makes the current target unavailable in this local simulation. The drone can finish the circuit but then stays at 100% with checks pending. **Test: release delivery pad** lets checks retry and, if they pass, the drone proceeds to land and deliver. This is an explicit synthetic reservation, not a real external landing authorization.
+Every human decision has a countdown. With no answer the **fixed rule** runs and the log says so.
+Operator commands (hold, resume, reel in, wait +15 s, return to hub) are available in the console; *Force lower* is never
+offered while anyone is within 3.5 m.
 
-Persistent failed checks or a blocked orbit raise a critical human-review incident. Acknowledging other proximity incidents never bypasses inspection checks. A new obstacle or avoidance reroute can interrupt and restart the observation route. New pad unavailability after approval pauses the final approach.
+## Files
 
-## Configuration
+* `last10m/scenes.js` — scene definitions and parameters (global + per scene).
+* `last10m/sim.js` — the deterministic scene simulation: mission phases, knowledge grid, landmarks and memory, the five
+  verification checks, the response ladder, prompts and commands, metrics, Distance to You. No three.js; runs in node.
+* `last10m/stage.js` — puts each scene's actors (drone, parcel and tether, dog, people, car, pigeons, balloon, confetti)
+  into the city and renders the camera views with the existing ink pass.
+* `last10m/app.js`, `last10m/style.css` — the three views, the Simulation board and the console.
+* `main.js` — unchanged city; in Last 10m mode (`<body data-app="last10m">`) it only builds and draws the city.
+* `docs/SEMANTIC_MODEL.md` — the semantic model (course deliverable).
+* `docs/README-airspace.md` — the previous AIRSPACE README.
 
-- Orbit radius: 25 m by default; editable 15–40 m.
-- Preferred altitude: 80 m by default. The planner tries that level, a higher level, and a level below the configured ceiling, using only complete validated circles.
-- Orbit speed: 5 m/s by default; editable 2–8 m/s. Predictions, actual motion and ETA share the same waypoint speed calculation.
-- Circle: 48 straight segments approximating a full orbit.
-- Failed-check retry: 1 simulated second. Human escalation: 8 simulated seconds.
-
-Inputs apply when the next circuit is planned. Near the city edge, the orbit center may shift slightly inward so the circle remains inside the permitted map envelope. The actual circle must still pass the existing building, restriction and permitted-volume checks; an onward landing route must also exist.
-
-All numbers are illustrative classroom parameters. There is no real camera, obstacle recognition, terrain sensing or certified flight authorization. The observation cue illustrates a conceptual sensor, while the pass/fail checks inspect the known simulation model. Completing a ring is not proof that a real landing site is safe.
-
-## Existing features
-
-The skybridge, BETWEEN / UNDER / NEXT TO placement tour, original order flow, map layers, queries and drone–drone / building / pigeon proximity controls remain available. See PLACEMENT_IMPLEMENTATION.md and docs/PLACEMENT_SCOPE.md for the preserved placement feature. Historical verification files from the previous package are identified as such under docs/placement-baseline and docs/proximity-baseline.
-
-The previous route previews do not include the new observation circuit: the actual customer leg is planned after pickup. The inspected delivery adds flight time and may change subsequent traffic interactions.
-
-## Files and verification
-
-- INSPECTION_IMPLEMENTATION.md: Claude integration handoff and constraints.
-- docs/INSPECTION_SCOPE.md: feature scope and movement/trigger definitions.
-- docs/VERIFICATION.md: current acceptance results.
-- docs/inspection-acceptance.json: actual browser evidence.
-- docs/inspection-session.json: real downloaded session export, including inspection context.
-- docs/inspection-demo.gif and inspection-*.png: actual simulation captures.
-- inspection.js: pure orbit planning, progress, model checks and shared waypoint speed.
-- inspection-integration.js: lifecycle, visuals, reservation test, UI and event integration.
-- inspection-code.patch: code delta against the separate airspace-placement-final copy.
-
-Node >=20, without installing dependencies:
-
-```sh
-npm test
-```
-
-Optional browser checks require Playwright and Chrome. Start the HTTP server, then run:
+## Tests
 
 ```sh
-npm install --no-save --package-lock=false playwright
-AIRSPACE_URL=http://127.0.0.1:8000 node tests/inspection-acceptance.cjs
+npm test            # node >= 20, no install needed
 ```
 
-The browser script creates temporary frames under work/inspection-frames and writes its evidence into docs. It injects a test-only closed airspace in its disposable page; close that page afterward. Application source does not contain that active closure.
+`tests/last10m-sim.test.js` checks determinism, every scene's outcome, the memory speed-up, operator commands and prompt
+time-outs, using the real city obstacles (`tests/fixtures/city-obstacles.json`).
 
-Session records and reservations reset with Reset / demo restart or a page refresh. Export before resetting. The inspection audit keeps the newest 400 events; the most recent 12 records are shown in the list. Session export retains inspection records and the original operations events. No backend, user identity or real flight command API is connected.
+All numbers are illustrative classroom parameters. Heights and speeds follow public figures (FAA Part 107 ceiling,
+Wing-style 7 m hover with tether); separation and clearance margins are simulation assumptions.
