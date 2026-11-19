@@ -56,7 +56,7 @@ export function createStage({ scene, couriers, obstacles = () => [] }) {
       h.g.position.set(d.x + d.px, d.y - 0.15, d.z + d.pz);
       const tg = d.phase === 'leave' || d.phase === 'return' || d.phase === 'land' ? d.home : d.target;
       if (tg && (Math.abs(tg.x - d.x) > 0.01 || Math.abs(tg.z - d.z) > 0.01)) h.g.rotation.y = Math.atan2(tg.x - d.x, tg.z - d.z);
-      const carrying = d.order && !d.delivered && !['idle', 'land'].includes(d.phase);
+      const carrying = d.order && d.carrying && !d.delivered && !['idle', 'land'].includes(d.phase);
       const p = world.parcelPos(d);
       h.parcel.visible = !!carrying; if (carrying) h.parcel.position.set(p.x, Math.max(SLAB + 0.13, p.y), p.z);
       const tether = carrying && d.drop > 0.02; h.tether.visible = tether;
@@ -116,7 +116,7 @@ export function createStage({ scene, couriers, obstacles = () => [] }) {
       const all = [...d.route, { x: d.x, y: d.y, z: d.z, ret: d.route.at(-1).ret }].map((p) => ({ v: new THREE.Vector3(p.x + (p.x === d.x ? d.px : 0), p.y - 0.15, p.z), ret: !!p.ret }));
       const k = all.findIndex((p) => p.ret), out = (k < 0 ? all : all.slice(0, k + 1)).map((p) => p.v), back = k < 0 ? [] : all.slice(Math.max(0, k - 1)).map((p) => p.v);
       for (const key of ['solid', 'dash']) if (t[key]) { trails.remove(t[key]); t[key].geometry.dispose(); t[key] = null; }
-      t.solid = tube(out, 0.075, solidMat); t.dash = tube(back, 0.06, dashMat);
+      t.solid = tube(out, 0.03, solidMat); t.dash = tube(back, 0.025, dashMat);
       if (t.solid) trails.add(t.solid); if (t.dash) trails.add(t.dash);
     });
   }
@@ -134,7 +134,7 @@ export function createStage({ scene, couriers, obstacles = () => [] }) {
     Object.assign(cam, { left: -halfH * aspect, right: halfH * aspect, top: halfH, bottom: -halfH }); cam.updateProjectionMatrix();
     const look = new THREE.Vector3(f.x, f.y, f.z); cam.position.copy(look).addScaledVector(dir, 120); cam.lookAt(look); cam.updateMatrixWorld();
   }
-  const DIRS = [[1, 1], [-1, 1], [1, -1], [-1, -1]].map(([x, z]) => new THREE.Vector3(60 * x, 52, 60 * z).normalize());
+  const DIRS = [[1, 1], [-1, 1], [-1, -1], [1, -1]].map(([x, z]) => new THREE.Vector3(60 * x, 52, 60 * z).normalize());
   const dirCache = new Map();
   function dirFor(p) {              // the isometric corner with the least tall building between the camera and the point
     const key = `${Math.round(p.x / 3)},${Math.round(p.z / 3)}`; if (dirCache.has(key)) return dirCache.get(key);
@@ -160,16 +160,16 @@ export function createStage({ scene, couriers, obstacles = () => [] }) {
   const clampN = (v, a, b) => Math.max(a, Math.min(b, v));
   let mainOnly = [];
   const hideMain = () => { const prev = mainOnly.map((o) => o.visible); mainOnly.forEach((o) => { o.visible = false; }); return () => mainOnly.forEach((o, i) => { o.visible = prev[i]; }); };
-  function renderCell(world, d, ctx2d) {
+  function renderCell(world, d, ctx2d, ix = 0) {
     const W = ctx2d.canvas.width, H = ctx2d.canvas.height; cellView ??= makeView(W, H);
     if (cellView.w !== W || cellView.h !== H) { cellView.renderer.setSize(W, H, false); cellView.w = W; cellView.h = H; }
-    const f = { x: d.x + d.px, y: d.y, z: d.z + d.pz }; faceFigures(ISO); aim(cellView.cam, f, 8, W / H, ISO);   // every cell is welded to its drone: the drone is always the centre of the picture
+    const dir = DIRS[ix % 4], f = { x: d.x + d.px, y: d.y, z: d.z + d.pz }; faceFigures(dir); aim(cellView.cam, f, 8, W / H, dir);   // every cell is welded to its drone: the drone is always the centre of the picture
     const restore = hideMain(); cellView.ink.render(scene, cellView.cam); restore(); ctx2d.drawImage(cellView.canvas, 0, 0, W, H);
   }
-  function renderBig(world, d, ctx2d, halfH = 8) {
+  function renderBig(world, d, ctx2d, ix = 0, halfH = 8) {
     const W = ctx2d.canvas.width, H = ctx2d.canvas.height; bigView ??= makeView(W, H);
     if (bigView.w !== W || bigView.h !== H) { bigView.renderer.setSize(W, H, false); bigView.w = W; bigView.h = H; }
-    const f = focusOf(world, d), dir = dirFor(f); faceFigures(dir); aim(bigView.cam, f, halfH, W / H, dir);
+    const f = focusOf(world, d), dir = DIRS[ix % 4]; faceFigures(dir); aim(bigView.cam, f, halfH, W / H, dir);   // the view angle changes only when the user asks for it
     const restore = hideMain(); bigView.ink.render(scene, bigView.cam); restore(); ctx2d.drawImage(bigView.canvas, 0, 0, W, H); return bigView.cam;
   }
   const setMainOnly = (list) => { mainOnly = list.filter(Boolean); };

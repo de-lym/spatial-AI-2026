@@ -11,7 +11,7 @@
 
 import { SCALE_M, HUB } from './scenes.js';
 import { CONST, levelRank, LEVEL_TEXT } from './sim.js';
-import { PARADE_ROUTE } from '../parade-environment.js';
+import { PARADE_ROUTE, PARADE, balloonAt } from '../parade-environment.js';
 
 const { SLAB, CRUISE, HOVER, DETECT_U } = CONST;
 export { LEVEL_TEXT };
@@ -23,7 +23,7 @@ export const PRESETS = [
   { id: 'mixed', label: 'Mixed / interleaved' },
 ];
 export const BOARD = [
-  { group: 'Orders', key: 'orders', label: 'Orders count', unit: '', min: 9, max: 60, step: 1, def: 24 },
+  { group: 'Orders', key: 'orders', label: 'Orders count', unit: '/10 min', min: 9, max: 60, step: 1, def: 30 },
   { group: 'Orders', key: 'urgentPct', label: 'Urgent ratio', unit: '%', min: 0, max: 100, step: 5, def: 25 },
   { group: 'Orders', key: 'radiusM', label: 'Delivery radius', unit: 'm', min: 80, max: 300, step: 10, def: 200 },
   { group: 'Agents', key: 'flocks', label: 'Pigeon flocks', unit: '', min: 0, max: 6, step: 1, def: 2 },
@@ -45,9 +45,9 @@ export const EVENT_TYPES = Object.keys(TIER);
 
 // ------------------------------------------------------------------ constants (formerly board parameters)
 const V = 4, VZ = 1.6, LOWER = 0.28, REEL = 0.7;           // 20 m/s cruise, 1.4 m/s tether pay-out
-const HOVER_BUDGET = 75, TIME_CAP = 900, MAX_TRIES = 2, BACKUP_DX = -3.2, PAD_DZ = 5.1;
+const HOVER_BUDGET = 75, TIME_CAP = 900, DEPART_GAP = 5, LAND_GAP = 5, HOLD_Y = 2.4, BAL_CORE = 5.0, BAL_HOLD = 7.5, MAX_TRIES = 2, BACKUP_DX = -3.2, PAD_DZ = 5.1;
 const PED_ZONE = 2.6, DOG_ZONE = 2.2, FRESH_S = 2, BATTERY_RESERVE = 20, N_DRONES = 9, GRID = 13;
-const HOVER_PHASES = new Set(['locate', 'confirm', 'descend', 'scan', 'verify', 'lower', 'wait', 'reel', 'shift', 'climb', 'release']);
+const HOVER_PHASES = new Set(['pickup', 'locate', 'confirm', 'descend', 'scan', 'verify', 'lower', 'wait', 'reel', 'shift', 'climb', 'release']);
 const FLIGHT = new Set(['enter', 'leave', 'return']);
 
 function rng(seed) { let s = seed >>> 0; return () => { s = (s + 0x6d2b79f5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
@@ -80,7 +80,9 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
     return { lowShare: n ? low / n : 0, tallShare: n ? tall / n : 0, paradeNear: clamp(1 - paradeDistance(a) / 12, 0, 1) };
   };
   const clearPad = (x, z) => !obstacles.some((o) => x > o.x0 - 1.3 && x < o.x1 + 1.3 && z > o.z0 - 1.3 && z < o.z1 + 1.3);   // a pad (and its backup spot) is never inside or hard against a building
-  let all = tiles.filter((t) => !(t.cx === 0 && t.cz === 0) && t.landUse !== 'sensitive' && !/pond/i.test(t.name || '') && clearPad(t.cx, t.cz + PAD_DZ) && clearPad(t.cx + BACKUP_DX, t.cz + PAD_DZ))
+  const isShop = (t) => /commercial block/i.test(t.name || '');
+  const shops = tiles.filter(isShop).map((t) => ({ id: String(t.name).match(/^(R\d+)/)?.[1] ?? t.id, name: String(t.name).replace(/\s*\(commercial block\)/i, ''), key: `${t.cx},${t.cz}`, x: t.cx, z: t.cz + PAD_DZ }));   // restaurants / shops: where the goods are picked up
+  let all = tiles.filter((t) => !(t.cx === 0 && t.cz === 0) && t.landUse !== 'sensitive' && !isShop(t) && !/pond/i.test(t.name || '') && clearPad(t.cx, t.cz + PAD_DZ) && clearPad(t.cx + BACKUP_DX, t.cz + PAD_DZ))
     .map((t) => ({ key: `${t.cx},${t.cz}`, x: t.cx, z: t.cz + PAD_DZ, tile: t, name: t.name || t.id, id: t.id }));
   all.sort((a, b) => hyp(a, HUB) - hyp(b, HUB));
   let addresses = all.filter((a) => hyp(a, HUB) <= radiusU);
@@ -88,13 +90,20 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
   for (const a of addresses) a.ctx = ctxOf(a);
 
   // ---- orders (all random draws of an order come from its own stream, so board changes never reshuffle other orders)
-  const orders = [];
-  for (let i = 0; i < P.orders; i++) {
-    const rr = rng(((P.seed >>> 0) * 13 + i * 97 + 5) >>> 0), a = addresses[Math.floor(Rord() * addresses.length)];
-    const urgent = Rord() < P.urgentPct / 100;
-    orders.push({ id: i + 1, addr: a, urgent, confettiRoll: rr(), confettiDur: 20 + rr() * 10, status: 'queued', tries: 0, drone: null, tAssigned: null, tDone: null, outcome: null, redelivered: false,
-      car: rr() < 0.02 + 0.45 * a.ctx.lowShare, carUntil: 60 + rr() * 110, needConfirm: rr() < 0.6, replyRoll: rr(), replyRoll2: rr(), replyDelay: 4 + rr() * 22, dogAttn: rr() < 0.1 + 0.85 * a.ctx.lowShare, backupOK: rr() < 0.3 });
+  // The city never sleeps: the board's order count is the number of orders arriving per 10 minutes (seeded, slightly irregular). Orders
+  // keep coming for as long as the simulation runs, so the drones keep circulating until the user pauses it.
+  const orders = []; let orderNo = 0;
+  function makeOrder() {
+    const i = orderNo++, rr = rng(((P.seed >>> 0) * 13 + i * 97 + 5) >>> 0), a = addresses[Math.floor(rr() * addresses.length)];
+    const urgent = rr() < P.urgentPct / 100, shop = shops.length ? shops[Math.floor(rr() * shops.length)] : null;
+    const o = { id: i + 1, addr: a, shop, prepS: 2 + rr() * 4, urgent, confettiRoll: rr(), confettiDur: 20 + rr() * 10, status: 'queued', tries: 0, drone: null, tAssigned: null, tDone: null, outcome: null, redelivered: false,
+      car: rr() < 0.02 + 0.45 * a.ctx.lowShare, carUntil: S0.t + 60 + rr() * 110, needConfirm: rr() < 0.6, replyRoll: rr(), replyRoll2: rr(), replyDelay: 4 + rr() * 22, dogAttn: rr() < 0.1 + 0.85 * a.ctx.lowShare, backupOK: rr() < 0.3 };
+    orders.push(o); return o;
   }
+  const S0 = { t: 0 };
+  const Rarr = seedOf(9), GAP = 600 / P.orders;
+  let nextArrival = 0;
+  function arrivals() { while (S.t >= nextArrival) { makeOrder(); nextArrival += nextArrival === 0 ? GAP * 0.3 : GAP * (0.55 + 0.9 * Rarr()); } }
 
   // ---- ground and air agents (they have their own simple behaviour; they are not scenery)
   const pickAddr = (R, weight) => { const w = addresses.map(weight), s = w.reduce((x, y) => x + y, 0); let u = R() * s; for (let i = 0; i < w.length; i++) { u -= w[i]; if (u <= 0) return addresses[i]; } return addresses.at(-1); };
@@ -104,22 +113,32 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
   const flockBirds = (t) => { const out = []; for (const f of flocks) { const s = ((t * f.speed + f.off) % 120) - 60; for (let i = 0; i < f.n; i++) out.push({ id: `${f.id}b${i}`, flock: f.id, x: f.dx * s - f.dz * f.lat + (i % 3 - 1) * 1.6, z: f.dz * s + f.dx * f.lat + (Math.floor(i / 3) - 0.5) * 1.6, y: f.y + Math.sin(t * 5 + i) * 0.15, flap: t * 14 + i }); } return out; };
 
   // ---- environment schedules (fixed by the seed; the board only changes how many / how often)
-  const gusts = []; { const rate = P.gustPerMin / 60; if (rate > 0) { let t = 0; while (t < TIME_CAP + 60) { t += -Math.log(1 - Rgust()) / rate; const d = 6 + Rgust() * 4; gusts.push({ t0: +t.toFixed(2), t1: +(t + d).toFixed(2), ang: Rgust() * Math.PI * 2, v: 9 + Rgust() * 7 }); t += d; } } }
-  const zones = []; { let t = 25 + Rzone() * 20; while (t < TIME_CAP + 60) { const onRoute = Rzone() < 0.6, c = onRoute ? routePoint(Rzone()) : (() => { const a = addresses[Math.floor(Rzone() * addresses.length)]; return { x: a.x, z: a.z - 2 }; })(); const dur = 20 + Rzone() * 15; zones.push({ id: `Z${zones.length + 1}`, t0: +t.toFixed(1), t1: +(t + dur).toFixed(1), x: c.x, z: c.z, r: 3.5 + Rzone() * 2 }); t += 18 + Rzone() * 14; } }
-  const clouds = []; { let t = 20 + Rconf() * 15; while (t < TIME_CAP + 60) { const c = routePoint(Rconf()), dur = 20 + Rconf() * 10; clouds.push({ id: `C${clouds.length + 1}`, t0: +t.toFixed(1), t1: +(t + dur).toFixed(1), x: c.x, z: c.z, r: 5.5, top: 6.5 }); t += 24 + Rconf() * 14; } }
+  const gusts = [], zones = [], clouds = [];
+  let gT = 0, zT = 25 + Rzone() * 20, cT = 20 + Rconf() * 15;
+  function extendSchedules(until) {                       // generated on demand, so the world can run for ever
+    const rate = P.gustPerMin / 60;
+    if (rate > 0) while (gT < until) { gT += -Math.log(1 - Rgust()) / rate; const d = 6 + Rgust() * 4; gusts.push({ t0: +gT.toFixed(2), t1: +(gT + d).toFixed(2), ang: Rgust() * Math.PI * 2, v: 9 + Rgust() * 7 }); gT += d; }
+    while (zT < until) { const onRoute = Rzone() < 0.6, c = onRoute ? routePoint(Rzone()) : (() => { const a = addresses[Math.floor(Rzone() * addresses.length)]; return { x: a.x, z: a.z - 2 }; })(); const dur = 20 + Rzone() * 15; zones.push({ id: `Z${++zoneNo}`, t0: +zT.toFixed(1), t1: +(zT + dur).toFixed(1), x: c.x, z: c.z, r: 3.5 + Rzone() * 2 }); zT += 18 + Rzone() * 14; }
+    while (cT < until) { const c = routePoint(Rconf()), dur = 20 + Rconf() * 10; clouds.push({ id: `C${++cloudNo}`, t0: +cT.toFixed(1), t1: +(cT + dur).toFixed(1), x: c.x, z: c.z, r: 5.5, top: 6.5 }); cT += 24 + Rconf() * 14; }
+    for (const list of [gusts, zones, clouds]) while (list.length > 24 && list[0].t1 < until - 200) list.shift();   // old entries are forgotten
+  }
+  let zoneNo = 0, cloudNo = 0;
   const active = (list, t) => list.find((g) => t >= g.t0 && t < g.t1) ?? null;
   let dynClouds = 0;
 
   // ---- state
   const S = {
     P, t: 0, done: false, endedBy: null, orders, drones: [], events: [], agents: { peds, dogs }, flocks, gusts, zones, clouds, addresses,
-    log: [], queuePeak: 0, series: [], completed: 0,
+    log: [], queuePeak: 0, series: [], completed: 0, seq: 0, nextDeparture: 0, landLock: 0, shops,
   };
-  const home = (i) => ({ x: (i % 3 - 1) * 1.7, z: 4.4 + Math.floor(i / 3) * 1.4 });   // inside the hub's landing column
+  extendSchedules(120); arrivals();
+  // home slots: on the plaza land around the Dispatch Tower (never on a road), outside the tower's clearance box and clear of the plaza trees, ≥ 2.8 u apart
+  const HOME_SLOTS = [[-2.8, -5.2], [0, -5.2], [2.8, -5.2], [-2.8, 5.2], [0, 5.2], [2.8, 5.2], [-5.2, -1.4], [-5.2, 1.4], [5.2, 0]];
+  const home = (i) => ({ x: HOME_SLOTS[i % 9][0], z: HOME_SLOTS[i % 9][1] });
   for (let i = 0; i < N_DRONES; i++) {
     const h = home(i);
     S.drones.push({ id: `D-0${i + 1}`, idx: i, x: h.x, y: SLAB, z: h.z, home: h, phase: 'idle', visible: true, order: null, target: null, cruise: CRUISE, drop: 0, speedK: 1, battery: 100,
-      held: false, hold: false, event: null, timer: 0, waitT: 0, hover: 0, px: 0, pz: 0, readyAt: i * 1.2, level: 'L0', maxLevel: 'L0', levelReason: 'At hub', route: [], routeLog: 0,
+      held: false, hold: false, event: null, timer: 0, waitT: 0, hover: 0, px: 0, pz: 0, readyAt: 0, level: 'L0', maxLevel: 'L0', levelReason: 'At hub', route: [], routeLog: 0,
       log: [], series: [], know: null, lmCount: 0, confirmed: false, approved: false, delivered: false, yieldFor: null, yieldCap: 0, lastCheck: [], zoneSeen: new Set(), distanceM: 0, scanned: false, seenAt: -99 });
   }
   const droneOf = (id) => S.drones.find((d) => d.id === id);
@@ -178,6 +197,7 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
   // ---------------------------------------------------------------- the five checks (read only what the drone can sense)
   function checks(d) {
     const T = d.target, o = d.order; if (!T || !o) return { ok: false, list: [], blockers: {} };
+    if (T.shop) return { ok: true, list: [], blockers: { dyn: [], carBlock: false, fresh: true } };   // at the shop there is nothing to verify
     const known = isKnown(o) || d.lmCount > 0.5;
     const seenDyn = [...peds, ...dogs].filter((a) => hyp(a, T) <= (a.kind === 'dog' ? DOG_ZONE : PED_ZONE) && watchedBy(d, a));
     const fresh = S.t - d.seenAt <= FRESH_S;
@@ -213,7 +233,7 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
   const defaultFor = (ev) => (ev.type === 'conflict' ? 'rule' : ev.tier === 3 ? 'return' : 'wait');   // the fixed rule when nobody acts
 
   function openEvent(d, type, extra = {}) {
-    if (d.event || !d.order) return null;
+    if (d.event || !d.order || d.delivered || d.abortedOrder) return null;   // a drone that has handed over (or is going home) has nothing left to decide
     const base = TIER[type], urgent = d.order.urgent, tier = urgent ? Math.max(1, base - 1) : base;      // an urgent order raises the tier by one
     const [lo, hi] = WINDOW[tier], win = lo + Revt() * (hi - lo);
     const ev = { id: `E${S.events.length + 1}`, type, base, tier, urgent, drone: d.id, order: d.order.id, opened: S.t, window: +win.toFixed(1), deadline: S.t + win, status: 'open',
@@ -280,16 +300,21 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
   }
 
   // ---------------------------------------------------------------- orders and drones
+  // a shop pad serves one drone at a time: the others queue above it, each on its own level, first come first served
+  const sameShop = (a, b) => a.target?.shop && b.target?.shop && Math.hypot(a.target.x - b.target.x, a.target.z - b.target.z) < 0.5;
+  const shopQueueRank = (d) => S.drones.filter((e) => e !== d && e.order && e.phase === 'pickup' && sameShop(e, d) && e.shopArrive < d.shopArrive).length;   // first come, first served at the pad
+  const shopRank = (d) => S.drones.filter((e) => e !== d && e.order && (e.leg === 'toShop' || e.phase === 'pickup') && sameShop(e, d) && e.shopSeq < d.shopSeq).length;
   function nextOrder() { const q = orders.filter((o) => o.status === 'queued'); q.sort((a, b) => (b.urgent - a.urgent) || a.id - b.id); return q[0] ?? null; }
   function assign(d, o) {
     o.status = 'active'; o.drone = d.id; o.tAssigned = S.t; if (o.tries > 0) o.redelivered = true;
-    d.order = o; d.target = { x: o.addr.x, z: o.addr.z, name: o.addr.name, original: true };
+    d.shopSeq = ++S.seq; d.order = o; d.carrying = !o.shop; d.pickStep = null; d.leg = o.shop ? 'toShop' : 'toCustomer';
+    d.target = o.shop ? { x: o.shop.x, z: o.shop.z, name: o.shop.name, shop: true } : { x: o.addr.x, z: o.addr.z, name: o.addr.name, original: true };
     d.phase = 'enter'; d.drop = 0; d.hover = 0; d.waitT = 0; d.escalated = false; d.approved = false; d.confirmed = false; d.confettiDone = false; d.lmCount = 0; d.delivered = false; d.abortedOrder = false;
     d.climbOver = false; d.zoneSeen = new Set(); d.route = [{ x: d.x, y: d.y, z: d.z }]; d.routeLog = S.t; d.series = []; d.scanned = false; d.seenAt = -99; d.gustIgnore = 0; d.speedK = 1;
     d.know = { ox: o.addr.x - GRID / 2, oz: o.addr.z - GRID / 2, state: new Uint8Array(GRID * GRID), seen: new Float32Array(GRID * GRID).fill(-99) };
-    planLeg(d, { x: o.addr.x, y: CRUISE, z: o.addr.z });
+    planLeg(d, { x: d.target.x, y: o.shop ? CRUISE + 1.6 * shopRank(d) : CRUISE, z: d.target.z });
     setLevel(d, 'L0', 'Departed'); d.maxLevel = 'L0';
-    log(d, 'DEPART', `${d.id} takes order #${o.id}${o.urgent ? ' (URGENT)' : ''} to ${o.addr.name}, cruising at ${Math.round(d.cruise * SCALE_M)} m.`);
+    log(d, 'DEPART', `${d.id} takes order #${o.id}${o.urgent ? ' (URGENT)' : ''}: ${o.shop ? `pick up at ${o.shop.name}, deliver to ${o.addr.name}` : `deliver to ${o.addr.name}`}, cruising at ${Math.round(d.cruise * SCALE_M)} m.`);
   }
   function goTo(d, p, y, dt, speed = V) {
     const dx = p.x - d.x, dz = p.z - d.z, L = Math.hypot(dx, dz), s = speed * d.speedK * dt;
@@ -298,7 +323,7 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
     return L < 0.05 && Math.abs(y - d.y) < 0.05;
   }
   const finishOrder = (d, outcome) => {
-    const o = d.order; o.status = outcome; o.outcome = outcome; o.tDone = S.t; S.completed++;
+    const o = d.order; if (o.outcome) return; o.status = outcome; o.outcome = outcome; o.tDone = S.t; S.completed++;
     d.delivered = true; log(d, 'DELIVERED', outcome === 'delivered' ? `Order #${o.id} delivered at the requested spot.` : `Order #${o.id} delivered at the backup spot (${Math.round(hyp(d.target, o.addr) * SCALE_M)} m away).`);
     setLevel(d, 'L0', 'Delivered');
   };
@@ -316,7 +341,7 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
 
   function stepDrone(d, dt) {
     if (d.phase === 'idle') {
-      if (S.t >= d.readyAt && !S.done) { const o = nextOrder(); if (o) assign(d, o); }
+      if (S.t >= d.readyAt && S.t >= S.nextDeparture) { const o = nextOrder(); if (o) { assign(d, o); S.nextDeparture = S.t + DEPART_GAP; } }   // one drone leaves the hub at a time
       return;
     }
     const hovering = HOVER_PHASES.has(d.phase);
@@ -329,6 +354,16 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
     }
     if (flying) {                                         // route trace for the map
       if (S.t - d.routeLog >= 0.6) { d.routeLog = S.t; d.route.push({ x: d.x, y: d.y, z: d.z, ret: d.phase !== 'enter' }); if (d.route.length > 160) d.route.shift(); }
+    }
+    // the parade: the balloon is a moving obstacle at 70 m. A drone never flies through it — it backs off and holds until it has passed.
+    if (d.phase !== 'land') {
+      const bl = balloonAt(S.t, true), db = Math.hypot(d.x - bl.x, (d.y - SLAB - bl.y) * 0.7, d.z - bl.z);
+      if (db < BAL_HOLD) {
+        if (db < BAL_CORE) { const hx = d.x - bl.x, hz = d.z - bl.z, L = Math.hypot(hx, hz) || 1, nx = d.x + hx / L * V * 0.5 * dt, nz = d.z + hz / L * V * 0.5 * dt; if (!obstacles.some((q) => nx > q.x0 && nx < q.x1 && nz > q.z0 && nz < q.z1 && d.y - SLAB < q.h + 0.5)) { d.x = nx; d.z = nz; } }
+        if (!d.balloonNear) { d.balloonNear = true; log(d, 'PARADE', 'Parade balloon ahead: backing off and holding until it has passed.'); if (levelRank(d.level) < levelRank('L1')) setLevel(d, 'L1', 'Parade balloon nearby'); }
+        return;
+      }
+      if (d.balloonNear) { d.balloonNear = false; if (d.level === 'L1') setLevel(d, 'L0', 'Clear of the balloon'); }
     }
     if (d.yieldFor && ['return', 'land', 'leave'].includes(d.phase)) { d.yieldFor = null; d.held = false; }      // leaving the area is always allowed
     if (d.held && !d.heldBy && !d.yieldFor) d.held = false;                                   // safety net: a hold always has an owner (an event or a yield)
@@ -346,11 +381,29 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
         const close = nearestBird(d);
         if (close < 2.4) { d.speedK = 0; if (!d.event) openEvent(d, 'pigeon'); return; }
         d.speedK = close < 5 ? 0.35 : 1;
-        if (followPath(d, dt)) { d.speedK = 1; d.phase = 'locate'; d.timer = 0; log(d, 'LOCATE', isKnown(o) ? `Recognised ${o.addr.name} from memory.` : `Searching for ${o.addr.name}…`); }
+        if (followPath(d, dt)) {
+          d.speedK = 1;
+          if (d.leg === 'toShop') { d.phase = 'pickup'; d.pickStep = 'down'; d.timer = 0; d.shopArrive = S.t + (++S.seq) * 1e-6; log(d, 'ARRIVE_SHOP', `Arrived at ${T.name}: collecting the order.`); return; }
+          d.phase = 'locate'; d.timer = 0; log(d, 'LOCATE', isKnown(o) ? `Recognised ${o.addr.name} from memory.` : `Searching for ${o.addr.name}…`);
+        }
+        return;
+      }
+      case 'pickup': {                                          // at the shop: hover over its pad, wait until the order is ready, lift off with it
+        if (d.pickStep === 'down') {
+          const rank = shopQueueRank(d);
+          if (rank > 0) { goTo(d, T, SLAB + Math.min(22, CRUISE + 1.6 * rank), dt, 0.1); return; }   // waiting in line above the shop
+          if (goTo(d, T, ground + HOVER, dt)) { d.pickStep = 'wait'; d.timer = 0; } return;
+        }
+        if (d.pickStep === 'wait') { d.timer += dt; if (d.timer >= o.prepS + 1) { d.carrying = true; d.pickStep = 'up'; log(d, 'PICKUP', `Order #${o.id} collected at ${T.name}.`); } return; }
+        if (goTo(d, T, ground + CRUISE, dt)) {
+          d.leg = 'toCustomer'; d.hover = 0; d.pickStep = null; d.target = { x: o.addr.x, z: o.addr.z, name: o.addr.name, original: true };
+          d.know = { ox: o.addr.x - GRID / 2, oz: o.addr.z - GRID / 2, state: new Uint8Array(GRID * GRID), seen: new Float32Array(GRID * GRID).fill(-99) };
+          planLeg(d, { x: o.addr.x, y: CRUISE, z: o.addr.z }); d.phase = 'enter'; log(d, 'DELIVERING', `Flying to ${o.addr.name}.`);
+        }
         return;
       }
       case 'locate': {
-        d.timer += dt;
+        d.timer += dt; o.locateS = (o.locateS ?? 0) + dt;
         if (d.timer >= (isKnown(o) ? 1 : 4)) { if (o.needConfirm && !d.confirmed) { d.phase = 'confirm'; d.confirmStart = S.t; log(d, 'ASK_CUSTOMER', 'Asked the customer to confirm the drop spot.'); } else d.phase = 'descend'; }
         return;
       }
@@ -405,18 +458,20 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
       case 'reelup': { d.drop = Math.max(0, d.drop - REEL * dt * 1.5); if (d.drop <= 0) d.phase = 'leave'; return; }
       case 'leave': {
         const close = nearestBird(d); if (close < 2.4) { d.speedK = 0; if (!d.event) openEvent(d, 'pigeon'); return; } d.speedK = close < 5 ? 0.35 : 1;
-        if (!d.path?.length || d.goal?.y !== 0) planLeg(d, { x: d.home.x, y: 0, z: d.home.z });
-        if (followPath(d, dt)) { d.speedK = 1; d.phase = 'land'; } return;
+        if (!d.path?.length && !d.goal?.hub) planLeg(d, { x: d.home.x, y: HOLD_Y, z: d.home.z, hub: true });
+        if (followPath(d, dt)) { d.speedK = 1; d.phase = 'land'; d.goal = null; } return;
       }
       case 'return': {
         d.drop = Math.max(0, d.drop - REEL * dt * 1.5); if (d.drop > 0) return;
         const close = nearestBird(d); d.speedK = close < 2.4 ? 0 : close < 5 ? 0.35 : 1;
-        if (!d.path?.length || d.goal?.y !== 0) planLeg(d, { x: d.home.x, y: 0, z: d.home.z });
-        if (followPath(d, dt)) { d.speedK = 1; d.phase = 'land'; }
+        if (!d.goal?.hub) planLeg(d, { x: d.home.x, y: HOLD_Y, z: d.home.z, hub: true });
+        if (followPath(d, dt)) { d.speedK = 1; d.phase = 'land'; d.goal = null; }
         return;
       }
-      case 'land': {
+      case 'land': {                                            // arrivals one at a time: hover above the own slot until the landing lock is free
+        if (!d.landing) { if (S.t < S.landLock) return; d.landing = true; S.landLock = S.t + LAND_GAP; }
         if (goTo(d, d.home, ground, dt)) {
+          d.landing = false;
           d.phase = 'idle'; d.readyAt = S.t + 2; d.battery = 100; d.route = []; d.parcelAt = null; d.delivered = false;
           const o2 = d.order;
           if (d.abortedOrder && o2 && o2.status === 'active') { o2.tries++; o2.status = o2.tries < MAX_TRIES ? 'queued' : 'aborted'; if (o2.status === 'aborted') { o2.outcome = 'aborted'; o2.tDone = S.t; S.completed++; } }
@@ -468,6 +523,7 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
     const atPad = (d) => !FLIGHT.has(d.phase);
     for (let i = 0; i < live.length; i++) for (let j = i + 1; j < live.length; j++) {
       const a = live[i], b = live[j], key = `${a.id}/${b.id}`; if ((pairCool.get(key) ?? 0) > S.t) continue;
+      if (sameShop(a, b)) continue;                                                                   // drones bound for the same shop are staggered by level and queue at the pad: not an event
       if (a.yieldFor === b.id || b.yieldFor === a.id) continue;                      // one of them is already yielding to the other
       const dy = Math.abs(a.y - b.y), pa = aheadOf(a, 2.5), pb = aheadOf(b, 2.5);
       const flightNear = dy < 1.3 && (hyp(a, b) < 2.4 || hyp(pa, pb) < 2.4);
@@ -573,7 +629,7 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
   }
   function step(dt) {
     if (S.done) return;
-    S.t += dt;
+    S.t += dt; S0.t = S.t; extendSchedules(S.t + 90); arrivals();
     updateAgents(dt);
     conflictScan();
     separationGuard();
@@ -590,27 +646,24 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
     }
     S.queuePeak = Math.max(S.queuePeak, queueList().length);
     if (S.t - (S.lastSample ?? -9) >= 5) { S.lastSample = S.t; S.series.push([+S.t.toFixed(0), queueList().length]); }
-    const finalOrders = orders.every((o) => ['delivered', 'delivered-alt', 'aborted'].includes(o.status));
-    if (finalOrders && S.drones.every((d) => d.phase === 'idle')) { S.done = true; S.endedBy = 'orders'; log(null, 'END', 'All orders are done or aborted.'); }
-    else if (S.t >= TIME_CAP) { S.done = true; S.endedBy = 'cap'; log(null, 'END', `Time cap of ${TIME_CAP} s reached.`); }
   }
-  function run(seconds, dt = 0.1) { for (let t = 0; t < seconds && !S.done; t += dt) step(dt); return S; }
+  function run(seconds, dt = 0.1) { for (let t = 0; t < seconds; t += dt) step(dt); return S; }
 
   // ---------------------------------------------------------------- scorecard
   function scorecard() {
     const ev = S.events, mean = (a) => (a.length ? +(a.reduce((x, y) => x + y, 0) / a.length).toFixed(1) : null);
     const react = (t) => mean(ev.filter((e) => e.tier === t && e.reaction != null).map((e) => e.reaction));
-    const n = Math.max(1, orders.length), by = (o) => orders.filter((x) => x.outcome === o).length;
-    const aborted = orders.filter((x) => x.outcome === 'aborted' || !x.outcome).length;
+    const fin = orders.filter((x) => x.outcome), n = Math.max(1, fin.length), by = (o) => fin.filter((x) => x.outcome === o).length;
+    const aborted = by('aborted');
     const t1 = ev.filter((e) => e.tier === 1), closest = t1.map((e) => e.closestM).filter((x) => x != null);
     const missed = ev.filter((e) => e.missed), minutes = Math.max(1 / 6, S.t / 60);
     const dels = orders.filter((o) => o.outcome && o.outcome !== 'aborted' && o.tDone != null && o.tAssigned != null).map((o) => o.tDone - o.tAssigned);
     return {
-      time: +S.t.toFixed(0), endedBy: S.endedBy, orders: orders.length,
+      time: +S.t.toFixed(0), endedBy: null, orders: fin.length,
       reaction: { 1: react(1), 2: react(2), 3: react(3) }, missed: missed.length, missedByTier: { 1: missed.filter((e) => e.tier === 1).length, 2: missed.filter((e) => e.tier === 2).length, 3: missed.filter((e) => e.tier === 3).length },
       delivered: +(by('delivered') / n * 100).toFixed(0), deliveredAlt: +(by('delivered-alt') / n * 100).toFixed(0), aborted: +(aborted / n * 100).toFixed(0), redelivered: orders.filter((o) => o.redelivered).length,
       closestTier1M: closest.length ? Math.min(...closest) : null, eventsTotal: ev.length, tier1: t1.length, eventsPerMin: +(ev.length / minutes).toFixed(1), peakQueue: S.queuePeak, avgDeliveryS: mean(dels),
-      byType: Object.fromEntries(EVENT_TYPES.map((t) => [t, ev.filter((e) => e.type === t).length])),
+      avgLocateS: mean(fin.filter((x) => x.locateS != null).map((x) => x.locateS)), byType: Object.fromEntries(EVENT_TYPES.map((t) => [t, ev.filter((e) => e.type === t).length])),
       score: Math.max(0, Math.round(100 - 1.5 * missed.filter((e) => e.tier === 1).length - 0.8 * missed.filter((e) => e.tier === 2).length - 0.4 * missed.filter((e) => e.tier === 3).length - 0.5 * aborted / n * 100)),
     };
   }
@@ -618,6 +671,7 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
   return {
     state: S, step, run, resolve, command, available, checks: (id) => { const d = droneOf(id); return d?.order ? checks(d).list : []; }, queue: queueList, scorecard, parcelPos, droneOf, flockBirds, activeGust: () => active(gusts, S.t), activeZones: () => zones.filter((z) => S.t >= z.t0 && S.t < z.t1), activeCloud: () => active(clouds, S.t),
     knowledgeCells(id) { const d = droneOf(id), K = d?.know; if (!K) return []; const out = []; for (let k = 0; k < GRID * GRID; k++) out.push({ x0: K.ox + (k % GRID), z0: K.oz + Math.floor(k / GRID), state: K.state[k], age: S.t - K.seen[k] }); return out; },
+    balloon: (t) => balloonAt(t, true),
     debugOpen(id, type) { return openEvent(droneOf(id), type); },
   };
 }

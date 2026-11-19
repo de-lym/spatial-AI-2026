@@ -206,3 +206,13 @@ body[data-mode="monitor"] #l10-board .bbody, body[data-mode="scene"] #l10-board 
 #l10-frames button[hidden] { display: none; }
 #l10-frames button span { font: 700 11.5px/23px Inter, sans-serif; color: inherit; display: block; }
 #l10-frames button.t1 { background: var(--t1); color: #fff; } #l10-frames button.t2 { background: var(--t2); color: #fff; } #l10-frames button.t3 { background: var(--t3); color: var(--ink); }
+
+/* v2.1: trails toggle, view-angle buttons, '!' warning bubbles */
+#l10-trails { position: absolute; top: 24px; left: 16px; height: 40px; border-radius: 20px; display: none; align-items: center; padding: 0 18px; font-size: 13px; font-weight: 500; pointer-events: auto; cursor: pointer; }
+body[data-mode="map"] #l10-trails { display: flex; }
+#l10-trails[aria-pressed="true"] { background: var(--ink); color: #fff; }
+#l10-view .rot { right: 170px; top: 52px; cursor: pointer; }
+#l10-wall .cell .rot { position: absolute; right: 8px; top: 40px; width: 26px; height: 26px; border-radius: 50%; background: rgba(246,245,243,.92); border: 1.5px solid var(--ink); display: flex; align-items: center; justify-content: center; font: 600 13px Inter, sans-serif; cursor: pointer; }
+#l10-wall .cell .rot:hover { background: var(--ink); color: #fff; }
+#l10-frames button { width: 30px; height: 30px; padding: 0; border-radius: 50%; transform: translate(0, -100%); }
+#l10-frames button span { font: 800 16px/26px Inter, sans-serif; text-align: center; }

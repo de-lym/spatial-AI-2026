@@ -608,6 +608,7 @@ function genPermitted() {
   vols.sort((a, b) => b.band - a.band || (b.x1 - b.x0) * (b.z1 - b.z0) - (a.x1 - a.x0) * (a.z1 - a.z0)); // upper band first, big prisms first
   vols.forEach((v, n) => { v.id = 'V-' + String(n + 1).padStart(2, '0'); });
   for (const e of [platform, ...S.restaurants, ...S.customers, ...EXTRA_PADS]) {
+    if (e.hubRing) { const tt = tileOf(0, 0); vols.push({ id: 'T-HUBRING', name: 'Launch hub landing ring', kind: 'transition', x0: -6.2, x1: 6.2, z0: -6.2, z1: 6.2, zloM: 0, zhiM: Math.min(LAND[tt.landUse].minAltM, hi), tiles: [tt.id], mix: { [tt.landUse]: 1 } }); continue; }
     const t = tileOf(e.acc.x, e.acc.z), top = Math.min(LAND[t.landUse].minAltM, hi), hub = e === platform;
     const id = hub ? 'T-00' : 'T-' + e.stationId.replace('-', ''), w = hub ? [4.4, 2.3] : e.extra ? [5.8, 2.4] : [2.4, 2.4], cz = hub ? 5.3 : e.acc.z;   // extra (Last 10m) columns also cover the backup spot 3.2 u beside the pad
     vols.push({ id, name: hub ? 'Launch hub column' : `${e.stationId} landing column`, kind: 'transition', x0: e.acc.x - (e.extra ? 5.8 : w[0]), x1: e.acc.x + (e.extra ? 2.4 : w[0]), z0: cz - w[1], z1: cz + w[1], zloM: 0, zhiM: top, tiles: [t.id], mix: { [t.landUse]: 1 } });
@@ -2483,7 +2484,7 @@ function rebuildCity({ preset = 'mixed', seed: sd = 11 } = {}) {
     buildingFiller = true; buildFiller(x, z, preset); buildingFiller = false;
   }
   world.obstacles.forEach((o, i) => { o.id = 'B-' + String(i + 1).padStart(3, '0'); });
-  EXTRA_PADS.length = 0;
+  EXTRA_PADS.length = 0; EXTRA_PADS.push({ extra: true, hubRing: true, stationId: 'X-HUBRING', acc: { x: 0, z: 0 } });   // the plaza around the Dispatch Tower: the drones' home
   for (const t of world.tiles) if (!(t.cx === 0 && t.cz === 0)) EXTRA_PADS.push({ extra: true, stationId: 'X-' + t.id, acc: { x: t.cx, z: t.cz + PAD_DZ } });
   finishBlocks(); regenAirspace();
   if (street.root) scene.remove(street.root);

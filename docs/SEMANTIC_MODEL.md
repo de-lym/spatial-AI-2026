@@ -92,15 +92,19 @@ tests) a conservative fallback is used: straight up, over the tallest building o
 
 ## 6. The mission and the order stream
 
-`world.js` creates the orders from the seed: random addresses inside the **delivery radius**, a share flagged **urgent**.
-An idle drone takes the next order (**urgent orders first**), cruises, runs the last-ten-metre state machine and flies home.
+`world.js` creates orders from the seed, **for as long as the simulation runs**: the board's *Orders count* is the number of
+orders arriving per 10 minutes. Each order has a **shop** (R1–R3, where the goods are collected) and a customer address inside
+the **delivery radius**; a share is flagged **urgent**. An idle drone takes the next order (**urgent first**; one departure
+every 5 s), flies to the shop, collects the order (waiting until it is ready; a shop pad serves one drone at a time, the others
+queue above it on separate levels), flies to the customer, runs the last-ten-metre state machine and flies home.
+Drones live on nine slots on the plaza land around the Dispatch Tower, never on a road, and land one at a time (5 s lock).
 
-**Enter → Locate → (Confirm with the customer) → Descend → Scan → Verify → Lower → Release → Reel up → Leave → Land**, with
+**Enter → Pick-up at the shop → Enter → Locate → (Confirm with the customer) → Descend → Scan → Verify → Lower → Release → Reel up → Leave → Land**, with
 **Wait / Reel / Shift / Climb / Return** as adaptations. Verify = five checks read from what the drone can sense: correct
 location · space is safe · descent path clear · facility available · within authorization.
 
-A run ends when every order is delivered or finally aborted (an aborted order goes back to the queue once for
-**redelivery**), or at the 900 s time cap.
+There is no end state: the world runs until the user pauses it. An aborted order goes back to the queue once for
+**redelivery**. The scorecard is live; the run that was going before the last restart is kept for comparison.
 
 ## 7. Event hierarchy (the core of v2)
 
@@ -150,7 +154,7 @@ The **Simulation board** (right column, same place on every page):
 | Group | Control |
 |---|---|
 | City | **Building cluster** — High-rise heavy · Low-rise heavy · Mixed / interleaved (a red circle on the Map shows the radius) |
-| Orders | **Orders count** (9–60) · **Urgent ratio** (0–100 %) · **Delivery radius** (80–300 m) |
+| Orders | **Orders count** (9–60 orders per 10 minutes) · **Urgent ratio** (0–100 %) · **Delivery radius** (80–300 m; shown as a green circle only while adjusting) |
 | Agents | **Pigeon flocks** · **Pedestrians** · **Dogs** · **Customer reply rate** |
 | Weather | **Gust frequency** (there is no steady wind) |
 | Agent memory | **Fresh / Retained** |
@@ -176,6 +180,11 @@ runs again.
 | Event windows, drone separation, pigeon buffer, gust limits | simulation assumptions | no public standard found |
 
 ## 10. Decisions made while building v2
+
+* **Parade.** The balloon (a moving obstacle at 70 m) is avoided automatically: within 37 m a drone backs off and holds until
+  the balloon has passed (logged as `PARADE`, not an operator event). The crowd reservation zones are not drawn.
+* **Orders count** was reinterpreted as an arrival rate (per 10 minutes) so that the model can run non-stop *and* the setting
+  still changes the load; at the top of the range the nine drones are saturated and a queue builds up.
 
 * **Branch.** The work stayed on `claude/03-semantic-model-delivery-system` (as asked) instead of a new `last-10m-v2` branch.
 * **v1 engine kept.** `sim.js` (the nine scripted scenes) and its tests stay as the reference of the state machine and the

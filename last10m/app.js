@@ -1,8 +1,8 @@
 // Last 10m v2 — the application: one shared city, nine drones, a human operator who triages.
 // Views: Map (routes, incident dots, delivery radius) · Monitor (3×3 wall of drone cameras) · Scene (one drone: console + camera).
 // main.js builds and draws the city; this module runs the world simulation on top of it.
-import { BOARD, PRESETS, DEFAULT_SETTINGS, createWorld, TIER_NAME, TITLE, SCENE_OF, WORLD_CONST } from './world.js?v=5';
-import { createStage } from './stage.js?v=6';
+import { BOARD, PRESETS, DEFAULT_SETTINGS, createWorld, TIER_NAME, TITLE, SCENE_OF, WORLD_CONST } from './world.js?v=7';
+import { createStage } from './stage.js?v=7';
 import { SCALE_M, HUB } from './scenes.js';
 import { LEVEL_TEXT } from './sim.js';
 
@@ -26,9 +26,10 @@ let draft = {};
 const memory = store.get('l10.v2.memory', {});
 let runs = store.get('l10.v2.runs', []);                 // the last two finished runs, with their settings
 let runNo = store.get('l10.v2.runNo', 0);
-let world = null, builtKey = '', cityData = null, building = false;
+let lastSettings = null; let world = null, builtKey = '', cityData = null, building = false;
+let showTrails = true; const viewIx = {};
 let running = true, speedIx = 0, mode = 'map', sel = null, showKnow = false, scoreOpen = false, boardOpen = true, boardTouched = false;
-let uiClock = 0, memClock = 0, cellRR = 0, finishedHandled = false, sideSig = '', consoleSig = '';
+let scoreClock = 0, uiClock = 0, memClock = 0, cellRR = 0, sideSig = '', consoleSig = '';
 
 // ---------------- city + run lifecycle ----------------
 function ensureCity() {
@@ -37,16 +38,12 @@ function ensureCity() {
 }
 function startRun() {
   ensureCity();
+  if (world && world.state.t > 30) { runs = [{ n: runNo, settings: { ...lastSettings }, card: world.scorecard() }, ...runs].slice(0, 2); store.set('l10.v2.runs', runs); store.set('l10.v2.memory', memory); }   // the run that was going is kept for the comparison
+  lastSettings = { ...settings };
   world = createWorld(settings, { obstacles: cityData.obstacles, tiles: cityData.tiles, memory, plan: planner });
   runNo++; store.set('l10.v2.runNo', runNo);
-  finishedHandled = false; scoreOpen = false; sideSig = ''; consoleSig = ''; if (mode === 'scene' && !world.droneOf(sel)) sel = 'D-01';
+  scoreOpen = false; sideSig = ''; consoleSig = ''; if (mode === 'scene' && !world.droneOf(sel)) sel = 'D-01';
   renderBoard(); renderSide(); renderStatus(); renderScore();
-}
-function finishRun() {
-  finishedHandled = true;
-  const rec = { n: runNo, settings: { ...settings }, card: world.scorecard() };
-  runs = [rec, ...runs.filter((r) => r.n !== rec.n)].slice(0, 2); store.set('l10.v2.runs', runs); store.set('l10.v2.memory', memory);
-  scoreOpen = true; renderScore(); renderStatus();
 }
 
 // ---------------- flight boundary system: the AIRSPACE route planner decides every leg ----------------
@@ -70,7 +67,7 @@ const hideAirspaceDrones = () => city.S.couriers.forEach((c) => { c.mesh.visible
 const tierOf = (d) => (d.event && ['open', 'acknowledged'].includes(d.event.status) ? d.event.tier : 0);
 const openTier = (d) => (d.event?.status === 'open' ? d.event.tier : 0);
 const orderLine = (d) => (d.order ? `#${d.order.id}${d.order.urgent ? ' · URGENT' : ''} → ${d.order.addr.name}` : 'idle at hub');
-const phaseText = (d) => ({ idle: 'idle at hub', enter: 'flying out', locate: 'locating', confirm: 'asking customer', descend: 'descending', scan: 'scanning', verify: 'verifying', wait: 'waiting', lower: 'lowering', reel: 'reeling in', release: 'releasing', reelup: 'reeling up', leave: 'flying home', return: 'returning (aborted)', land: 'landing', shift: 'moving to backup', climb: 'climbing' }[d.phase] ?? d.phase);
+const phaseText = (d) => ({ idle: 'idle at hub', enter: 'flying out', locate: 'locating', confirm: 'asking customer', descend: 'descending', scan: 'scanning', verify: 'verifying', wait: 'waiting', lower: 'lowering', reel: 'reeling in', release: 'releasing', reelup: 'reeling up', leave: 'flying home', return: 'returning (aborted)', land: 'landing', shift: 'moving to backup', climb: 'climbing', pickup: 'collecting at the shop' }[d.phase] ?? d.phase);
 const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 function counts() {
   const S = world.state, c = { 1: 0, 2: 0, 3: 0 }; for (const e of S.events) if (e.status === 'open') c[e.tier]++;
@@ -203,9 +200,9 @@ $('l10-side').addEventListener('click', (e) => {
 // ---------------- status bar ----------------
 function renderStatus() {
   if (!world) return; const c = counts(), S = world.state;
-  $('l10-status').innerHTML = `<span>Time <b>${fmtT(S.t)}</b></span><span>Orders <b>${c.delivered}</b>/${S.orders.length}<i>${c.aborted} aborted</i></span><span>In flight <b>${c.inflight}</b>/9</span>
+  $('l10-status').innerHTML = `<span>Time <b>${fmtT(S.t)}</b></span><span>Delivered <b>${c.delivered}</b><i>${c.aborted} aborted</i></span><span>In flight <b>${c.inflight}</b>/9</span>
     <span><i class="tdot s" style="background:${TIER_COLOR[1]}">1</i><b>${c.open[1]}</b></span><span><i class="tdot s" style="background:${TIER_COLOR[2]}">2</i><b>${c.open[2]}</b></span><span><i class="tdot s" style="background:${TIER_COLOR[3]}">3</i><b>${c.open[3]}</b></span>
-    <span>Missed <b>${c.missed}</b></span><span>${S.done ? '<b>Run ended</b>' : `Run <b>${runNo}</b>`}</span>${runs.length ? '<span><a href="#" data-score="1">Scorecard</a></span>' : ''}`;
+    <span>Missed <b>${c.missed}</b></span><span>Run <b>${runNo}</b></span><span><a href="#" data-score="1">Scorecard</a></span>`;
 }
 $('l10-status').addEventListener('click', (e) => { if (e.target.closest('[data-score]')) { e.preventDefault(); scoreOpen = true; renderScore(); } });
 
@@ -220,17 +217,17 @@ const ROWS = [
   ['Closest approach in ① events', (c) => c.closestTier1M, ' m', 1], ['Events per minute', (c) => c.eventsPerMin, '', 0], ['Peak queue length', (c) => c.peakQueue, '', -1], ['Avg delivery time', (c) => c.avgDeliveryS, ' s', -1], ['Run time', (c) => c.time, ' s', 0],
 ];
 function renderScore() {
-  const el = $('l10-score'); el.hidden = !scoreOpen; if (!scoreOpen) return;
-  const cur = runs[0], prev = runs[1];
-  const cols = [cur, prev].filter(Boolean);
-  const better = (i, f, dir) => { if (!prev || !dir) return ''; const a = f(cur.card), b = f(prev.card); if (a == null || b == null || a === b) return ''; return (dir > 0 ? a > b : a < b) ? (i === 0 ? ' win' : '') : (i === 1 ? ' win' : ''); };
-  el.innerHTML = `<div class="sc-head"><div><h2>${world?.state.done ? 'Run complete' : 'Scorecard'} · run ${cur?.n ?? '—'}</h2><span class="small">${cur ? `${cur.card.endedBy === 'cap' ? 'time cap reached' : 'all orders handled'} · ${cur.card.orders} orders · ${cur.card.eventsTotal} events (${cur.card.tier1} critical)` : 'no finished run yet'}</span></div><button type="button" class="pill" data-sc="close">Close</button></div>
-    ${cur ? `<div class="sc-score">${cols.map((r, i) => `<div class="sc-big${i === 1 ? ' prev' : ''}"><b>${r.card.score}</b><span>${i === 0 ? 'this run' : 'previous run'} · #${r.n}</span></div>`).join('')}</div>
+  const el = $('l10-score'); el.hidden = !scoreOpen; if (!scoreOpen || !world) return;
+  const live = { n: runNo, settings: { ...settings }, card: world.scorecard() }, prev = runs[0];
+  const cols = [live, prev].filter(Boolean);
+  const better = (i, f, dir) => { if (!prev || !dir) return ''; const x = f(live.card), y = f(prev.card); if (x == null || y == null || x === y) return ''; return (dir > 0 ? x > y : x < y) ? (i === 0 ? ' win' : '') : (i === 1 ? ' win' : ''); };
+  el.innerHTML = `<div class="sc-head"><div><h2>Scorecard · run ${live.n}</h2><span class="small">live · ${fmtT(live.card.time)} · ${live.card.orders} orders finished · ${live.card.eventsTotal} events (${live.card.tier1} critical) · the simulation keeps running</span></div><button type="button" class="pill" data-sc="close">Close</button></div>
+    <div class="sc-score">${cols.map((r, i) => `<div class="sc-big${i === 1 ? ' prev' : ''}"><b>${r.card.score}</b><span>${i === 0 ? 'this run (live)' : 'previous run'} · #${r.n}</span></div>`).join('')}</div>
     <table class="sc-table"><thead><tr><th></th>${cols.map((r, i) => `<th>${i === 0 ? 'This run' : 'Previous'} · #${r.n}</th>`).join('')}</tr></thead><tbody>
       <tr class="settings"><td>Environment</td>${cols.map((r) => `<td>${esc(PRESET_LABEL[r.settings.preset])}<br><span class="small">${['orders', 'urgentPct', 'radiusM', 'flocks', 'pedestrians', 'dogs', 'replyPct', 'gustPerMin', 'memory'].map((k) => `${SETTING_LABEL[k]} ${r.settings[k]}`).join(' · ')}</span></td>`).join('')}</tr>
       ${ROWS.map(([label, f, u, dir]) => `<tr><td>${esc(label)}</td>${cols.map((r, i) => `<td class="${better(i, f, dir)}">${esc(fmtN(f(r.card), u))}</td>`).join('')}</tr>`).join('')}</tbody></table>
-    <p class="small">${prev ? 'Highlighted: the better of the two. Change the board and press Apply &amp; restart to compare another environment.' : 'Change the board (for example another building cluster) and run again: the last two runs are compared side by side.'}</p>
-    <div class="sc-foot"><button type="button" class="black" data-sc="again">Run again</button><button type="button" class="pill" data-sc="close">Close</button></div>` : '<p>Finish a run to see the scorecard.</p>'}`;
+    <p class="small">${prev ? 'Highlighted: the better of the two. The previous run is the one that was going before the last Apply &amp; restart / Reset.' : 'Change the board (for example another building cluster), Apply &amp; restart, and this run is kept for comparison.'}</p>
+    <div class="sc-foot"><button type="button" class="black" data-sc="again">Restart the run</button><button type="button" class="pill" data-sc="close">Close</button></div>`;
 }
 $('l10-score').addEventListener('click', (e) => {
   const a = e.target.closest('[data-sc]')?.dataset.sc; if (!a) return;
@@ -240,12 +237,15 @@ $('l10-score').addEventListener('click', (e) => {
 // ---------------- monitor wall: nine drone cameras ----------------
 const wall = $('l10-wall');
 wall.innerHTML = Array.from({ length: 9 }, (_, i) => `<button type="button" class="cell" data-open="D-0${i + 1}" aria-label="Open drone D-0${i + 1}">
-  <canvas width="480" height="300"></canvas><span class="cam"><span class="dot bg-red" style="width:6px;height:6px"></span>CAM-D-0${i + 1}</span><span class="bang"></span>
+  <canvas width="480" height="300"></canvas><span class="cam"><span class="dot bg-red" style="width:6px;height:6px"></span>CAM-D-0${i + 1}</span><span class="bang"></span><span class="rot" role="button" tabindex="0" title="Change the view angle">⟳</span>
   <span class="strip"><b>D-0${i + 1}</b><span class="what"></span><span class="chip"></span></span></button>`).join('');
 const cells = [...wall.querySelectorAll('.cell')].map((el, i) => ({ el, id: `D-0${i + 1}`, ctx: el.querySelector('canvas').getContext('2d'), bang: el.querySelector('.bang'), what: el.querySelector('.what'), chip: el.querySelector('.chip') }));
 function sizeCells() { for (const c of cells) { const r = c.el.getBoundingClientRect(); if (r.width > 10) { c.ctx.canvas.width = Math.round(r.width); c.ctx.canvas.height = Math.round(r.height); } } }
 new ResizeObserver(sizeCells).observe(wall);
-wall.addEventListener('click', (e) => { const b = e.target.closest('[data-open]'); if (b) setMode('scene', b.dataset.open); });
+wall.addEventListener('click', (e) => {
+  const rot = e.target.closest('.rot'); if (rot) { e.stopPropagation(); const id = rot.closest('[data-open]').dataset.open; viewIx[id] = ((viewIx[id] ?? 0) + 1) % 4; return; }
+  const b = e.target.closest('[data-open]'); if (b) setMode('scene', b.dataset.open);
+});
 
 // ---------------- map: drone markers, routes, incident dots, delivery radius ----------------
 const frames = $('l10-frames');
@@ -280,7 +280,7 @@ function drawMap() {
     if (b.hidden) b.hidden = false;
     const p = P(d.x, d.z, d.y); b.style.left = `${p.x + 14}px`; b.style.top = `${p.y - 14}px`;
     const cls = `t${ev.tier}${ev.tier === 1 ? ' flash' : ''}`; if (b.className !== cls) b.className = cls;
-    const txt = `! ${TITLE[ev.type]}`; if (b.firstChild.textContent !== txt) b.firstChild.textContent = txt;
+    if (b.firstChild.textContent !== '!') b.firstChild.textContent = '!'; b.title = `${d.id} · ${TITLE[ev.type]}`;
   });
 }
 
@@ -326,6 +326,8 @@ function renderTimeline(d) {
       ${ev.map((e) => `<span class="tick ${['OPERATOR', 'AUTO'].includes(e.code) ? 'decision' : ''}" style="left:${(e.t - t0) / span * 100}%" data-text="${esc(`${e.time} · ${e.text}`)}"></span>`).join('')}${labels.join('')}</div>
     <span class="dist">Distance to You <b>${(d.distanceM ?? 0).toFixed(1)} m</b></span><svg viewBox="0 0 120 30" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="#141414" stroke-width="1.6"/></svg>`;
 }
+$('l10-rot').addEventListener('click', () => { viewIx[sel] = ((viewIx[sel] ?? 0) + 1) % 4; });
+$('l10-trails').addEventListener('click', () => { showTrails = !showTrails; $('l10-trails').setAttribute('aria-pressed', String(showTrails)); });
 $('l10-know').addEventListener('click', () => { showKnow = !showKnow; $('l10-know').setAttribute('aria-pressed', String(showKnow)); });
 $('l10-back').addEventListener('click', () => setMode('monitor'));
 $('l10-switch').addEventListener('click', (e) => { const b = e.target.closest('[data-mode]'); if (b) setMode(b.dataset.mode); });
@@ -336,14 +338,13 @@ function frame(dt) {
   if (!world) return;
   hideAirspaceDrones();
   if (running && !world.state.done) { let left = dt * SPEEDS[speedIx]; while (left > 1e-6 && !world.state.done) { const s = Math.min(0.1, left); world.step(s); left -= s; } }
-  if (world.state.done && !finishedHandled) finishRun();
   stage.sync(world, mode === 'scene' ? sel : null);
-  stage.syncTrails(world, mode === 'map');
+  stage.syncTrails(world, mode === 'map' && showTrails);
   const pr = city.parade; if (pr?.paradeVisual && pr.engine?.paradeAtTime) pr.paradeVisual.update(pr.engine.paradeAtTime(world.state.t), world.state.t);   // the parade runs on the world clock
   fx.style.display = mode === 'map' ? 'block' : 'none';
   if (mode === 'map') drawMap();
-  if (mode === 'monitor') { for (let k = 0; k < 3; k++) { const c = cells[cellRR++ % cells.length], d = world.droneOf(c.id); stage.renderCell(world, d, c.ctx); } }
-  if (mode === 'scene') { const d = world.droneOf(sel); if (d) { const cam = stage.renderBig(world, d, $('l10-big').getContext('2d')); drawOverlay(d, cam); $('l10-cam').innerHTML = `<span class="dot bg-red" style="width:7px;height:7px"></span>CAM-${sel} · ${esc(orderLine(d))}`; $('l10-live').textContent = world.state.done ? 'ENDED' : running ? 'LIVE' : 'PAUSED'; } }
+  if (mode === 'monitor') { for (let k = 0; k < 3; k++) { const c = cells[cellRR++ % cells.length], d = world.droneOf(c.id); stage.renderCell(world, d, c.ctx, viewIx[c.id] ?? 0); } }
+  if (mode === 'scene') { const d = world.droneOf(sel); if (d) { const cam = stage.renderBig(world, d, $('l10-big').getContext('2d'), viewIx[sel] ?? 0); drawOverlay(d, cam); $('l10-cam').innerHTML = `<span class="dot bg-red" style="width:7px;height:7px"></span>CAM-${sel} · ${esc(orderLine(d))}`; $('l10-live').textContent = world.state.done ? 'ENDED' : running ? 'LIVE' : 'PAUSED'; } }
   uiClock += dt; memClock += dt;
   if (uiClock > 0.25) {
     uiClock = 0; renderStatus();
@@ -355,6 +356,7 @@ function frame(dt) {
     }
     if (mode === 'scene') { const d = world.droneOf(sel); if (d) { renderTimeline(d); renderConsole(false); } } else renderSide();
   }
+  if (scoreOpen) { scoreClock += dt; if (scoreClock > 4) { scoreClock = 0; const el = $('l10-score'), st = el.scrollTop; renderScore(); el.scrollTop = st; } }
   if (memClock > 5) { memClock = 0; store.set('l10.v2.memory', memory); }
 }
 

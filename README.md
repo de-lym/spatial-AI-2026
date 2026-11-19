@@ -21,8 +21,8 @@ The original AIRSPACE operations app is still available at <http://localhost:800
 
 | View | What it answers | How to get there |
 |---|---|---|
-| **Map** | *Where* is trouble? Each drone's route (thin black line, dashed on the way home), a **red dot where each incident happened** (colour = tier), and the **red circle** of the delivery radius around the hub. | Default view, or **Map** in the top switch |
-| **Monitor · 9** | *What* is happening? A 3 × 3 wall of nine **drone cameras**. A cell with an event shows its tier badge; tier ① cells flash. | **Monitor · 9** |
+| **Map** | *Where* is trouble? A thin 3D trail of every flight (solid on the way out, dashed on the way home; the **Trails** button switches it on and off), a **dot where each incident happened** (colour = tier), and a colour-coded **!** bubble above a drone that has an open event. | Default view, or **Map** in the top switch |
+| **Monitor · 9** | *What* is happening? A 3 × 3 wall of nine **drone cameras**, each welded to its own drone (the drone is always the centre of the picture). A cell with an event shows its tier badge; tier ① cells flash. The **⟳** button of a cell (and **View ⟳** in Scene) changes the view angle; nothing rotates by itself. | **Monitor · 9** |
 | **Scene** | *What do we do?* One drone: camera, five checks, FOUND / WHY NOT / TRIED / PROPOSES, the answer options with a countdown, commands, timeline and Distance to You. | Click a cell, a map marker or a row in **To resolve** |
 
 ## The Simulation board (right column, same place on every page)
@@ -30,13 +30,22 @@ The original AIRSPACE operations app is still available at <http://localhost:800
 | Group | Control |
 |---|---|
 | City | **Building cluster**: High-rise heavy · Low-rise heavy · Mixed / interleaved (the hub, roads, parade street and crowd zone always stay) |
-| Orders | **Orders count** · **Urgent ratio** · **Delivery radius** (the red circle follows the slider) |
+| Orders | **Orders count** (orders arriving per 10 minutes) · **Urgent ratio** · **Delivery radius** (a green circle shows around the hub only while you drag the slider) |
 | Agents | **Pigeon flocks** · **Pedestrians** · **Dogs** · **Customer reply rate** |
 | Weather | **Gust frequency** (no steady wind) |
 | Memory | **Fresh / Retained** |
 | Run | Seed · Pause / speed / Reset · **Apply & restart** |
 
 Everything else (battery, hover budget, timeouts, backup spots) is a code constant in `last10m/world.js`.
+
+## The delivery model, and a city that never sleeps
+
+Nine drones live on the plaza around the Dispatch Tower (never on a road), leave and land **one at a time**, and run a
+**delivery** mission: fly to the **shop** (R1 Burger, R2 Ramen, R3 Slow-Roast), collect the order there (wait until it is
+ready; one drone at a time on a shop pad, the others queue above it), then fly to the customer and run the last ten metres.
+Every leg is planned by the AIRSPACE flying-boundary planner, so a drone never flies through a building. The parade balloon
+is a moving obstacle: a drone that gets near it backs off and holds until it has passed. Orders keep arriving for as long as
+the simulation runs — it only stops when you press **Pause**.
 
 ## Event hierarchy
 
@@ -53,9 +62,9 @@ lower drone ID; the other yields and you can override.
 
 ## Scorecard and comparison
 
-When every order is delivered or aborted (or at the 900 s cap) a card shows: average reaction time by tier, missed
+The **Scorecard** (status bar) is live, because the simulation never ends. It shows: average reaction time by tier, missed
 decisions, delivered / backup / aborted %, redelivered orders, closest approach during tier ① events, events per minute and
-peak queue length. The **last two runs** are kept with their settings and shown side by side (the better value is
+peak queue length. The run that was going before the last **Apply & restart / Reset** is kept and shown next to the live one (the better value is
 highlighted). Variants are never generated for you: change the board, **Apply & restart**, and compare.
 
 ## Tests

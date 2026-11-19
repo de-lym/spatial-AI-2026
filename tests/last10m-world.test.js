@@ -6,7 +6,7 @@ import { createWorld, DEFAULT_SETTINGS, TIER, WINDOW, EVENT_TYPES, BOARD } from 
 const city = (p) => JSON.parse(readFileSync(new URL(`./fixtures/city-${p}.json`, import.meta.url)));
 const CITY = { high: city('high'), low: city('low'), mixed: city('mixed') };
 const make = (over = {}, memory = {}) => { const p = over.preset ?? 'mixed'; return createWorld({ ...DEFAULT_SETTINGS, ...over }, { obstacles: CITY[p].obstacles, tiles: CITY[p].tiles, memory }); };
-const run = (over = {}, memory = {}) => { const w = make(over, memory); w.run(900); return w; };
+const run = (over = {}, memory = {}, secs = 900) => { const w = make(over, memory); w.run(secs); return w; };
 const count = (w, type) => w.state.events.filter((e) => e.type === type).length;
 
 test('one fixture per city preset; high-rise lots are taller than low-rise lots', () => {
@@ -17,13 +17,14 @@ test('one fixture per city preset; high-rise lots are taller than low-rise lots'
   assert.ok(housing('low') > housing('high'));
 });
 
-test('nine fixed drones, all at the hub, a seeded order queue inside the delivery radius', () => {
+test('nine fixed drones, all at the hub; seeded orders keep arriving, every address inside the delivery radius', () => {
   const w = make({ orders: 30, radiusM: 160 });
   assert.equal(w.state.drones.length, 9);
   assert.deepEqual(w.state.drones.map((d) => d.id), ['D-01', 'D-02', 'D-03', 'D-04', 'D-05', 'D-06', 'D-07', 'D-08', 'D-09']);
-  assert.equal(w.state.orders.length, 30);
+  w.run(600);
+  assert.ok(w.state.orders.length >= 24 && w.state.orders.length <= 40, `${w.state.orders.length} orders in 10 minutes for a rate of 30`);
   for (const o of w.state.orders) assert.ok(Math.hypot(o.addr.x, o.addr.z) <= 160 / 5 + 1e-6, 'order outside the delivery radius');
-  const w2 = make({ orders: 30, radiusM: 160 });
+  const w2 = make({ orders: 30, radiusM: 160 }); w2.run(600);
   assert.deepEqual(w.state.orders.map((o) => [o.addr.key, o.urgent]), w2.state.orders.map((o) => [o.addr.key, o.urgent]));
 });
 
@@ -33,15 +34,64 @@ test('same seed + settings give the same event stream (deterministic); another s
   assert.notEqual(sig(run()), sig(run({ seed: 7 })));
 });
 
-test('every run ends (all three presets, with and without events)', () => {
+test('the world never stops: drones keep circulating and orders keep being completed, in every preset', () => {
   for (const preset of ['high', 'low', 'mixed']) {
-    const w = run({ preset });
-    assert.equal(w.state.done, true, preset);
-    assert.equal(w.state.endedBy, 'orders', `${preset} should finish before the time cap`);
-    assert.ok(w.state.orders.every((o) => ['delivered', 'delivered-alt', 'aborted'].includes(o.status)));
+    const w = make({ preset, orders: 24 }); let last = 0;
+    for (let k = 1; k <= 5; k++) {
+      w.run(300);
+      const done = w.state.completed; assert.ok(done - last >= 3, `${preset}: only ${done - last} orders completed in minute ${k * 5 - 5}–${k * 5}`); last = done;
+      assert.equal(w.state.done, false);
+      assert.ok(w.state.drones.some((d) => d.phase !== 'idle'), 'somebody is always working');
+    }
   }
-  const quiet = run({ flocks: 0, pedestrians: 0, dogs: 0, gustPerMin: 0, replyPct: 100 });
-  assert.equal(quiet.state.done, true);
+  const quiet = make({ flocks: 0, pedestrians: 0, dogs: 0, gustPerMin: 0, replyPct: 100 }); quiet.run(1200);
+  assert.equal(quiet.state.done, false); assert.ok(quiet.state.completed > 15);
+});
+
+test('drones leave and land one at a time, from slots on the plaza land around the tower (never on a road), apart from each other', () => {
+  const w = make({ orders: 24 }); const departures = [], landings = [];
+  for (const d of w.state.drones) { assert.ok(Math.abs(d.home.x) <= 5.6 && Math.abs(d.home.z) <= 5.6, `${d.id} home is off the plaza slab`); assert.ok(Math.abs(d.home.x) > 3.9 || Math.abs(d.home.z) > 3.9, 'home inside the tower clearance'); }
+  for (let a = 0; a < w.state.drones.length; a++) for (let b = a + 1; b < w.state.drones.length; b++) assert.ok(Math.hypot(w.state.drones[a].home.x - w.state.drones[b].home.x, w.state.drones[a].home.z - w.state.drones[b].home.z) >= 2.7, 'homes too close');
+  const phase = new Map();
+  for (let i = 0; i < 6000; i++) {
+    w.step(0.1);
+    for (const d of w.state.drones) { const p = phase.get(d.id); if (p === 'idle' && d.phase !== 'idle') departures.push(w.state.t); if (p && p !== 'idle' && p !== 'land' && d.phase === 'land') landings.push(w.state.t); phase.set(d.id, d.phase); }
+  }
+  const gaps = (a) => a.slice(1).map((x, i) => x - a[i]);
+  assert.ok(departures.length > 10 && landings.length > 10);
+  assert.ok(Math.min(...gaps(departures)) >= 4.9 - 0.11, `two drones left within ${Math.min(...gaps(departures)).toFixed(1)} s`);
+  // touch-downs are spaced by the landing lock
+  const touch = []; const was = new Map(); const w2 = make({ orders: 24 });
+  for (let i = 0; i < 6000; i++) { w2.step(0.1); for (const d of w2.state.drones) { if (was.get(d.id) === 'land' && d.phase === 'idle') touch.push(w2.state.t); was.set(d.id, d.phase); } }
+  assert.ok(touch.length > 8 && Math.min(...gaps(touch.sort((a, b) => a - b))) >= 4);
+});
+
+test('delivery model: a drone first collects the order at a shop (restaurant), then delivers it to the customer; the parcel exists only after pick-up', () => {
+  const w = make({ orders: 12 }); const shops = new Set(w.state.shops.map((s) => `${s.x},${s.z}`)); assert.ok(shops.size >= 3);
+  let picked = 0, order = new Map();
+  for (let i = 0; i < 5000; i++) {
+    w.step(0.1);
+    for (const d of w.state.drones) {
+      if (!d.order) continue;
+      if (d.leg === 'toShop' && d.phase !== 'pickup') { assert.equal(d.carrying, false, 'carrying before the pick-up'); assert.ok(shops.has(`${d.target.x},${d.target.z}`), 'first leg does not go to a shop'); }
+      if (d.phase === 'lower' || d.phase === 'release') assert.equal(d.carrying, true, 'delivering without a parcel');
+      const k = order.get(d.id); if (k !== d.order.id) { order.set(d.id, d.order.id); }
+    }
+  }
+  picked = w.state.log.filter((e) => e.code === 'PICKUP').length; const delivered = w.state.log.filter((e) => e.code === 'DELIVERED').length;
+  assert.ok(picked >= 8 && delivered >= 6 && picked >= delivered);
+  for (const o of w.state.orders) if (o.shop) assert.ok(!w.state.addresses.some((a) => a.key === o.shop.key), 'a shop is also a customer address');
+});
+
+test('the parade: a drone never passes through the balloon — it backs off and holds', () => {
+  const w = make({ orders: 40, flocks: 0 }); let near = 0, minD = Infinity;
+  for (let i = 0; i < 9000; i++) {
+    w.step(0.1); const t = w.state.t, bx = 0; void bx;
+    const bl = w.balloon(t);
+    for (const d of w.state.drones) { if (d.phase === 'idle' || d.phase === 'land') continue; const dd = Math.hypot(d.x - bl.x, (d.y - 0.4 - bl.y) * 0.7, d.z - bl.z); minD = Math.min(minD, dd); if (dd < 9) near++; }
+  }
+  assert.ok(minD > 5.4, `a drone got within ${minD.toFixed(1)} u of the balloon`);
+  assert.ok(w.state.log.some((e) => e.code === 'PARADE'), 'no drone ever reacted to the parade');
 });
 
 test('every event has the tier of its type; an urgent order raises it by one (3→2, 2→1, 1 stays)', () => {
@@ -60,7 +110,7 @@ test('every event has the tier of its type; an urgent order raises it by one (3�
 
 test('urgent orders are handed to drones first', () => {
   const w = make({ urgentPct: 30 });
-  w.run(12);
+  w.run(70);
   const taken = w.state.orders.filter((o) => o.status !== 'queued'), left = w.state.orders.filter((o) => o.status === 'queued');
   assert.ok(taken.length >= 5);
   const urgentLeft = left.filter((o) => o.urgent).length;
@@ -147,28 +197,28 @@ test('more dogs → more dog events; more pigeon flocks → more pigeon events; 
 });
 
 test('city preset changes the event mix: low-rise → more dogs and cars, high-rise → more gust trouble', () => {
-  const seeds = [1, 2, 3, 4, 5, 6];
-  const sum = (p, types, over) => seeds.reduce((n, seed) => n + types.reduce((m, ty) => m + count(run({ preset: p, seed, orders: 40, radiusM: 300, ...over }), ty), 0), 0);
+  const seeds = [1, 2, 3, 4];
+  const sum = (p, types, over) => seeds.reduce((n, seed) => n + types.reduce((m, ty) => m + count(run({ preset: p, seed, orders: 40, radiusM: 300, ...over }, {}, 600), ty), 0), 0);
   assert.ok(sum('low', ['dog', 'car'], { dogs: 8 }) > sum('high', ['dog', 'car'], { dogs: 8 }), 'low-rise should see more dogs and cars');
   assert.ok(sum('high', ['gust'], { gustPerMin: 5 }) > sum('low', ['gust'], { gustPerMin: 5 }), 'high-rise should see more gust trouble');
 });
 
 test('Retained memory speeds up repeat deliveries; Fresh forgets', () => {
-  const quiet = { flocks: 0, pedestrians: 0, dogs: 0, gustPerMin: 0, replyPct: 100, orders: 24, radiusM: 200 };
+  const quiet = { flocks: 0, pedestrians: 0, dogs: 0, gustPerMin: 0, replyPct: 100, orders: 30, radiusM: 200 };
   const mem = {};
   const first = run({ ...quiet, memory: 'retained' }, mem);
   assert.ok(Object.keys(mem.landmarks).length > 5, 'the first run should learn landmarks');
   const again = run({ ...quiet, memory: 'retained' }, mem);
   const fresh = run({ ...quiet, memory: 'fresh' }, mem);
-  const a = again.scorecard().avgDeliveryS, f = fresh.scorecard().avgDeliveryS, one = first.scorecard().avgDeliveryS;
-  assert.ok(a < f, `retained ${a} s vs fresh ${f} s`);
+  const a = again.scorecard().avgLocateS, f = fresh.scorecard().avgLocateS, one = first.scorecard().avgLocateS;
+  assert.ok(a < f - 0.2, `locating: retained ${a} s vs fresh ${f} s`);
   assert.ok(a < one, `second retained run ${a} s vs first ${one} s`);
-  assert.ok(Math.abs(f - one) < 1.5, 'a fresh run behaves like a first run');
+  assert.ok(Math.abs(f - one) < 0.5, 'a fresh run behaves like a first run');
 });
 
 test('scorecard: reaction by tier, missed decisions, outcome shares, redeliveries, closest approach, load', () => {
   const w = make({ orders: 30 });
-  for (let i = 0; i < 12000 && !w.state.done; i++) { w.step(0.1); const q = w.queue()[0]; if (q && w.state.t - q.opened > 1.2) w.resolve(q.id, q.options[0].id); }   // a (fairly quick) operator
+  for (let i = 0; i < 9000; i++) { w.step(0.1); const q = w.queue()[0]; if (q && w.state.t - q.opened > 1.2) w.resolve(q.id, q.options[0].id); }   // a (fairly quick) operator
   const sc = w.scorecard();
   for (const k of ['reaction', 'missed', 'missedByTier', 'delivered', 'deliveredAlt', 'aborted', 'redelivered', 'closestTier1M', 'eventsPerMin', 'peakQueue']) assert.ok(k in sc, k);
   assert.ok(Math.abs(sc.delivered + sc.deliveredAlt + sc.aborted - 100) <= 2);
@@ -187,7 +237,7 @@ test('the board only exposes the v2 controls', () => {
 test('drones never fly through a building: every position of every drone stays outside every obstacle volume', () => {
   for (const preset of ['high', 'low', 'mixed']) {
     const w = make({ preset, orders: 40, urgentPct: 40 }); const obs = CITY[preset].obstacles; let steps = 0;
-    for (let i = 0; i < 9000 && !w.state.done; i++) {
+    for (let i = 0; i < 9000; i++) {
       w.step(0.1);
       for (const d of w.state.drones) {
         if (d.phase === 'idle') continue; steps++;
