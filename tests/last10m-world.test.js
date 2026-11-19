@@ -153,15 +153,16 @@ test('city preset changes the event mix: low-rise → more dogs and cars, high-r
 });
 
 test('Retained memory speeds up repeat deliveries; Fresh forgets', () => {
+  const quiet = { flocks: 0, pedestrians: 0, dogs: 0, gustPerMin: 0, replyPct: 100, orders: 24, radiusM: 200 };
   const mem = {};
-  const first = run({ memory: 'retained', orders: 24, radiusM: 200 }, mem);
-  assert.ok(Object.keys(mem.landmarks).length > 3, 'the first run should learn landmarks');
-  const again = run({ memory: 'retained', orders: 24, radiusM: 200 }, mem);
-  const fresh = run({ memory: 'fresh', orders: 24, radiusM: 200 }, mem);
+  const first = run({ ...quiet, memory: 'retained' }, mem);
+  assert.ok(Object.keys(mem.landmarks).length > 5, 'the first run should learn landmarks');
+  const again = run({ ...quiet, memory: 'retained' }, mem);
+  const fresh = run({ ...quiet, memory: 'fresh' }, mem);
   const a = again.scorecard().avgDeliveryS, f = fresh.scorecard().avgDeliveryS, one = first.scorecard().avgDeliveryS;
   assert.ok(a < f, `retained ${a} s vs fresh ${f} s`);
-  assert.ok(a <= one, `second retained run ${a} s vs first ${one} s`);
-  assert.ok(Object.keys(mem.landmarks).length > 0);
+  assert.ok(a < one, `second retained run ${a} s vs first ${one} s`);
+  assert.ok(Math.abs(f - one) < 1.5, 'a fresh run behaves like a first run');
 });
 
 test('scorecard: reaction by tier, missed decisions, outcome shares, redeliveries, closest approach, load', () => {

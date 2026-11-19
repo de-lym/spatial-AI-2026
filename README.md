@@ -1,9 +1,10 @@
 # Last 10m — So close, yet so far
 
-A spatial-AI simulation of the **last ten metres of drone delivery**. Nine extreme cases run as nine independent
-scenes on one miniature city, each watched by its own camera. The drone starts every run knowing nothing about the
-block, scans it, builds landmarks it reuses next time, and decides — or asks a human — what to do when the drop spot is
-blocked, contested or unsafe.
+A spatial-AI simulation of the **last ten metres of drone delivery**. v2 is **one shared miniature city with nine fixed
+drones (D-01 … D-09) running a stream of orders**. Nine kinds of trouble (the old nine scenes) happen at the drop spots,
+at a rate that depends on the environment you set. They are ranked into three urgency tiers with countdowns, so you —
+the operator — are overloaded and have to triage. At the end a scorecard shows how you did, and the last two runs are
+compared side by side: running twice in two environments is how you *design* an environment.
 
 *Your package is only ten metres away. That doesn't mean you're getting it.*
 
@@ -20,64 +21,48 @@ The original AIRSPACE operations app is still available at <http://localhost:800
 
 | View | What it answers | How to get there |
 |---|---|---|
-| **Map** | *Where* is something happening? A static view of the city; the nine scenes are framed and coloured by status. | Default view, or **Map** in the top switch |
-| **Monitor · 9** | *What* is happening? Nine live camera feeds, plus the list of things to resolve. | **Monitor · 9**, or **Open monitor →** |
-| **Scene** | *What do we do?* One zoomed feed, the drone's knowledge, the event timeline and the operator console. | Click a frame, a camera or a list item |
-
-Status colours: **green** = normal (L0–L1), **yellow** = hazard being handled (L2 hold/wait, L3 avoid/redirect),
-**red** = emergency (H human decision, L4 abort), **grey** = ended (delivered or aborted).
+| **Map** | *Where* is trouble? Each drone's route (thin black line, dashed on the way home), a **red dot where each incident happened** (colour = tier), and the **red circle** of the delivery radius around the hub. | Default view, or **Map** in the top switch |
+| **Monitor · 9** | *What* is happening? A 3 × 3 wall of nine **drone cameras**. A cell with an event shows its tier badge; tier ① cells flash. | **Monitor · 9** |
+| **Scene** | *What do we do?* One drone: camera, five checks, FOUND / WHY NOT / TRIED / PROPOSES, the answer options with a countdown, commands, timeline and Distance to You. | Click a cell, a map marker or a row in **To resolve** |
 
 ## The Simulation board (right column, same place on every page)
 
-* **Pause / 1× / Reset** — run control for all nine scenes.
-* **Environment parameters** — wind, gust peak, pigeon density, pedestrians, battery at launch, backup spots, hover budget,
-  operator timeout, memory (Fresh / Retained).
-* On the **Map** and **Monitor** pages the board edits the global set: **Apply to all** restarts all nine scenes.
-* In a **Scene** the board also shows that scene's own parameters (e.g. *Dog appears at*, *Dog stays for*). Tags show
-  `edited` (this scene differs) or `global`. **Apply to this scene** restarts only that scene; **Apply to all** pushes the
-  global values to every scene.
+| Group | Control |
+|---|---|
+| City | **Building cluster**: High-rise heavy · Low-rise heavy · Mixed / interleaved (the hub, roads, parade street and crowd zone always stay) |
+| Orders | **Orders count** · **Urgent ratio** · **Delivery radius** (the red circle follows the slider) |
+| Agents | **Pigeon flocks** · **Pedestrians** · **Dogs** · **Customer reply rate** |
+| Weather | **Gust frequency** (no steady wind) |
+| Memory | **Fresh / Retained** |
+| Run | Seed · Pause / speed / Reset · **Apply & restart** |
 
-To compare environments, change parameters and run again: every run with the same parameters and seed is identical,
-so any difference comes from the environment, not from chance.
+Everything else (battery, hover budget, timeouts, backup spots) is a code constant in `last10m/world.js`.
 
-## The nine scenes
+## Event hierarchy
 
-| # | Case | Trigger (by the drone's own state) | Automatic response | Human decision |
-|---|---|---|---|---|
-| A1 | Pet on drop zone | dog runs onto the lawn when the parcel is 3 m above it | reel in, wait, rescan | approve the backup spot (not pre-authorized) |
-| A2 | Drop zone occupied | car parked on the pad | static obstacle → go straight to the backup spot | — |
-| A3 | Person under descent | people cross the plaza while the parcel is lowered | reel in at 3.5 m, retry; after 2 interruptions use the backup | — |
-| B1 | Pigeon flock | flock crosses the drone's path 60 m out | slow down, hold, continue | — |
-| B2 | Balloon vs two drones | parade balloon drifts across both drones' paths | both hold | who yields (fixed rule: D-03) |
-| B3 | Gust on tether | gust while the parcel is half lowered | pause, shorten tether, wait for the gust; abort above 12 m/s sustained | — |
-| C1 | Sensor occluded | parade confetti over the yard | memory locates the pad but cannot prove it clear → climb, wait, rescan | — |
-| C2 | Customer silent | two lawns match "in front of my garage" | wait for the customer within the hover budget | choose east / west lawn |
-| C3 | Battery limit | kids playing on the pad, long trip | wait until the 20 % reserve, then abort | — |
+| Tier | Events | Countdown | If nobody acts |
+|---|---|---|---|
+| **① Critical** (red, flashing) | pedestrian in the descent zone · two-drone conflict · sudden no-fly zone · gust toward a building | 5–8 s | the fixed rule applies; a **missed decision** with a bigger penalty |
+| **② Urgent** (orange) | dog on the drop zone · pigeon flock in the path · sensor occluded | 15–20 s | keep waiting; abort and return after the hover limit |
+| **③ Can wait** (yellow) | car parked on the pad · customer silent | 45–60 s | on timeout abort; the order goes back to the queue |
 
-Every human decision has a countdown. With no answer the **fixed rule** runs and the log says so.
-Operator commands (hold, resume, reel in, wait +15 s, return to hub) are available in the console; *Force lower* is never
-offered while anyone is within 3.5 m.
+An **urgent order raises an event by one tier**. **Safety is never left to the human:** in a tier ① event the drone
+first stops, reels up, hovers or yields on its own, *then* asks you what to do next. A slow operator costs time and
+score, never a person or a dog. **To resolve** is sorted by tier, then time left. Conflict rule: urgent first, then the
+lower drone ID; the other yields and you can override.
 
-## Files
+## Scorecard and comparison
 
-* `last10m/scenes.js` — scene definitions and parameters (global + per scene).
-* `last10m/sim.js` — the deterministic scene simulation: mission phases, knowledge grid, landmarks and memory, the five
-  verification checks, the response ladder, prompts and commands, metrics, Distance to You. No three.js; runs in node.
-* `last10m/stage.js` — puts each scene's actors (drone, parcel and tether, dog, people, car, pigeons, balloon, confetti)
-  into the city and renders the camera views with the existing ink pass.
-* `last10m/app.js`, `last10m/style.css` — the three views, the Simulation board and the console.
-* `main.js` — unchanged city; in Last 10m mode (`<body data-app="last10m">`) it only builds and draws the city.
-* `docs/SEMANTIC_MODEL.md` — the semantic model (course deliverable).
-* `docs/README-airspace.md` — the previous AIRSPACE README.
+When every order is delivered or aborted (or at the 900 s cap) a card shows: average reaction time by tier, missed
+decisions, delivered / backup / aborted %, redelivered orders, closest approach during tier ① events, events per minute and
+peak queue length. The **last two runs** are kept with their settings and shown side by side (the better value is
+highlighted). Variants are never generated for you: change the board, **Apply & restart**, and compare.
 
 ## Tests
 
-```sh
-npm test            # node >= 20, no install needed
-```
+`npm test` — engine tests for determinism, termination, tier bumping, tier ① auto-safety, conflict priority, event rates
+vs. board values and city preset, retained-memory speed-up and the scorecard (`tests/last10m-world.test.js`), plus the v1
+state-machine tests (`tests/last10m-sim.test.js`) and the earlier AIRSPACE / parade tests.
 
-`tests/last10m-sim.test.js` checks determinism, every scene's outcome, the memory speed-up, operator commands and prompt
-time-outs, using the real city obstacles (`tests/fixtures/city-obstacles.json`).
-
-All numbers are illustrative classroom parameters. Heights and speeds follow public figures (FAA Part 107 ceiling,
-Wing-style 7 m hover with tether); separation and clearance margins are simulation assumptions.
+See [`docs/SEMANTIC_MODEL.md`](docs/SEMANTIC_MODEL.md) for the semantic model (environment, locations, distances, agents,
+memory, event hierarchy, parameters). The original AIRSPACE README is in `docs/README-airspace.md`.

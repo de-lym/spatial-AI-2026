@@ -1,98 +1,166 @@
-# Last 10m — Semantic Model
+# Last 10m — Semantic Model (v2)
 
 The model behind the simulation: what exists, how it is located and measured, what each agent knows, wants and does,
-and how the environment is designed and compared. Implementation references point to `last10m/`.
+how events are ranked, and how environments are designed and compared. Implementation references point to `last10m/`.
+
+**v2 in one paragraph.** v1 had nine independent, scripted scenes. v2 is **one shared city with nine fixed drones
+(D-01 … D-09) running a stream of orders.** The nine old scenes became **nine event types**. How often each one happens
+depends on the environment the user sets. Events are sorted into **three urgency tiers** with countdowns, so the human
+operator is overloaded and has to triage. When a run ends a **scorecard** shows how the operator did, and the last two
+runs are compared side by side — running twice in two environments is how the user *designs* an environment.
 
 ## 1. Spatial idea
 
 Physical proximity does not guarantee delivery. A drone can be ten metres from the customer and still fail, because the
-last ten metres are full of things that move, block, hide or disagree. The simulation isolates nine such situations as
-nine independent scenes on one city so they can be triggered, watched, varied and compared.
+last ten metres are full of things that move, block, hide or disagree: dogs, pedestrians, parked cars, pigeons, gusts,
+other drones, a parade with confetti, a customer who does not answer. v2 puts all of them on one city at once.
 
 ## 2. Environment
 
 | Property | Choice | Where |
 |---|---|---|
 | Physical vs abstract | **Physical** — a miniature city in metres (1 scene unit = 5 m) | `scenes.js` `SCALE_M` |
-| Observability | **Partial** — agents sense only within a range that depends on height and conditions | `sim.js` `sensorRadius`, `sense` |
-| Agents | **Multi-agent** — drones, pedestrians, a dog, a customer; B2 has two drones | `sim.js` `S.drones`, `S.agents` |
-| Dynamics | **Dynamic** — people, animals, balloon, birds, gusts and confetti change over time | `sim.js` `updateAgents` |
-| Determinism | **Deterministic** — seeded randomness; same parameters + seed = same run | `sim.js` `rng(seed)` |
+| City | **Generated** from a preset (High-rise heavy · Low-rise heavy · Mixed / interleaved) and the seed; the hub, roads, parade street and crowd zone never change | `main.js` `rebuildCity`, `tests/fixtures/city-*.json` |
+| Observability | **Partial** — a drone senses only within a range that grows with height and shrinks to 3 m in confetti | `world.js` `sensorRadius`, `sense` |
+| Agents | **Multi-agent** — nine drones, pedestrians, dogs, pigeon flocks, customers, and the human operator | `world.js` `S.drones`, `S.agents`, `flocks` |
+| Dynamics | **Dynamic** — people walk, dogs roam and run, flocks cross, gusts blow, confetti and no-fly zones appear and vanish | `world.js` `updateAgents`, schedules |
+| Determinism | **Deterministic** — separate seeded streams for orders, pedestrians, dogs, flocks, gusts, zones, confetti and event windows. Same settings + seed = same run; changing one board value never reshuffles an unrelated stream | `world.js` `seedOf` |
+
+### Building clusters (city presets)
+
+| Preset | Lot mix | Effect on the events |
+|---|---|---|
+| **High-rise heavy** | many towers, few houses | more occlusion, downwash and **gust trouble**, more **two-drone conflicts** in narrow corridors |
+| **Low-rise heavy** | houses, yards, water tanks | more **dogs**, more **cars on pads**, more pedestrians at the door |
+| **Mixed / interleaved** | tall and low lots alternate like a chessboard | the most varied mix |
+
+Every lot becomes an obstacle volume; the same lists are exported as one fixture per preset so the simulation is testable
+in node (`tests/fixtures/city-high.json`, `city-low.json`, `city-mixed.json`, each with the land-use tiles).
 
 ### Occupants
 
 | Class | Instances | Role |
 |---|---|---|
-| **Obstacle** (blocks traversal) | buildings (city geometry), parked car (A2), balloon (B2), pigeons (B1) | hard constraint: never crossed |
-| **Hindrance** (penalty) | crowds and pedestrians, gusts, confetti, pigeon activity, hover time | slower, more battery, longer scans, waits |
-| **Affordance** (bonus) | delivery pad, authorized backup spot, known landmarks, retained memory | faster verify, no waiting for approval, shorter locate/scan |
+| **Obstacle** (blocks traversal) | buildings, parked cars, pigeons, other drones, no-fly zones | hard constraint: never crossed |
+| **Hindrance** (penalty) | pedestrians, dogs, gusts, confetti, hover time, a silent customer | slower, more battery, longer waits |
+| **Affordance** (bonus) | the delivery pad, a pre-authorized backup spot, known landmarks, retained memory | faster verify, no waiting for approval, shorter locate / scan |
 
-## 3. Location (two notions)
+## 3. Location (three notions)
 
-1. **Machine location** — continuous coordinates `{x, y, z}` in metres in the city frame; the knowledge grid indexes the
-   ground into 5 m cells around each scene (`sim.js` `idx`, `cellCenter`).
-2. **Human / semantic location** — named places and relations: *C1 house*, *Front lawn*, *Backup spot*, *East / West
-   lawn*, the customer instruction *"the lawn in front of my garage"*. These are the landmarks the drone recognises
-   (`scenes.js` `landmarks`, `instruction`).
+1. **Grid cell** — the drone writes what it senses into a 13 × 13 knowledge grid of 5 m cells around the drop spot
+   (unknown / free / static / dynamic + time seen). Visible in Scene mode with *Drone knowledge*.
+2. **Address / pad** — every parcel has a front pad `(x, z + 5.1)` and a backup spot 16 m beside it; orders name an address.
+3. **Landmark** — a named place the drone has *recognised* (the house, the lawn). A landmark is learned after ~3 s of
+   sightings and stored in memory.
 
-A third, relative frame is used by the console and labels: positions relative to the drop target ("dog 1.2 m from the
-target").
+The continuous machine location `{x, y, z}` in metres is the carrier of all three. Labels also use a relative frame
+("dog 1.2 m from the target").
 
 ## 4. Distance (three notions, each with its own metric)
 
 | Distance | Metric | Use |
 |---|---|---|
-| **Distance to You** | 3D Euclidean distance between the parcel and the requested spot, metres | the narrative indicator; grows again on abort |
-| **Clearance** | 2D Euclidean distance between the parcel column and the nearest person/animal, metres; thresholds 2 m (safe) and 3.5 m (detect) | the safety check and the A3 / A1 interruptions |
-| **Time / budget distance** | seconds of hover left and battery % above the 20 % reserve | when waiting is no longer allowed |
+| **Route distance** | metres flown along the route from the hub (drawn as the thin black line on the Map, dashed on the way home) | the radius limit of the board; order duration |
+| **Distance to You** | 3D Euclidean distance between the parcel and the requested spot, metres; it grows again on abort | the narrative indicator in Scene mode |
+| **Closest approach** | the smallest 3D distance between a drone or parcel and a person, animal or other drone **during tier ① events** | the safety line of the scorecard |
 
-The route itself is planned at a cruise height that clears every known building on the straight leg
-(`cruiseHeightFor`), so flight distance is not the deciding metric in this project.
+Planned flight height is `clamp(tallest building on the leg + 2 u, 10, 23)` (50–115 m), so flight distance is not the
+deciding metric; clearance and time are.
 
 ## 5. Agents
 
 | Agent | Goal | Knowledge / sensing | Plans ahead by | Performance measure |
 |---|---|---|---|---|
-| **Delivery drone** | put the parcel down safely at the requested (or an authorized) spot within battery and hover budget | starts with **no knowledge of the block**; a sensor disc of 10–30 m that shrinks to 3 m in confetti; writes a 25 × 25 knowledge grid (unknown / free / static / dynamic + time seen) | planning the cruise height over known buildings; 2–2.5 s look-ahead against pigeons and the balloon; escalating from wait → backup → human → abort | outcome (delivered, delivered at alternative, aborted), time, hover seconds, battery left, highest response level, decision time, minimum clearance |
-| **Pedestrian** | walk to the other side of the plaza / play on the pad | sees only its own path | straight path | time disturbed by the drone |
-| **Dog** | roam the yard, stay near something interesting | none modelled | approach-stay-leave | times disturbed |
-| **Customer** | receive the parcel where they asked | remote; answers by message (or not) | — | instruction satisfied / not |
-| **Operator** (user) | keep everyone safe and deliveries flowing | sees all nine feeds | answers prompts, issues commands | decision time; overrides |
+| **Delivery drone ×9** | put the parcel down safely at the requested (or an authorized) spot, then fly home | starts with **no knowledge** of any address; sensor disc 3–6 u, 0.6 u in confetti; own knowledge grid | cruise height over known buildings; 2.5 s look-ahead for other drones, pigeons and no-fly zones; wait → backup → human → abort | outcome, time, hover seconds, highest response level, closest approach |
+| **Pedestrian** | walk to an address (often one a drone is serving) | sees only its own path | straight path | times it entered a descent zone |
+| **Dog** | roam its yard; run to the drop spot when a parcel comes down | none modelled | approach–stay–leave | times it blocked a drop |
+| **Pigeon flock** | cross the city on a fixed line | none modelled | straight flight | times it entered a drone's buffer |
+| **Customer** | receive the parcel where they asked | remote; answers by message with the board's reply rate | — | spot confirmed / not |
+| **Operator** (user) | keep everyone safe and deliveries flowing | sees all nine feeds | answers events, issues commands | reaction time by tier, missed decisions |
 
 ### Spatial memory
 
-* Objects become **landmarks** after about three seconds of observation (`sense`).
-* With **Retained** memory, landmarks and static cells are kept between runs (browser storage). The next run locates in
-  1 s instead of 4 s and scans in 1 s instead of 2.5 s; the test suite checks this.
+* Landmarks are learned per address and stored in `memory.landmarks`.
+* **Fresh** forgets everything when a run starts; **Retained** keeps landmarks between runs (browser storage). A known
+  address is located in 1 s instead of 4 s and scanned in 1 s instead of 2.5 s. The tests check that a second retained
+  run is faster and that a fresh run behaves like a first run.
 * Rule: **static knowledge can be reused, dynamic conditions must be revalidated.** Memory never proves a spot is clear —
-  an observation older than 2 s fails the safety check (C1 demonstrates this).
+  an observation older than 2 s fails the safety check.
 
-## 6. Decision logic
+## 6. The mission and the order stream
 
-Mission: **Enter → Locate → Descend → Scan → Verify → Lower → Release → Leave**, with **Wait / Reel / Shift / Climb /
-Ask / Return** as adaptations.
+`world.js` creates the orders from the seed: random addresses inside the **delivery radius**, a share flagged **urgent**.
+An idle drone takes the next order (**urgent orders first**), cruises, runs the last-ten-metre state machine and flies home.
 
-Verify = five checks read from the drone's knowledge only: correct location · space is safe · descent column clear ·
-facility available · within authorization.
+**Enter → Locate → (Confirm with the customer) → Descend → Scan → Verify → Lower → Release → Reel up → Leave → Land**, with
+**Wait / Reel / Shift / Climb / Return** as adaptations. Verify = five checks read from what the drone can sense: correct
+location · space is safe · descent path clear · facility available · within authorization.
 
-Response ladder (shared by all nine scenes, recorded as the highest level reached):
+A run ends when every order is delivered or finally aborted (an aborted order goes back to the queue once for
+**redelivery**), or at the 900 s time cap.
 
-`L0 normal → L1 slow/adjust → L2 hold/wait → L3 avoid/redirect → H human decision → L4 abort`
+## 7. Event hierarchy (the core of v2)
 
-Human decisions have a countdown (`autoS`). With no answer the fixed rule applies (A1: keep waiting · B2: D-03 yields ·
-C2: wait for the customer). Operator commands never override safety: *Force lower* is not offered while anyone is within
-3.5 m, and the battery reserve cannot be crossed.
+The nine event types, the old scene they came from, and what drives them:
 
-## 7. Environment design (user as environment designer)
+| Event | Was | Driven by |
+|---|---|---|
+| Dog on drop zone | A1 | dogs, low-rise share |
+| Car parked on pad | A2 | low-rise share (a car leaves after a while) |
+| Pedestrian in descent zone | A3 | pedestrians, near the parade or offices |
+| Pigeon flock in path | B1 | pigeon flocks |
+| Two-drone conflict | B2 | **real**: detected from path or descent overlap — orders count, radius (density), high-rise corridors |
+| Gust toward building | B3 | gust frequency, high-rise share |
+| Sensor occluded | C1 | parade proximity (confetti or debris) |
+| Customer silent | C2 | 1 − customer reply rate |
+| Sudden no-fly zone | C3 | seeded, more likely near the parade |
 
-* **Global parameters** (all nine scenes): wind, gust peak, pigeon density, pedestrians, battery at launch, backup spots,
-  hover budget, operator timeout, memory, seed.
-* **Scene parameters** (one scene): dog trigger height and stay time, backup pre-authorization, car on pad, crossing
-  interval, flock distance, balloon drift, gust length, confetti length, customer reply time, kids on pad.
-* **Apply to this scene / Apply to all** commit a parameter set and restart. Runs are deterministic, so two runs differ
-  only by what the user changed; the nine status colours, outcomes and metrics are the comparison.
+### Tiers
 
-## 8. Parameters grounded in public figures
+| Tier | Events | Window | If nobody acts |
+|---|---|---|---|
+| **① Critical** (red, flashing) — people safety or collision | pedestrian · two-drone conflict · no-fly zone · gust toward building | **5–8 s** | the fixed rule applies (yield / hold / reel up); counted as a **missed decision** with a bigger score penalty |
+| **② Urgent** (orange) — short window or the delivery fails | dog · pigeon flock · sensor occluded | **15–20 s** | keep waiting; abort and return after the 75 s hover limit |
+| **③ Can wait** (yellow) — not dangerous, just stuck | car on pad · customer silent | **45–60 s** | on timeout abort and return; the order goes back to the queue |
+
+Rules (all tested in `tests/last10m-world.test.js`):
+
+1. **An urgent order raises an event by one tier** (③ → ②, ② → ①).
+2. **Safety is never left to the human.** The drone takes the safe action first (stop, reel up, hover, climb, yield) and
+   *then* asks what to do next. A slow operator costs time and score, never a person or a dog getting hit.
+3. **To resolve** is sorted by tier, then by time left. Events overlap on purpose, so the operator has to triage.
+4. **Conflict rule:** an urgent order has priority; with equal priority the lower drone ID goes first; the other yields.
+   The operator can override (*swap*).
+5. A last-resort **separation guard** (independent of events and the operator) stops the lower-priority drone when two get
+   closer than ~7 m.
+
+### Response ladder
+
+`L0 normal → L1 slow / adjust → L2 hold / wait → L3 avoid / redirect → H human decision → L4 abort`, recorded per drone as
+the highest level reached. Operator commands (hold, resume, reel in, wait +15 s, return to hub) never override safety:
+*Force lower* is not offered, and the battery reserve cannot be crossed.
+
+## 8. Environment design (user as environment designer)
+
+The **Simulation board** (right column, same place on every page):
+
+| Group | Control |
+|---|---|
+| City | **Building cluster** — High-rise heavy · Low-rise heavy · Mixed / interleaved (a red circle on the Map shows the radius) |
+| Orders | **Orders count** (9–60) · **Urgent ratio** (0–100 %) · **Delivery radius** (80–300 m) |
+| Agents | **Pigeon flocks** · **Pedestrians** · **Dogs** · **Customer reply rate** |
+| Weather | **Gust frequency** (there is no steady wind) |
+| Agent memory | **Fresh / Retained** |
+| Run | Seed · Pause / 1× / Reset · **Apply & restart** (one global apply) |
+
+Battery, hover budget, timeouts, backup spots and all per-scene parameters are code constants (`world.js`).
+
+**Comparison.** The scorecard (average reaction time by tier, missed decisions, delivered / backup / aborted %,
+redeliveries, closest approach in tier ① events, events per minute, peak queue length) is kept for the last two runs with
+their settings and shown side by side. Variants are never generated automatically: the user changes the environment and
+runs again.
+
+## 9. Parameters grounded in public figures
 
 | Parameter | Value | Reference |
 |---|---|---|
@@ -100,6 +168,23 @@ C2: wait for the customer). Operator commands never override safety: *Force lowe
 | Cruise height | 50 m (more where buildings require) | Wing: typically ~150 ft |
 | Cruise speed | 20 m/s | Wing ~60 mph, Zipline P2 ~70 mph (conservative urban value) |
 | Delivery hover + tether | 7 m | Wing: ~7 m (23 ft) hover, package lowered on a tether |
-| People clearance | 2 m safe, 3.5 m detect | Wing asks customers to stay ~2 m (6 ft) away |
+| People clearance | detect within 13 m of the drop, 2 m safe | Wing asks customers to stay ~2 m (6 ft) away |
 | Hover budget | 75 s | Wing ~30 s, Zipline ~75 s over the home |
-| Drone separation, pigeon buffer, gust limits | simulation assumptions | no public standard found |
+| Event windows, drone separation, pigeon buffer, gust limits | simulation assumptions | no public standard found |
+
+## 10. Decisions made while building v2
+
+* **Branch.** The work stayed on `claude/03-semantic-model-delivery-system` (as asked) instead of a new `last-10m-v2` branch.
+* **v1 engine kept.** `sim.js` (the nine scripted scenes) and its tests stay as the reference of the state machine and the
+  response ladder; `world.js` is the v2 engine. `scenes.js` still supplies the hub and the scale.
+* **Addresses.** An order goes to the front pad of any parcel inside the radius except the hub block, the two sensitive
+  facilities and ponds; there are no per-customer houses.
+* **Pedestrians and dogs** are agents with their own simple behaviour: pedestrians re-target (70 %) toward an address a
+  drone is about to serve, dogs have a home address and run out when a drone lowers there (85 % per order). Both are
+  seeded, so more of them means more events.
+* **Confetti** appears when a drone descends at an address near the parade route (probability ∝ proximity), in addition to
+  scheduled clouds along the route.
+* **One event per drone at a time.** A drone that already handles an event yields to a higher-priority drone silently.
+* **Silent customer.** A customer that does not reply at the first attempt gets a fresh chance on redelivery.
+* **Score.** A single number is shown for quick comparison (100 − penalties for missed decisions, weighted by tier, and for
+  aborted orders); every component is shown next to it.

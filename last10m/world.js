@@ -332,7 +332,7 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
         return;
       }
       case 'descend': { if (columnBusy(d) && d.y - SLAB > HOVER + 1) return;                    // another drone is working that pad: wait above it
-        if (!d.confettiDone && o.tries === 0 && o.confettiRoll < 0.9 * o.addr.ctx.paradeNear) { d.confettiDone = true; clouds.push({ id: `Cd${++dynClouds}`, t0: S.t, t1: S.t + o.confettiDur, x: o.addr.x, z: o.addr.z, r: 5, top: 6.5, dynamic: true }); log(d, 'EVENT', 'Parade confetti drifts over the yard.'); }
+        if (!d.confettiDone && o.tries === 0 && o.confettiRoll < 0.6 * o.addr.ctx.paradeNear) { d.confettiDone = true; clouds.push({ id: `Cd${++dynClouds}`, t0: S.t, t1: S.t + o.confettiDur, x: o.addr.x, z: o.addr.z, r: 5, top: 6.5, dynamic: true }); log(d, 'EVENT', 'Parade confetti drifts over the yard.'); }
         const cl = cloudOver(d, d.y - SLAB); if (cl && d.y - SLAB < cl.top && hyp(d, cl) < cl.r - 0.5 && !d.event) { openEvent(d, 'occluded', { cloud: cl.id }); return; } if (goTo(d, T, ground + HOVER, dt)) { d.phase = 'scan'; d.timer = 0; } return; }
       case 'shift': { if (goTo(d, T, ground + HOVER, dt, 1.2)) { d.phase = 'scan'; d.timer = 0; log(d, 'SCAN', 'Scanning the backup spot.'); } return; }
       case 'climb': { if (goTo(d, T, ground + 7.2, dt) && !inCloud(d)) { if (d.event?.type === 'occluded') closeEvent(d.event, 'self'); d.phase = 'descend'; log(d, 'RESCAN', 'Cloud gone: descending to rescan.'); } return; }
@@ -578,7 +578,7 @@ export function createWorld(input = {}, { obstacles = [], tiles = [], memory = {
       delivered: +(by('delivered') / n * 100).toFixed(0), deliveredAlt: +(by('delivered-alt') / n * 100).toFixed(0), aborted: +(aborted / n * 100).toFixed(0), redelivered: orders.filter((o) => o.redelivered).length,
       closestTier1M: closest.length ? Math.min(...closest) : null, eventsTotal: ev.length, tier1: t1.length, eventsPerMin: +(ev.length / minutes).toFixed(1), peakQueue: S.queuePeak, avgDeliveryS: mean(dels),
       byType: Object.fromEntries(EVENT_TYPES.map((t) => [t, ev.filter((e) => e.type === t).length])),
-      score: Math.max(0, Math.round(100 - 6 * missed.filter((e) => e.tier === 1).length - 3 * missed.filter((e) => e.tier === 2).length - 1.5 * missed.filter((e) => e.tier === 3).length - aborted / n * 40)),
+      score: Math.max(0, Math.round(100 - 1.5 * missed.filter((e) => e.tier === 1).length - 0.8 * missed.filter((e) => e.tier === 2).length - 0.4 * missed.filter((e) => e.tier === 3).length - 0.5 * aborted / n * 100)),
     };
   }
 
