@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { createWorld, DEFAULT_SETTINGS, TIER, EVENT_TYPES, BOARD } from '../last10m/world.js';
+import { createWorld, DEFAULT_SETTINGS, TIER, EVENT_TYPES, BOARD, paradeDistance } from '../last10m/world.js';
 
 const city = (p) => JSON.parse(readFileSync(new URL(`./fixtures/city-${p}.json`, import.meta.url)));
 const CITY = { high: city('high'), low: city('low'), mixed: city('mixed') };
@@ -298,4 +298,28 @@ test('people and dogs never walk through buildings: walkers keep to the street l
     }
     assert.ok(moved > 1000);
   }
+});
+
+test('drones keep their distance: no two airborne drones ever closer than 6.4 m, and waiting drones hold on a ring, never parked on top of each other', () => {
+  for (const preset of ['high', 'low', 'mixed']) {
+    const w = make({ preset, orders: 45 }); let minD = Infinity, stacked = 0; const streak = new Map();
+    for (let i = 0; i < 9000; i++) {
+      w.step(0.1); operate(w, 2);
+      const L = w.state.drones.filter((d) => d.phase !== 'idle' && d.y - 0.4 > 0.6);
+      for (let a = 0; a < L.length; a++) for (let b = a + 1; b < L.length; b++) {
+        const h = Math.hypot(L[a].x - L[b].x, L[a].z - L[b].z), v = Math.abs(L[a].y - L[b].y); minD = Math.min(minD, Math.hypot(h, v));
+        const k = L[a].id + L[b].id, n = h < 0.3 && v < 3 ? (streak.get(k) ?? 0) + 1 : 0; streak.set(k, n);   // one directly on top of the other …
+        if (n > 30) stacked++;                                                             // … for more than a passing moment (3 s)
+      }
+    }
+    assert.ok(minD * 5 >= 6.4, `${preset}: two drones came within ${(minD * 5).toFixed(1)} m`);
+    assert.equal(stacked, 0, `${preset}: drones stacked in one column`);
+  }
+});
+
+test('confetti comes in occasional bursts by the parade, not everywhere all the time', () => {
+  const w = make({}); let on = 0, n = 0;
+  for (let i = 0; i < 9000; i++) { w.step(0.1); operate(w, 2); n++; if (w.state.clouds.some((c) => w.state.t >= c.t0 && w.state.t < c.t1)) on++; }
+  assert.ok(on / n < 0.5, `confetti in the air ${(on / n * 100).toFixed(0)}% of the time`);
+  for (const c of w.state.clouds) assert.ok(paradeDistance(c) < 4.5, `a confetti cloud ${(paradeDistance(c) * 5).toFixed(0)} m from the parade`);
 });

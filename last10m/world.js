@@ -148,12 +148,13 @@ export function createWorld(input = {}, { obstacles = [], low = [], roads = null
 
   // ---- environment schedules (fixed by the seed; the board only changes how many / how often)
   const gusts = [], zones = [], clouds = [];
-  let gT = 0, zT = 25 + Rzone() * 20, cT = 20 + Rconf() * 15;
+  let gT = 0, zT = 25 + Rzone() * 20, cT = 30 + Rconf() * 30;
   function extendSchedules(until) {                       // generated on demand, so the world can run for ever
     const rate = P.gustPerMin / 60;
     if (rate > 0) while (gT < until) { gT += -Math.log(1 - Rgust()) / rate; const d = 6 + Rgust() * 4; gusts.push({ t0: +gT.toFixed(2), t1: +(gT + d).toFixed(2), ang: Rgust() * Math.PI * 2, v: 9 + Rgust() * 7 }); gT += d; }
     while (zT < until) { const onRoute = Rzone() < 0.6, c = onRoute ? routePoint(Rzone()) : (() => { const a = addresses[Math.floor(Rzone() * addresses.length)]; return { x: a.x, z: a.z - 2 }; })(); const dur = 20 + Rzone() * 15; zones.push({ id: `Z${++zoneNo}`, t0: +zT.toFixed(1), t1: +(zT + dur).toFixed(1), x: c.x, z: c.z, r: 3.5 + Rzone() * 2 }); zT += 18 + Rzone() * 14; }
-    while (cT < until) { const c = routePoint(Rconf()), dur = 20 + Rconf() * 10; clouds.push({ id: `C${++cloudNo}`, t0: +cT.toFixed(1), t1: +(cT + dur).toFixed(1), x: c.x, z: c.z, r: 5.5, top: 6.5 }); cT += 24 + Rconf() * 14; }
+    // confetti: a burst fired from the parade route now and then (about one minute apart); it rises, flutters down and settles
+    while (cT < until) { const c = routePoint(Rconf()), dur = 14 + Rconf() * 8; clouds.push({ id: `C${++cloudNo}`, t0: +cT.toFixed(1), t1: +(cT + dur).toFixed(1), x: c.x, z: c.z, r: 4, top: 5 }); cT += dur + 45 + Rconf() * 45; }
     for (const list of [gusts, zones, clouds]) while (list.length > 24 && list[0].t1 < until - 200) list.shift();   // old entries are forgotten
   }
   let zoneNo = 0, cloudNo = 0;
@@ -355,7 +356,8 @@ export function createWorld(input = {}, { obstacles = [], low = [], roads = null
     d.phase = 'enter'; d.drop = 0; d.hover = 0; d.waitT = 0; d.escalated = false; d.approved = false; d.confirmed = false; d.confettiDone = false; d.lmCount = 0; d.delivered = false; d.abortedOrder = false;
     d.climbOver = false; d.zoneSeen = new Set(); d.route = [{ x: d.x, y: d.y, z: d.z }]; d.routeLog = S.t; d.series = []; d.scanned = false; d.seenAt = -99; d.gustIgnore = 0; d.speedK = 1;
     d.know = { ox: o.addr.x - GRID / 2, oz: o.addr.z - GRID / 2, state: new Uint8Array(GRID * GRID), seen: new Float32Array(GRID * GRID).fill(-99) };
-    planLeg(d, { x: d.target.x, y: o.shop ? CRUISE + 1.6 * shopRank(d) : CRUISE, z: d.target.z });
+    { const r = o.shop ? shopRank(d) : 0, h = r > 0 ? holdPoint(d, d.target) : null;      // a shop already has a drone coming: fly straight to the holding ring
+      planLeg(d, h ? { x: h.x, y: Math.max(h.y - SLAB, CRUISE + 1.6 * r), z: h.z } : { x: d.target.x, y: CRUISE, z: d.target.z }); }
     setLevel(d, 'L0', 'Departed'); d.maxLevel = 'L0';
     log(d, 'DEPART', `${d.id} takes order #${o.id}${o.urgent ? ' (URGENT)' : ''}: ${o.shop ? `pick up at ${o.shop.name}, deliver to ${o.addr.name}` : `deliver to ${o.addr.name}`}, cruising at ${Math.round(d.cruise * SCALE_M)} m.`);
   }
@@ -367,6 +369,18 @@ export function createWorld(input = {}, { obstacles = [], low = [], roads = null
     if (d.y - SLAB >= need - 1e-3) return false;
     d.y = Math.min(d.y + VZ * dt * 1.5, SLAB + need); return true;
   }
+  /** where a drone waits its turn for a busy pad: not on top of it, but on a ring 3.4 u (17 m) around it, its own slot by ID,
+   *  at a height that clears the buildings there. Two waiting drones are never in the same column. */
+  function holdPoint(d, pad) {
+    const a = d.idx * (Math.PI * 2 / N_DRONES) + 0.35, x = pad.x + Math.cos(a) * 3.4, z = pad.z + Math.sin(a) * 3.4;
+    let top = 0;                                           // the whole way out from the pad must be clear, not only the holding point
+    for (let k = 0; k <= 8; k++) { const px = pad.x + (x - pad.x) * k / 8, pz = pad.z + (z - pad.z) * k / 8; for (const o of obstacles) if (px > o.x0 - MARGIN_U && px < o.x1 + MARGIN_U && pz > o.z0 - MARGIN_U && pz < o.z1 + MARGIN_U) top = Math.max(top, o.h); }
+    return { x, z, y: SLAB + Math.max(CRUISE, top + 2) };
+  }
+  /** wait on the holding ring: climb first if needed, then move out level */
+  function holdAt(d, pad, dt) { const h = holdPoint(d, pad); if (d.y < h.y - 0.02) { d.y = Math.min(h.y, d.y + VZ * dt * 1.5); return; } goTo(d, h, d.y, dt, 2); }
+  /** back from the ring to the pad: level, at the ring height, then down */
+  const backOver = (d, T, dt) => { if (hyp(d, T) > 0.05) { goTo(d, T, d.y, dt, 2); return false; } return true; };
   function goTo(d, p, y, dt, speed = V) {
     const dx = p.x - d.x, dz = p.z - d.z, L = Math.hypot(dx, dz), s = speed * d.speedK * dt;
     if (L > 1e-4) { if (lowGuard(d, p, dt)) return false; const k = Math.min(1, s / L); d.x += dx * k; d.z += dz * k; }
@@ -422,7 +436,7 @@ export function createWorld(input = {}, { obstacles = [], low = [], roads = null
     if (d.yieldFor) {                                     // yielding: wait until the other drone has gone by (or finished at the pad), at most 45 s
       const g = droneOf(d.yieldFor), gone = !g.order || ['idle', 'land', 'leave', 'return'].includes(g.phase);
       const clear = gone || (hyp(d, g) > 3.6 && hyp(aheadOf(d, 2.5), g) > 3.6 && hyp(aheadOf(d, 2.5), aheadOf(g, 2.5)) > 3.6);
-      if (!clear && S.t < d.yieldCap) return;
+      if (!clear && S.t < d.yieldCap) { if (!FLIGHT.has(d.phase) && d.target && d.y - SLAB > HOVER + 1) holdAt(d, d.target, dt); return; }   // at a pad: clear the column for the other drone
       d.yieldFor = null; d.held = false; setLevel(d, 'L0', 'Resumed');
     }
     if (d.hold || d.held || (d.sepStop ?? 0) > S.t) return;
@@ -443,8 +457,8 @@ export function createWorld(input = {}, { obstacles = [], low = [], roads = null
       case 'pickup': {                                          // at the shop: hover over its pad, wait until the order is ready, lift off with it
         if (d.pickStep === 'down') {
           const rank = shopQueueRank(d);
-          if (rank > 0) { goTo(d, T, SLAB + Math.min(22, CRUISE + 1.6 * rank), dt, 0.1); return; }   // waiting in line above the shop
-          if (goTo(d, T, ground + HOVER, dt)) { d.pickStep = 'wait'; d.timer = 0; } return;
+          if (rank > 0) { holdAt(d, T, dt); return; }   // waiting in line on the holding ring around the shop
+          if (backOver(d, T, dt) && goTo(d, T, ground + HOVER, dt)) { d.pickStep = 'wait'; d.timer = 0; } return;
         }
         if (d.pickStep === 'wait') { d.timer += dt; if (d.timer >= o.prepS + 1) { d.carrying = true; d.pickStep = 'up'; log(d, 'PICKUP', `Order #${o.id} collected at ${T.name}.`); } return; }
         if (goTo(d, T, ground + CRUISE, dt)) {
@@ -455,18 +469,21 @@ export function createWorld(input = {}, { obstacles = [], low = [], roads = null
         return;
       }
       case 'locate': {
+        if (columnBusy(d)) holdAt(d, T, dt); else backOver(d, T, dt);   // look from the ring while the pad is busy
         d.timer += dt; o.locateS = (o.locateS ?? 0) + dt;
         if (d.timer >= (isKnown(o) ? 1 : 4)) { if (o.needConfirm && !d.confirmed) { d.phase = 'confirm'; d.confirmStart = S.t; log(d, 'ASK_CUSTOMER', 'Asked the customer to confirm the drop spot.'); } else d.phase = 'descend'; }
         return;
       }
       case 'confirm': {
+        if (columnBusy(d)) holdAt(d, T, dt); else backOver(d, T, dt);
         if (custReplies(o) && S.t - d.confirmStart >= o.replyDelay && !d.event) { d.confirmed = true; d.phase = 'descend'; log(d, 'CONFIRMED', 'Customer confirmed the spot.'); return; }
         if (!custReplies(o) && S.t - d.confirmStart >= 8 && !d.event) openEvent(d, 'silent');
         return;
       }
-      case 'descend': { if (columnBusy(d) && d.y - SLAB > HOVER + 1) return;                    // another drone is working that pad: wait above it
-        if (!d.confettiDone && o.tries === 0 && o.confettiRoll < 0.6 * o.addr.ctx.paradeNear) { d.confettiDone = true; clouds.push({ id: `Cd${++dynClouds}`, t0: S.t, t1: S.t + o.confettiDur, x: o.addr.x, z: o.addr.z, r: 5, top: 6.5, dynamic: true }); log(d, 'EVENT', 'Parade confetti drifts over the yard.'); }
-        const cl = cloudOver(d, d.y - SLAB); if (cl && d.y - SLAB < cl.top && hyp(d, cl) < cl.r - 0.5 && !d.event) { openEvent(d, 'occluded', { cloud: cl.id }); return; } if (goTo(d, T, ground + HOVER, dt)) { d.phase = 'scan'; d.timer = 0; } return; }
+      case 'descend': { if (columnBusy(d) && d.y - SLAB > HOVER + 1) { holdAt(d, T, dt); return; }   // another drone is working that pad: wait on the holding ring, not on top of it
+        // only a yard right on the parade route (≤ 20 m) gets a burst of its own
+        if (!d.confettiDone && o.tries === 0 && paradeDistance(o.addr) < 4 && o.confettiRoll < 0.5) { d.confettiDone = true; const dur = Math.min(18, o.confettiDur); clouds.push({ id: `Cd${++dynClouds}`, t0: S.t, t1: S.t + dur, x: o.addr.x, z: o.addr.z, r: 3.5, top: 5, dynamic: true }); log(d, 'EVENT', 'Parade confetti drifts over the yard.'); }
+        const cl = cloudOver(d, d.y - SLAB); if (cl && d.y - SLAB < cl.top && hyp(d, cl) < cl.r - 0.5 && !d.event) { openEvent(d, 'occluded', { cloud: cl.id }); return; } if (backOver(d, T, dt) && goTo(d, T, ground + HOVER, dt)) { d.phase = 'scan'; d.timer = 0; } return; }
       case 'shift': { if (goTo(d, T, ground + HOVER, dt, 1.2)) { d.phase = 'scan'; d.timer = 0; log(d, 'SCAN', 'Scanning the backup spot.'); } return; }
       case 'climb': { if (goTo(d, T, ground + 7.2, dt) && !inCloud(d) && d.event?.status !== 'open') { if (d.event?.type === 'occluded') closeEvent(d.event, 'self'); d.phase = 'descend'; log(d, 'RESCAN', 'Cloud gone: descending to rescan.'); } return; }
       case 'scan': {
@@ -593,11 +610,46 @@ export function createWorld(input = {}, { obstacles = [], low = [], roads = null
     }
   }
   /** last line of defence, independent of events and of the operator: two airborne drones never get closer than ~7 m */
-  function separationGuard() {
-    const live = S.drones.filter((d) => d.order && !['idle', 'land'].includes(d.phase));
+  /** last line of defence, independent of events and of the operator: two airborne drones keep at least 10 m apart horizontally
+   *  or 8 m vertically. The drone that is closing in stops (both closing: the lower priority one); two hovering drones that ended up
+   *  too close drift apart; a drone that has been stopped for 4 s re-plans its leg 15 m higher and passes over. */
+  const SEP_H = 2.0, SEP_V = 1.6, HARD_Q = 0.8;   // keep 10 m / 8 m; never closer than 8 m horizontally and 6.4 m vertically at the same time
+  const sepQ = (p, r) => Math.max(Math.hypot(p.x - r.x, p.z - r.z) / SEP_H, Math.abs(p.y - r.y) / SEP_V);
+  const airborne = (d) => d.order && !['idle', 'land'].includes(d.phase) && d.y - SLAB > 0.6;
+  /** true if the move from (px,py,pz) to the drone's new position brought it closer than the separation to another airborne drone */
+  function sepViolates(d, px, py, pz) {
+    if (!airborne(d) || (d.x === px && d.y === py && d.z === pz)) return false;
+    const before = { x: px, y: py, z: pz };
+    for (const e of S.drones) { if (e === d || !airborne(e)) continue; const q1 = sepQ(d, e); if (q1 < HARD_Q && q1 < sepQ(before, e) - 1e-9) return true; }
+    return false;
+  }
+  function separationGuard(dt) {
+    const live = S.drones.filter((d) => d.order && !['idle', 'land'].includes(d.phase) && d.y - SLAB > 0.6);
+    const stopped = new Set();
+    const stop = (d) => { d.sepStop = S.t + 0.35; stopped.add(d); };
+    const moving = (d) => Math.hypot(d.vx ?? 0, d.vz ?? 0, d.vy ?? 0) > 0.1;
+    function sidestep(y, g, dt) {                          // the lower priority one moves out of the way (sideways, or up if there is no room)
+      const L = hyp(y, g), ux = L > 1e-3 ? (y.x - g.x) / L : Math.cos(y.idx), uz = L > 1e-3 ? (y.z - g.z) / L : Math.sin(y.idx);
+      const nx = y.x + ux * 1.2 * dt, nz = y.z + uz * 1.2 * dt;
+      if (!obstacles.some((o) => nx > o.x0 - 0.5 && nx < o.x1 + 0.5 && nz > o.z0 - 0.5 && nz < o.z1 + 0.5 && y.y - SLAB < o.h + 0.5) && y.y - SLAB >= lowNeed(y.x, y.z, nx, nz)) { y.x = nx; y.z = nz; }
+      else y.y += VZ * dt;
+      if (y.goal && FLIGHT.has(y.phase)) y.needPlan = true;
+    }
     for (let i = 0; i < live.length; i++) for (let j = i + 1; j < live.length; j++) {
       const a = live[i], b = live[j];
-      if (hyp(a, b) < 1.4 && Math.abs(a.y - b.y) < 1.4) { const y = lowerPriority(a, b); y.sepStop = S.t + 0.35; }
+      // separation measure: < 1 means closer than 10 m horizontally AND 8 m vertically
+      const q = (p, r) => Math.max(Math.hypot(p.x - r.x, p.z - r.z) / SEP_H, Math.abs(p.y - r.y) / SEP_V);
+      const pa = { x: a.x + (a.vx ?? 0), y: a.y + (a.vy ?? 0), z: a.z + (a.vz ?? 0) }, pb = { x: b.x + (b.vx ?? 0), y: b.y + (b.vy ?? 0), z: b.z + (b.vz ?? 0) };   // where each will be in 1 s at its velocity
+      const q0 = q(a, b); if (Math.min(q0, q(pa, pb), q(pa, b), q(a, pb)) >= 1) continue;
+      const k = 0.2, sa = { x: a.x + (a.vx ?? 0) * k, y: a.y + (a.vy ?? 0) * k, z: a.z + (a.vz ?? 0) * k }, sb = { x: b.x + (b.vx ?? 0) * k, y: b.y + (b.vy ?? 0) * k, z: b.z + (b.vz ?? 0) * k };
+      const closeA = q(sa, b) < q0 - 1e-4, closeB = q(a, sb) < q0 - 1e-4, y = lowerPriority(a, b), g = y === a ? b : a;   // closing in = the gap shrinks right now
+      if (closeA && closeB) { stop(a); stop(b); sidestep(y, g, dt); continue; }              // head-on: both stop, the lower priority one steps aside
+      if (closeA || closeB) { stop(closeA ? a : b); continue; }                          // the one closing in stops
+      if (q0 < 1) { if (moving(y)) stop(y); else if (!moving(g)) sidestep(y, g, dt); }   // too close side by side: let the other pull away; both still: step aside
+    }
+    for (const d of S.drones) {
+      if (stopped.has(d)) { d.sepT = (d.sepT ?? 0) + dt; if (d.sepT > 4 && d.goal && FLIGHT.has(d.phase) && !d.climbOver) { d.climbOver = true; d.needPlan = true; d.sepT = 0; log(d, 'SEPARATION', 'Blocked by another drone: re-planning 15 m higher.'); } }
+      else d.sepT = Math.max(0, (d.sepT ?? 0) - dt * 0.5);
     }
   }
   function detectors() {
@@ -690,11 +742,17 @@ export function createWorld(input = {}, { obstacles = [], low = [], roads = null
     S.t += dt; S0.t = S.t; extendSchedules(S.t + 90); arrivals();
     updateAgents(dt);
     conflictScan();
-    separationGuard();
+    separationGuard(dt);
     detectors();
     selfClose();
     for (const d of S.drones) {
+      const px = d.x, pz = d.z, py = d.y;
       stepDrone(d, dt);
+      if (sepViolates(d, px, py, pz)) { d.x = px; d.y = py; d.z = pz; d.sepT = (d.sepT ?? 0) + dt; }   // hard rule: a move may never bring two drones closer than the separation
+      // velocity (its intention): a drone held by the separation guard keeps its last heading for a moment, so it is not let go
+      // just to creep closer one step at a time
+      if (Math.hypot(d.x - px, d.z - pz) > 1e-4) { d.vx = (d.x - px) / dt; d.vz = (d.z - pz) / dt; d.vT = S.t; } else if (S.t - (d.vT ?? -9) > 1.5 || !d.order) { d.vx = 0; d.vz = 0; }
+      if (Math.abs(d.y - py) > 1e-4) { d.vy = (d.y - py) / dt; d.vyT = S.t; } else if (S.t - (d.vyT ?? -9) > 1.5 || !d.order) d.vy = 0;
       if (d.order && d.phase !== 'idle') sense(d, dt);
       if (d.order && S.t - (d.lastSeries ?? -9) >= 0.5) {
         d.lastSeries = S.t; const p = parcelPos(d), dm = Math.hypot(p.x - d.order.addr.x, p.y - SLAB, p.z - d.order.addr.z) * SCALE_M; d.distanceM = dm;

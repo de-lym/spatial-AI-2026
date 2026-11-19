@@ -83,7 +83,20 @@ export function createStage({ scene, couriers, obstacles = () => [] }) {
     for (const c of S.clouds) {
       const on = S.t >= c.t0 && S.t < c.t1; let v = clouds.get(c.id);
       if (!on && !v) continue; if (!v) { v = confetti(); clouds.set(c.id, v); }
-      v.pts.visible = on; if (on) { const a = v.pts.geometry.attributes.position; v.seed.forEach(([sx, sy, sz, ph], i) => { const y = ((sy - (S.t * 0.25 + ph)) % 1 + 1) % 1; a.setXYZ(i, c.x + sx * c.r, SLAB + y * c.top, c.z + sz * c.r); }); a.needsUpdate = true; }
+      v.pts.visible = on; if (on) {
+        // a burst, not snow: each piece is fired up from the street within ~1 s, opens out, flutters down and lies on the ground
+        const a = v.pts.geometry.attributes.position, age = S.t - c.t0, dur = c.t1 - c.t0;
+        v.seed.forEach(([sx, sy, sz, ph], i) => {
+          const e = age - ph * 1.2; if (e < 0) { a.setXYZ(i, c.x, -50, c.z); return; }
+          const th = Math.atan2(sz, sx || 1e-3) + ph * 0.5, rf = c.r * Math.sqrt(Math.min(1, Math.hypot(sx, sz))), hp = c.top * (0.55 + 0.45 * sy);
+          const vf = hp / Math.max(3, dur * 0.8 - 1 - ph * 1.2);
+          let y, rad, sway = 0;
+          if (e < 1) { const k = 1 - (1 - e) * (1 - e); y = hp * k; rad = rf * 0.55 * k; }
+          else { const f = e - 1; y = Math.max(0, hp - vf * f); rad = rf * (0.55 + 0.45 * Math.min(1, f * vf / hp)); if (y > 0) sway = Math.sin(f * 2.3 + ph * 11) * 0.3; }
+          a.setXYZ(i, c.x + Math.cos(th) * rad + sway, SLAB + 0.02 + y, c.z + Math.sin(th) * rad + sway * 0.5);
+        });
+        a.needsUpdate = true;
+      }
     }
     // selected drone: target, backup, sensor disc
     const d = selId ? world.droneOf(selId) : null;

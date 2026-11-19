@@ -1,8 +1,8 @@
 // Last 10m v2 — the application: one shared city, nine drones, a human operator who triages.
 // Views: Map (routes, incident dots, delivery radius) · Monitor (3×3 wall of drone cameras) · Scene (one drone: console + camera).
 // main.js builds and draws the city; this module runs the world simulation on top of it.
-import { BOARD, PRESETS, DEFAULT_SETTINGS, createWorld, TIER_NAME, TITLE, SCENE_OF, WORLD_CONST } from './world.js?v=8';
-import { createStage } from './stage.js?v=8';
+import { BOARD, PRESETS, DEFAULT_SETTINGS, createWorld, TIER_NAME, TITLE, SCENE_OF, WORLD_CONST } from './world.js?v=9';
+import { createStage } from './stage.js?v=9';
 import { SCALE_M, HUB } from './scenes.js';
 import { LEVEL_TEXT } from './sim.js';
 
